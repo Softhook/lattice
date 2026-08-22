@@ -1207,4 +1207,8 @@ if (isMain) {
   }
 }
 
+// `Session`, `readDevToolsPort` and `fetchJson` are exported for tools/trailer/capture.mjs,
+// which needs the same debugger plumbing and must not own a second copy of it. Nothing about
+// the looking harness changes by naming them.
 export { look, judge, decodePng, backgroundOf, luminanceOf, motionBetween, textLegibility, LIMITS };
+export { Session, readDevToolsPort, fetchJson };

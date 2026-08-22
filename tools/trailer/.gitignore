@@ -1,0 +1,8 @@
+# Everything here is output, and all of it is reproducible from the source beside it:
+#   node shoot.mjs --print         prints the nine capture commands verbatim
+#   node score/render.mjs          re-renders the wav and the stems
+# Committing 38 MB of mp4 and wav to hold artifacts a command regenerates is the same mistake as
+# committing a build. It is also the mistake this kit is loudest about not making anywhere else.
+shots/
+score/*.wav
+score/*.png
