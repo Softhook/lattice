@@ -1,0 +1,6 @@
+# Everything here is output, and all of it is reproducible from the source beside it:
+#   node tools/trailer/score-v3/build.mjs      renders the master, the three stems and the picture
+# Committing 34 MB of wav to hold artifacts one command regenerates is the same mistake as
+# committing a build, and it is the mistake this kit is loudest about not making anywhere else.
+*.wav
+*.png
