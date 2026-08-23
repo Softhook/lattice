@@ -413,3 +413,92 @@ A busy HUD costs about **4.5 µs** of an 8 ms frame. The `setText` figure is the
 one: it is a guard, not a write, and it exists because assigning `textContent` invalidates
 layout whether or not the string changed. Twenty readouts updating every frame with the same
 numbers is a layout pass per frame for nothing.
+
+---
+
+## `showcase/emberwake`
+
+**Machine:** Apple M5, 10 cores, macOS 26.5.1, Google Chrome 151.0.7922.173 headless
+(`--headless=new`), Node v24.18.0, viewport 1280×720, device scale factor 1. Idle machine.
+
+**Budget: 33 ms.** Emberwake is held to 30 fps rather than the kit's 8 ms, on the owner's call —
+it is the maximal showcase and its whole purpose is to spend what the kit can afford. The 8 ms in
+`.lattice/kit.json` still binds every package and every exhibit, and the numbers below happen to
+be inside it anyway.
+
+**What is measured:** `loop.stats.frameMs`, sampled inside the page from a `requestAnimationFrame`
+of its own, so no CDP round trip is in it. That is the pump's own work — update plus render, the
+whole of what the game is responsible for. `cadenceMs` is beside it because the pump's work is not
+the whole frame: rasterisation happens after the pump returns and is in the cadence and nowhere
+else. Reading only `frameMs` is how a fill-rate problem hides, and one of the rows below is one.
+
+`?ablaze=60` opens with sixty things already alight, which drives the fire to its ceiling — 74
+props burning, the 320-mote pool full, and the light field at its `MAX_POOLS` cap of 30. It is a
+worse scene than the game produces on its own.
+
+| operation | n | p50 | p99 | budget | verdict |
+|---|---:|---:|---:|---:|---|
+| frame, at rest | 2,103 | 1.04 ms | 1.18 ms | 33 ms | **pass** — 3.6% |
+| frame, 74 fires / 320 motes / 30 pools, idle | 1,866 | 1.42 ms | 1.99 ms | 33 ms | **pass** — 6.0% |
+| frame, same scene, under way and firing | 3,099 | 0.98 ms | 1.89 ms | 33 ms | **pass** — 5.7% |
+| frame, same scene, `?dpr=2`, **software raster** | 507 | 2.25 ms | 3.57 ms | 33 ms | **pass** — 11% |
+| frame, same scene, `?dpr=2`, GPU raster | 2,401 | 1.17 ms | 1.40 ms | 33 ms | **pass** — 4.2% |
+| **painted cadence**, `?dpr=2`, **software raster** | 507 | — | — | 33 ms | **33.5 ms — at the line** |
+| painted cadence, `?dpr=2`, GPU raster | 2,401 | — | — | 33 ms | **pass** — 7.3 ms |
+| painted cadence, dpr 1, either raster | 1,866 | — | — | 33 ms | **pass** — 8.2–8.6 ms |
+
+### The one row that is not free, and why it is machine-dependent
+
+At `dpr=2` under **software** rasterisation the pump still costs 2.25 ms, and the painted cadence
+is **33.5 ms** — a 4× collapse that `frameMs` cannot see, because none of it happens inside the
+pump. Turn GPU raster on and the same scene at the same ratio paints in **7.3 ms**. The work is
+fill rate on a 2560×1440 surface and nothing else: the light field is priced by buffer *area*
+(hence `scale: 0.42` in `main.ts`), and area is what doubling the ratio quadruples.
+
+So the owner's instinct that this is "a computer + browser thing" is right, and it is worth being
+precise about *which* half is: **the pump is machine-independent** — 1–2 ms of geometry and
+command submission everywhere measured — **and the paint is not.** A retina laptop with GPU raster
+pays nothing for its ratio. A machine falling back to software raster pays four times, and that is
+the only configuration in this table that reaches its budget.
+
+Every capture in `tools/trailer` runs `--disable-gpu`, so a trailer shot at `--dpr 2` is measuring
+the worst row in this table rather than the one a player gets.
+
+### The 200x collapse in #62 was the harness, not the game
+
+Filed as a reproducible 200× collapse under movement plus firing: 434.6 s for eight frames. It was
+not the game. `showcase/emberwake/act/raid-bisect.mjs` sent `keyDown` cues with virtual key codes
+and **no `text`**, which Chrome treats as a *raw* press and re-offers to the macOS menu
+accelerators; Chrome opened `chrome://help/` in a new foreground tab, the exhibit went to the
+background, and a background tab produces no BeginFrames — so Blink's rAF-aligned mouse-move queue
+never flushed and every `Input.dispatchMouseEvent` fell back to its 5-second timeout.
+
+| operation | n | before | after | verdict |
+|---|---:|---:|---:|---|
+| `Input.dispatchMouseEvent`, act cue | 82 | 5,015 ms | 1–11 ms | **fixed** — the whole of the collapse |
+| `capture.mjs --warmup 1400`, warmup phase | 84 steps | 372.8 s | 0.9 s | **fixed** |
+| `capture.mjs --warmup 1400`, 8-frame shot | 8 | 40.4 s | 0.3 s | **fixed** |
+| the same capture, end to end | — | 413.2 s | **2.4 s** | **172× faster** |
+| `Page.captureScreenshot`, 1280×720 PNG | 8 | 42 ms | 40 ms | unchanged — the real floor of a capture |
+| the game's own frame during all of it | — | ~1 ms | ~1 ms | never moved |
+
+82 mouse cues × 5.01 s is 411 s of a 413 s run. The game's frame cost was 1 ms throughout, which
+is why the frames looked identical: **nothing expensive was happening, and nothing was happening
+at all.** The second-order damage is worse than the timing. `@latticekit/input` releases every held
+key on `visibilitychange` — correctly; that is the stuck-key guard — so the act's `W` was dropped
+the instant the tab went to the background and the boat never got under way. The row in #62 headed
+"movement + firing" contained no movement. With the fix the same act ends its shot at throttle 1
+and 9.06 tiles per second.
+
+`test/contracts/act-keys.test.ts` pins it: every character `keyDown` in every act carries its
+`text`. Verified by deleting the fix and watching it go red.
+
+### Things measured that turned out to be fine — do not re-optimise these
+
+- **The light field.** 30 pools at the cap, composited once, at the top of the fire. It is inside
+  the 1.4 ms p50 above, and `?ablaze=60` versus at rest is a difference of 0.4 ms.
+- **The depth sorter and the two forward walks over it.** 58 drawables at the peak. Not visible.
+- **`Page.captureScreenshot` at 40 ms.** It is 94% of a capture's wall clock now and it is the
+  harness's floor, not the game's — the PNG encode of a 1280×720 surface.
+- **`sound.unlock()` on the first key**, 97 ms one-off to construct the `AudioContext`. It is
+  real, it is once, and it is on a gesture rather than in a frame.

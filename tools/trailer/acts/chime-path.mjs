@@ -35,8 +35,15 @@ export default function chimePath({ frames, width, height }) {
   });
 
   const space = (at) => {
+    // `text` on the keyDown is load-bearing, not decoration. Without it Chrome treats the press
+    // as *raw*, offers it to the macOS menu accelerators after the page declines it, opens
+    // chrome://help/ in a foreground tab, and backgrounds this one — at which point
+    // `@latticekit/input` correctly releases every held key and Blink stops flushing its
+    // rAF-aligned mouse queue, so every later pointer event waits out a 5 s timeout. This shot
+    // took 553 s to film for that reason and nobody noticed, because the frames still looked
+    // plausible. See issue #62.
     const key = { code: 'Space', key: ' ', windowsVirtualKeyCode: 32, nativeVirtualKeyCode: 32 };
-    cues.push({ at, events: [{ keyboard: 'keyDown', ...key }] });
+    cues.push({ at, events: [{ keyboard: 'keyDown', ...key, text: ' ', unmodifiedText: ' ' }] });
     cues.push({ at: at + 3, events: [{ keyboard: 'keyUp', ...key }] });
   };
   space(4);

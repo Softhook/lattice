@@ -18,15 +18,27 @@
 /**
  * One key, held from `from` to `to` in capture frames.
  *
- * **Dispatched as a DOM event through `{ eval }` rather than as a `{ keyboard }` cue**, and that
- * is not a style choice. `Input.dispatchKeyEvent` — which is what a `{ keyboard }` cue becomes —
- * produced no `keydown` at all in this headless session: the mouse cues in the same act landed,
- * the shells flew, and the boat never moved. Measured twice, with `keyDown` and with
- * `rawKeyDown`. A synthetic `KeyboardEvent` on `document` reaches `@latticekit/input`'s listener
- * exactly the same way a real one does — it reads `code`, `repeat`, `target` and the modifier
- * flags, and a constructed event has all of them — so the game cannot tell the difference.
+ * **Dispatched as a DOM event through `{ eval }` rather than as a `{ keyboard }` cue.**
  *
- * Reported as a finding against `tools/trailer`, which this file does not modify.
+ * The reason recorded here was wrong, and the wrong reason cost a week — it was filed as issue
+ * #62, a "200x performance collapse", and root-caused only after a profile. What this comment
+ * used to say was that `Input.dispatchKeyEvent` "produced no `keydown` at all in this headless
+ * session". It produced one. What it *also* produced was a `chrome://help/` tab in the
+ * foreground, because a `keyDown` carrying virtual key codes and **no `text`** is a raw press,
+ * and Chrome hands an unconsumed raw press to the macOS menu accelerators. The exhibit went to
+ * the background, `@latticekit/input` released every held key on `visibilitychange` — which is
+ * the stuck-key guard being right — and so the boat never moved. That is the symptom this
+ * comment described. A hidden tab also produces no BeginFrames, so every later
+ * `Input.dispatchMouseEvent` blocked for its five-second fallback, which is where the 434 s went.
+ *
+ * So a `{ keyboard }` cue is usable, and `showcase/emberwake/act/raid-bisect.mjs` uses one: give
+ * every character `keyDown` its `text`. `test/contracts/act-keys.test.ts` enforces it.
+ *
+ * This act keeps the `{ eval }` form anyway, for the reason that was always the good one: a
+ * synthetic `KeyboardEvent` on `document` reaches `@latticekit/input`'s listener exactly the way
+ * a real one does — it reads `code`, `repeat`, `target` and the modifier flags, and a constructed
+ * event has all of them — and it can never be re-offered to a menu bar, so a film shot with it
+ * does not depend on which platform the camera is on.
  */
 function key(cues, at, type, code) {
   cues.push({

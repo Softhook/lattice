@@ -9,7 +9,7 @@
     "build": "vite build",
     "preview": "vite preview --port 5290 --strictPort"
   },
-  "$comment": "Not a workspace member on purpose: showcase/ is outside the root package.json's workspaces globs, so this folder installs nothing and resolves @latticekit/* through the repository's own node_modules — the same dist symlinks every exhibit uses. Run `npm run build` at the root first.",
+  "$comment": "A workspace member: the root package.json lists `showcase/*`, so @latticekit/* resolve to `packages/` through the root node_modules symlinks rather than to the registry. That is deliberate — a showcase silently testing the last published tarball would prove nothing about the tree it lives in, and in this repository the registry copies are known to lag. Run `npm run build` at the root first, because the symlinks point at each package dist.",
   "dependencies": {
     "@latticekit/audio": "^0.1.1",
     "@latticekit/core": "^0.1.1",
