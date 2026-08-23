@@ -42,10 +42,15 @@ function groundInk(pen: Pen, h: number, grain: number): Ink {
   const grass = pen.palette.get('grass');
   const scrub = pen.palette.get('scrub');
   const rock = pen.palette.get('rock');
-  if (h <= 1) return mix(sand, grass, grain * 0.3);
-  if (h <= 3) return mix(sand, grass, 0.35 + h * 0.18 + grain * 0.2);
+  const shoal = pen.palette.get('shoal');
+  // The beach is *cool* sand, not warm sand, and that is the one change that stopped every
+  // island reading as a flat plate: at night the strip the sea has just left is still wet, so it
+  // takes the water's colour, and putting a cold band between a cold sea and a warm interior is
+  // what gives the coastline an edge to be read as an edge.
+  if (h <= 1) return mix(mix(sand, shoal, 0.42), grass, grain * 0.35);
+  if (h <= 3) return mix(mix(sand, shoal, 0.16), grass, 0.35 + h * 0.18 + grain * 0.25);
   if (h <= 9) return mix(grass, scrub, grain);
-  return mix(scrub, rock, (h - 9) * 0.18 + grain * 0.3);
+  return mix(scrub, rock, (h - 9) * 0.18 + grain * 0.34);
 }
 
 /**
@@ -87,7 +92,11 @@ export function drawLand(pen: Pen, world: World, visible: Readonly<TileRange>, s
       // relief term included, so the decorations stay relatives of the tile's own hue.
       const h = heights.get(gx, gy);
       const grain = (hash2(seed, gx, gy) & 0xffff) / 0xffff;
-      const tint = 0.94 + grain * 0.13;
+      // A quarter of a stop of per-tile brightness, up from an eighth. The narrower spread was
+      // measured on an eighty-tile map where an island filled a fifth of the frame; at this
+      // scale one island *is* the frame, and a hillside of tiles within 6% of each other is a
+      // single facet with lines drawn on it.
+      const tint = 0.88 + grain * 0.25;
       const painted = isoTerrain(pen, world.field, gx, gy, groundInk(pen, h, grain), undefined, tint);
 
       if (!detail) continue;
@@ -112,11 +121,40 @@ export function drawLand(pen: Pen, world: World, visible: Readonly<TileRange>, s
       const fall = heights.get(gx + 1, gy) - heights.get(gx, gy + 1);
       if (fall > 2 || fall < -2) {
         pen.surface.stroke(pen.xy, 3, false, withAlpha(shade(painted, 0.84), 0.3), 1);
-      } else if (h >= 9 && grain > 0.86) {
+        continue;
+      }
+      if (h >= 9 && grain > 0.82) {
         // Scree on the tops: one small dark triangle out of the tile's own color. Sparse, so it
         // reads as loose stone rather than as noise, and it is the third scale of detail that
         // stops a summit being one flat facet.
-        pen.surface.poly(pen.xy, 3, withAlpha(shade(painted, 0.8), 0.5));
+        pen.surface.poly(pen.xy, 3, withAlpha(shade(painted, 0.78), 0.55));
+        continue;
+      }
+      // Tufts and stones on the flat, on about one tile in six. **The third scale, and the one
+      // the first build did not have anywhere below the summits** — a hillside of large plain
+      // diamonds is a contour map however well the diamonds are shaded, and the eye needs
+      // something at the size of one hut to read the ground as ground rather than as a facet.
+      // Two short strokes from the tile's own center, coloured out of the tile's own paint, so
+      // they cost no palette lookup and cannot clash with a fire's light on the same tile.
+      const speck = hash2(seed ^ 0x2f, gx, gy) & 0xff;
+      if (speck < 44) {
+        // **Written over `pen.xy` in place, from index zero.** A `subarray` here would be a
+        // `Float64Array` view allocated per tile per frame — four thousand a second on a frame
+        // with two islands in it, which is exactly the shape non-negotiable 7 exists to catch.
+        // The tile's four corners are read into locals first and then overwritten, because the
+        // two decorations that need them have already taken their `continue` above.
+        const cx = ((pen.xy[0] ?? 0) + (pen.xy[4] ?? 0)) * 0.5;
+        const cy = ((pen.xy[1] ?? 0) + (pen.xy[5] ?? 0)) * 0.5;
+        const jx = ((speck & 7) - 3.5) * 3.4;
+        const jy = (((speck >> 3) & 7) - 3.5) * 1.7;
+        const size = 2.4 + (speck & 3);
+        pen.xy[0] = cx + jx;
+        pen.xy[1] = cy + jy;
+        pen.xy[2] = cx + jx + size;
+        pen.xy[3] = cy + jy + size * 0.5;
+        pen.xy[4] = cx + jx + size * 0.32;
+        pen.xy[5] = cy + jy - size * 0.75;
+        pen.surface.poly(pen.xy, 3, withAlpha(shade(painted, h >= 4 ? 0.74 : 1.2), 0.5));
       }
     }
   }

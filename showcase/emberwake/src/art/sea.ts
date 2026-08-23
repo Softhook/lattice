@@ -20,9 +20,9 @@
  * the good kind of optimization.
  */
 
-import { noise2 } from '@latticekit/core';
+import { clamp01, noise2 } from '@latticekit/core';
 import { HALF_H, HALF_W, type Rect, type TileRange } from '@latticekit/iso';
-import { withAlpha, type Pen } from '@latticekit/draw';
+import { mix, withAlpha, type Pen } from '@latticekit/draw';
 import { Puff, type Game } from '../game.js';
 
 /** Points per crest. Fourteen segments across a 1280-wide frame is a wave whose curve you can
@@ -47,12 +47,19 @@ interface Swell {
   readonly dash: number;
 }
 
-/** Two families. The long slow one carries the eye across the frame; the short fast one is what
- *  makes the surface feel like it is being blown across. */
+/**
+ * Three families. The long slow one carries the eye across the frame, the short fast one makes
+ * the surface feel like it is being blown across, and the third is grain.
+ *
+ * The alphas were raised by half after the map got denser. On an eighty-tile map with seven
+ * islands the sea *was* the frame and a faint swell was plenty; with a coastline in every shot
+ * the same swell disappeared into the gaps and the water between two islands went back to being
+ * flat navy paper. A sea has to hold its own against a lit village.
+ */
 const SWELLS: readonly Swell[] = [
-  { spacing: 6.1, amp: 0.66, drift: 0.34, wave: 0.1, alpha: 0.34, slot: 'surf', dash: 34 },
-  { spacing: 3.3, amp: 0.32, drift: -0.85, wave: 0.24, alpha: 0.2, slot: 'foam', dash: 15 },
-  { spacing: 1.7, amp: 0.15, drift: 1.5, wave: 0.5, alpha: 0.09, slot: 'shoal', dash: 7 },
+  { spacing: 5.3, amp: 0.66, drift: 0.34, wave: 0.1, alpha: 0.5, slot: 'surf', dash: 46 },
+  { spacing: 2.9, amp: 0.32, drift: -0.85, wave: 0.24, alpha: 0.3, slot: 'foam', dash: 19 },
+  { spacing: 1.5, amp: 0.15, drift: 1.5, wave: 0.5, alpha: 0.14, slot: 'shoal', dash: 8 },
 ];
 
 /**
@@ -78,7 +85,10 @@ export function drawBackdrop(pen: Pen, _visible: Readonly<Rect>, glow: number): 
   // The top of the frame lifts a little while the world burns — not enough to name, enough that
   // a player who has set three islands alight is looking at a different picture than one who has
   // set none. It is the cheapest possible way to make progress visible in the composition itself.
-  const top = pen.palette.get(glow > 0.25 ? 'sky' : 'seaFar');
+  // A blend, not a switch. The first build swapped `seaFar` for `sky` the instant the world's
+  // fire load crossed a quarter, which is a whole-frame colour cut on one tick — visible, and
+  // exactly the kind of thing a viewer reads as a rendering fault rather than as a sunrise.
+  const top = mix(pen.palette.get('seaFar'), pen.palette.get('sky'), clamp01(glow * 1.7));
   s.polyRamp(xy, 4, 0, 0, 0, h, top, pen.palette.get('seaDeep'));
 }
 

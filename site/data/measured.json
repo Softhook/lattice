@@ -1,7 +1,7 @@
 {
   "$comment": "Every number the landing page prints, with the command that produced it. Nothing on the page may state a figure that is not in this file or read live off the running kit. If you cannot name the command, the number does not go on the page. `npm run measured` re-runs every command here and fails the build when this file disagrees with the repository \u2014 the rule above was stated from the first day and drifted anyway, in nine figures, because nothing re-ran the commands.",
-  "commit": "cbd48bd",
-  "measuredOn": "2026-08-18",
+  "commit": "b9ed713",
+  "measuredOn": "2026-08-22",
   "machine": "Apple Silicon, Node v24.18",
   "figures": {
     "packages": {
@@ -20,12 +20,12 @@
       "source": "find packages -type f -not -path '*/node_modules/*' -not -path '*/dist/*' -not -path '*/coverage/*' \u2014 207 .ts, 19 .json, 9 .md, nothing else"
     },
     "tests": {
-      "value": 2648,
+      "value": 2665,
       "unit": "",
       "source": "npx vitest run \u2014 2648 passed (2648)"
     },
     "testFiles": {
-      "value": 100,
+      "value": 101,
       "unit": "",
       "source": "npx vitest run \u2014 100 passed (100)"
     },
@@ -110,7 +110,7 @@
     },
     {
       "package": "audio",
-      "gzipKb": 7.76,
+      "gzipKb": 7.77,
       "budgetKb": 12
     },
     {

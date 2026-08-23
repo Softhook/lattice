@@ -31,8 +31,8 @@
 
 import { clamp, clamp01, createRng, createScope, noise2 } from '@latticekit/core';
 import {
-  DepthSorter, HALF_H, HALF_W, TILE_H, TILE_W, createCamera, rectFromSize,
-  type Camera, type Rect,
+  DepthSorter, HALF_H, HALF_W, TILE_H, TILE_W, createCamera, heightAt, rectFromSize,
+  screenToTileOnHeights, type Camera, type Rect, type Tile,
 } from '@latticekit/iso';
 import {
   beginFrame, createCanvas2dSurface, createLightField, endFrame, renderFrame, wash, withAlpha,
@@ -41,14 +41,16 @@ import {
 import { createInput, type ActionMap } from '@latticekit/input';
 import { drive } from '@latticekit/ui';
 import { browserFrames, createLoop } from '@latticekit/loop';
-import { MAP, MAX_HEIGHT_PX, createWorld, type World } from './world.js';
-import { Phase, createGame, stepGame, type Game, type SoundEvent } from './game.js';
-import { emberwakePalette } from './art/palette.js';
+import { MAP, MAX_HEIGHT_PX, MAX_UNITS, STEP_PX, createWorld, type World } from './world.js';
+import {
+  MAG_BLAST, Phase, RELOAD_SECONDS, RUN_SECONDS, createGame, stepGame, type Game, type SoundEvent,
+} from './game.js';
+import { DAWN_REACH, DAWN_STOPS, NIGHT_STOPS, emberwakePalette } from './art/palette.js';
 import { drawBackdrop, drawSwell, drawWaterMotes } from './art/sea.js';
 import { drawLand } from './art/land.js';
 import {
-  fireOf, paintBattery, paintBearings, paintBoat, paintDarkMotes, paintEmbers, paintFlame,
-  paintProp, paintShell,
+  fireOf, paintBattery, paintBearingOfHit, paintBearings, paintBoat, paintDarkMotes, paintEmbers,
+  paintFlame, paintProp, paintReticle, paintShell,
 } from './art/things.js';
 import { sx, sy } from './art/space.js';
 import { bindMute, createHud } from './hud.js';
@@ -85,15 +87,24 @@ const palette = emberwakePalette();
  * square of both the resolution and the camera's zoom. At 0.42 the buffers are 70% of the default
  * area for a difference nobody can point at in a scene whose light is all soft firelight anyway.
  *
- * `falloff` is exactly 1 on purpose. The kit's plateau is a hard ring at every value but 1 — a
- * pool at 2.6 has a visible seam where the plateau ends — and a fire wants a pure linear ramp
- * regardless. Filed; here it costs nothing because 1 is the value the art wanted.
+ * **`falloff` is exactly 1, and for two builds it was 2.4 while this paragraph said it was 1.**
+ * The kit's exponent sets how much of the radius stays at full intensity before the ramp begins,
+ * so anything above 1 is a plateau with a rim — and at 2.4 every fire in the game threw a
+ * hard-edged white disc onto the ground that read as a spotlight rather than as firelight. It
+ * survived two reviews because the comment beside it described the value it should have had. A
+ * fire wants a pure linear ramp and 1 is it.
+ *
+ * `bloom` at 0.3 rather than the default 0.35: this scene has forty pools of one colour and the
+ * spill compounds where they overlap, which is the case the option's own doc names.
  */
-const light = createLightField(surface, { scale: 0.42, falloff: 2.4, bloom: 0.2 });
+const light = createLightField(surface, { scale: 0.42, falloff: 1, bloom: 0.3 });
 
 /** How dark the night is before any fire. Not 1: a raid you cannot navigate is not a raid, and
  *  the sea has to keep enough tone for the swell to read between the islands. */
 const NIGHT_DEPTH = 0.6;
+/** …and how dark it is at first light. The mask has to lift with the palette or the two disagree:
+ *  a `DUSK` sea under a midnight mask is a grey sea, which is worse than either. */
+const DAWN_DEPTH = 0.3;
 
 // ── the camera ─────────────────────────────────────────────────────────────────────────────
 
@@ -104,9 +115,16 @@ const NIGHT_DEPTH = 0.6;
 const REACH: Rect = { minX: 0, minY: 0, maxX: 0, maxY: 0 };
 rectFromSize(REACH, -MAP * TILE_W * 0.5, -MAX_HEIGHT_PX, MAP * TILE_W, MAP * TILE_H + MAX_HEIGHT_PX * 2);
 
-/** The zoom the game sits at. Close enough that a hull reads and far enough that a shell's whole
- *  arc fits in the frame — which is the constraint that actually chose it. */
-const BASE_ZOOM = Number(params.get('zoom') ?? '1.05') || 1.05;
+/**
+ * The zoom the game sits at.
+ *
+ * Close enough that a hull reads and far enough that a shell's whole arc fits in the frame — and
+ * then pulled back from 1.05 to 0.9 for the same reason the drag went up: at 1.05 the frame holds
+ * about twenty tiles corner to corner, one island is most of it, and the burning one is off the
+ * edge the moment the boat leaves. Twenty-three tiles is a boat, the island she is working on,
+ * and the sea she is going to next.
+ */
+const BASE_ZOOM = Number(params.get('zoom') ?? '0.9') || 0.9;
 
 const camera: Camera = createCamera(Math.max(1, innerWidth), Math.max(1, innerHeight), {
   zoom: BASE_ZOOM, minZoom: 0.5, maxZoom: 2.2, keepVisible: 0, bounds: REACH,
@@ -203,6 +221,24 @@ if (ablaze > 0) {
   }
 }
 
+/**
+ * `?night=F` — open with `F` of the night already gone, 0 to 1.
+ *
+ * The same kind of hatch as `?ablaze`, for the same reason and with the same limits: it sets an
+ * **opening state**, not a rule. The run that follows is the ordinary run — the same escalation,
+ * the same clock rate, the same seeded fleet — it simply starts later in the night, so the sky is
+ * already coming up.
+ *
+ * It exists because the alternative is filming it, and filming it is not available. The colour
+ * arc is the best thing in this game and it is eighty seconds into a raid nobody can survive
+ * unattended: a capture act that has to *play* for eighty seconds through an archipelago this
+ * dense grounds itself four times and is sunk at forty-four. Three cuts of that act are in the
+ * git history. A parameter that says "start at four fifths past midnight" is honest about what it
+ * is doing; an act that pretends to have played there is not.
+ */
+const nightGone = clamp01(Number(params.get('night') ?? '0'));
+if (nightGone > 0) game.t = nightGone * RUN_SECONDS;
+
 /** Hooks, built once and shared by every run — they close over `sound` and the camera state
  *  rather than over the game, so a restart does not have to rebuild them. */
 function start(w: World): Game {
@@ -218,6 +254,7 @@ function start(w: World): Game {
       if (stopTicks > 0) made.stop = Math.max(made.stop, stopTicks);
       punchZoom += zoom;
     },
+    beat: (what, left) => hud.notice(what, left),
   });
   camX = (made.player.x - made.player.y) * HALF_W;
   camY = (made.player.x + made.player.y) * HALF_H;
@@ -250,8 +287,12 @@ function again(sameWorld: boolean): void {
 
 // ── the fixed step ─────────────────────────────────────────────────────────────────────────
 
-/** Scratch for the pointer, reused. */
+/** Scratch for the pointer and for the tile it lands on, reused. */
 const pointer = { x: 0, y: 0 };
+const aimTile: Tile = { gx: 0, gy: 0 };
+/** The tallest *ground*, which is what bounds the aim march — `MAX_HEIGHT_PX` includes the
+ *  tallest thing standing on it and would start the march above any terrain that exists. */
+const GROUND_TOP_PX = MAX_UNITS * STEP_PX;
 
 loop.onUpdate((dt, tick) => {
   input.tick(tick);
@@ -263,12 +304,37 @@ loop.onUpdate((dt, tick) => {
   game.firing = input.held('fire');
 
   if (input.pointerScreen(pointer)) {
-    // Screen → world → grid, on the sea plane. Two divisions, and they are the inverse of the
-    // projection every draw call in the game runs forward.
+    // Screen → world → grid **on the sea plane**. Two divisions, and they are the inverse of the
+    // projection every draw call in the game runs forward. Exact, and correct for everything
+    // afloat, which is most of what a player shoots at.
     const wx = camera.toWorldX(pointer.x);
     const wy = camera.toWorldY(pointer.y);
     game.aimX = wy / TILE_H + wx / TILE_W;
     game.aimY = wy / TILE_H - wx / TILE_W;
+
+    // **…and on the ground where the ray meets ground, which is the whole difference between a
+    // game about fire and a game about missing.**
+    //
+    // A magazine stands fourteen levels up a hill. Fourteen levels is a hundred and forty world
+    // pixels, and in a dimetric projection a hundred and forty pixels of elevation is nine tiles
+    // of apparent displacement up the screen — so a player who points at the building they can
+    // see is pointing at a tile nine tiles beyond it, and every shell lands in the water on the
+    // far side of the island. There is no feedback that says so: the splash is off screen behind
+    // the hill. A first playthrough on real hardware ran ninety-two seconds and set nothing on
+    // fire, in a game named after fire, for exactly this reason.
+    //
+    // `screenToTileOnHeights` marches the ray down the height field and answers with the tile it
+    // actually strikes, which is the one the player is looking at. Taken **only when that tile is
+    // land**: over water the plane answer above is exact and sub-tile, and a tile-centred aim
+    // would quantise every shot at a moving hull to the nearest half tile.
+    if (screenToTileOnHeights(camera, pointer.x, pointer.y, game.world.field, GROUND_TOP_PX, aimTile)) {
+      const at = aimTile.gy * MAP + aimTile.gx;
+      if (aimTile.gx >= 0 && aimTile.gy >= 0 && aimTile.gx < MAP && aimTile.gy < MAP &&
+        game.world.solid[at] === 1) {
+        game.aimX = aimTile.gx + 0.5;
+        game.aimY = aimTile.gy + 0.5;
+      }
+    }
   }
 
   stepGame(game, dt);
@@ -277,8 +343,12 @@ loop.onUpdate((dt, tick) => {
   // puts the thing she is about to hit on screen before she hits it. Chasing her position alone
   // reads as lag no matter how fast the follow is.
   const p = game.player;
-  const leadX = p.x + p.vx * 0.72;
-  const leadY = p.y + p.vy * 0.72;
+  // Half a second of her own velocity, down from three quarters. The lead exists to put what she
+  // is about to hit on screen before she hits it, and at the old speed three quarters of a second
+  // was five tiles; the same fraction now overshoots less and the frame sits behind her, which is
+  // where a chase camera belongs.
+  const leadX = p.x + p.vx * 0.62;
+  const leadY = p.y + p.vy * 0.62;
   camX += ((leadX - leadY) * HALF_W - camX) * 0.11;
   camY += ((leadX + leadY) * HALF_H - camY) * 0.11;
 
@@ -354,23 +424,43 @@ function fill(order: DepthSorter): void {
   }
 }
 
-/** Cap on light pools per frame. The field is priced by pool **area**, so a burning island at
- *  a punched-in zoom is the worst case in the game; past about thirty pools the composite starts
- *  costing more than everything else put together and the thirty-first is indistinguishable. */
-const MAX_POOLS = 30;
+/**
+ * Cap on light pools per frame. The field is priced by pool **area**, so a burning island at a
+ * punched-in zoom is the worst case in the game.
+ *
+ * Forty-four rather than thirty, and the cap only became honest at the same time. Pools were
+ * added in prop-array order, so once the world held more fires than the cap the *first* forty-four
+ * in the array won — which is an arbitrary corner of the map, and a burning island the camera was
+ * looking straight at could go unlit because a fire eight hundred pixels off screen took the
+ * budget. {@link postLight} now skips anything outside the frame before it counts, so the cap
+ * spends itself on what is visible and forty-four is more than a 1280x720 frame can hold anyway.
+ */
+const MAX_POOLS = 44;
+
+/** Tiles from the camera's own center, on each axis, past which nothing is lit. A 1280x720 frame
+ *  at zoom 1.05 is about twenty tiles across the diagonal; twenty-two has a margin for the pool
+ *  radius of a fire just off the edge, whose glow does reach in. */
+const LIGHT_REACH = 22;
 
 /** Post the frame's light. Called after `light.begin` and before `renderFrame`, which is the one
  *  window in which pools may be added. */
 function postLight(): void {
   let pools = 0;
   const w = game.world;
+  // The camera's center, back in grid space. `worldX = (gx - gy) · HALF_W` and
+  // `worldY = (gx + gy) · HALF_H`, so this is that pair of equations solved — two divides and two
+  // adds, once a frame, and it is what makes MAX_POOLS a budget rather than a lottery.
+  const cgx = (camera.y / HALF_H + camera.x / HALF_W) * 0.5;
+  const cgy = (camera.y / HALF_H - camera.x / HALF_W) * 0.5;
   for (const p of w.props) {
     if (pools >= MAX_POOLS) break;
     const f = fireOf(p);
     if (f <= 0.04) continue;
+    if (p.gx - cgx > LIGHT_REACH || cgx - p.gx > LIGHT_REACH) continue;
+    if (p.gy - cgy > LIGHT_REACH || cgy - p.gy > LIGHT_REACH) continue;
     // The pool is the same `f` the flame is drawn at, so what the scene is lit by and what it
     // looks like cannot drift.
-    light.add(p.gx, p.gy, p.zPx, 1.3 + p.size * 1.35 * f, 0.3 + f * 0.4, 'flame');
+    light.add(p.gx, p.gy, p.zPx, 1.7 + p.size * 2 * f, 0.34 + f * 0.5, 'flame');
     pools++;
   }
   const p = game.player;
@@ -387,10 +477,18 @@ function postLight(): void {
     if (!s.live) continue;
     light.add(s.x, s.y, 0, 1.8, 0.26, s.team === 0 ? 'ember' : 'rlamp');
   }
+  // The shore guns. One pool each while the muzzle is lit, so a battery firing from a headland
+  // lights its own hillside and the player can see where the shell came from even when the
+  // emplacement itself is a grey box at the edge of the frame.
+  for (const b of w.batteries) {
+    if (b.flash <= 0 || pools >= MAX_POOLS) continue;
+    light.add(b.gx, b.gy, b.zPx, 8, 0.85 * (b.flash / 0.12), 'fcore');
+    pools++;
+  }
   // The magazine. One pool, enormous, for a fifth of a second, and it is the only time the whole
   // frame is lit at once.
-  if (game.flashAge < 0.45) {
-    const f = 1 - game.flashAge / 0.45;
+  if (game.flashAge < 0.34) {
+    const f = 1 - game.flashAge / 0.34;
     light.add(game.flashX, game.flashY, 0, 26 * f, f, 'fcore');
   }
 }
@@ -450,11 +548,23 @@ const passes: Passes = {
   },
   effects: (pen) => {
     paintEmbers(pen, game);
-    if (game.phase === Phase.Playing) paintBearings(pen, game.world, camera);
+    drawShockwave(pen);
+    if (game.phase === Phase.Playing) {
+      // The sight, on the ground, at the answer the height march gave — above the night, because
+      // a reticle a player cannot see in the dark is a reticle that is not there.
+      paintReticle(pen, game.aimX, game.aimY, heightAt(game.world.field, game.aimX, game.aimY),
+        clamp01(1 - game.player.reload / RELOAD_SECONDS));
+      paintBearingOfHit(pen, game.player.x, game.player.y, game.hitX, game.hitY, game.hitAge);
+      paintBearings(pen, game.world, camera);
+    }
     // The white flash. Fifteen hundredths of a second, and it is the reason a magazine feels
     // like a magazine rather than like a large fire.
-    if (game.flashAge < 0.16) {
-      wash(pen, withAlpha(pen.palette.get('fcore'), (1 - game.flashAge / 0.16) * 0.6));
+    // Twelve hundredths, not sixteen, and half a stop less of it. At the old numbers the frame
+    // is *white* for four frames and then sepia for a third of a second, which in a cut reads as
+    // a bad dissolve rather than as a bang. The shockwave ring above now carries the reach and
+    // the light pool carries the heat, so the wash only has to carry the instant.
+    if (game.flashAge < 0.12) {
+      wash(pen, withAlpha(pen.palette.get('fcore'), (1 - game.flashAge / 0.12) * 0.52));
     }
     // Damage is a **vignette, not a wash**. A full-screen red at any alpha you can see tints the
     // sea, the islands and the boat together, and the frame stops being a night and becomes a
@@ -465,11 +575,62 @@ const passes: Passes = {
       const red = pen.palette.get('bad');
       const w = pen.surface.width;
       const h = pen.surface.height;
-      pen.surface.softEllipse(w * 0.5, h * 0.5, w * 0.78, h * 0.86,
-        withAlpha(red, 0), withAlpha(red, game.player.hurt * 0.34));
+      // 0.18 and a wider ellipse, not 0.34 and a narrower one. At a third, a frame in which the
+      // player has just been hit is *entirely magenta* — the transparent middle is a quarter of
+      // the width and everything outside it is red at an alpha you cannot see through, which is
+      // the wash this comment says it is not. The bearing arc above is now the tell that carries
+      // the information, so the vignette only has to say "that hurt".
+      pen.surface.softEllipse(w * 0.5, h * 0.5, w * 0.96, h * 1.02,
+        withAlpha(red, 0), withAlpha(red, game.player.hurt * 0.18));
     }
   },
 };
+
+/** Seconds a magazine's shockwave takes to cross its own blast radius. */
+const WAVE_SECONDS = 0.62;
+/** Segments in the ring, and the turn between two of them expressed as the `k` of the rotation
+ *  trick: `atan(RING_K)` is exactly `TAU / RING_N`, so the walk closes on itself. */
+const RING_N = 24;
+const RING_K = 0.26794919243112270;
+
+/**
+ * The ring a magazine throws.
+ *
+ * Two strokes of one ellipse, and it is the single cheapest thing in this file that makes an
+ * explosion read as *pressure* rather than as a large light. The white flash says something
+ * happened; the ring says how far it reached — which is the information the player needs, because
+ * the blast radius is bigger than the fireball and standing off is the lesson the first magazine
+ * teaches. Drawn in Effects so it sits above the night, like the sparks.
+ */
+function drawShockwave(pen: Pen): void {
+  const age = game.flashAge;
+  if (age >= WAVE_SECONDS) return;
+  const k = age / WAVE_SECONDS;
+  // Fast out, slow to stop — a linear ring reads as an animation and this reads as a bang.
+  const grow = 1 - (1 - k) * (1 - k);
+  const r = HALF_W * pen.camera.zoom * MAG_BLAST * grow;
+  const cx = sx(pen, game.flashX, game.flashY);
+  const cy = sy(pen, game.flashX, game.flashY, 0);
+  const fade = (1 - k) * (1 - k);
+  pen.surface.softEllipse(cx, cy, r, r * 0.5,
+    withAlpha(pen.palette.get('fcore'), 0), withAlpha(pen.palette.get('flame'), 0.5 * fade));
+  // The ring, as a closed polyline: `Surface` strokes point lists and has no arc primitive. The
+  // walk round it is the same `v + k·perp(v)` rotation the hulls steer with, so twenty-four steps
+  // of `atan(RING_K)` is exactly one turn and the whole ring stays Tier A — no `cos` anywhere.
+  let ux = 1;
+  let uy = 0;
+  for (let i = 0; i <= RING_N; i++) {
+    pen.xy[i * 2] = cx + ux * r;
+    pen.xy[i * 2 + 1] = cy + uy * r * 0.5;
+    const nx = ux - RING_K * uy;
+    const ny = uy + RING_K * ux;
+    const inv = 1 / Math.sqrt(nx * nx + ny * ny);
+    ux = nx * inv;
+    uy = ny * inv;
+  }
+  pen.surface.stroke(pen.xy, RING_N + 1, true, withAlpha(pen.palette.get('fcore'), 0.75 * fade),
+    Math.max(1, 3 * pen.camera.zoom * fade));
+}
 
 const order = new DepthSorter(SLOTS);
 
@@ -491,8 +652,15 @@ loop.onRender((_alpha, time, ms) => {
     camera.zoomAt(want / camera.zoom, camera.viewW * 0.5, camera.viewH * 0.5);
   }
 
+  // The sunrise. `Palette.lerp` quantises to 32 levels and bumps `rev` only when the level
+  // changes, so calling it every frame costs one comparison on 31 frames out of 32 and one
+  // palette rebuild on the thirty-second — which is why this can be a continuous value in the
+  // simulation and a stepped one in the caches without the game having to know.
+  palette.lerp(NIGHT_STOPS, DAWN_STOPS, game.dawn * DAWN_REACH);
+
   const pen: Pen = beginFrame({ surface, camera, palette, t: time, light, snap: true });
-  light.begin(pen, clamp(NIGHT_DEPTH - game.heat * 0.08, 0.3, 0.9), 'night');
+  const depth = NIGHT_DEPTH + (DAWN_DEPTH - NIGHT_DEPTH) * game.dawn;
+  light.begin(pen, clamp(depth - game.heat * 0.08, 0.28, 0.9), 'night');
   postLight();
   fill(order);
   renderFrame(pen, passes, order);
@@ -565,5 +733,14 @@ Object.defineProperty(window, '__emberwake', {
       return Math.sqrt(p.vx * p.vx + p.vy * p.vy);
     },
     get throttle(): number { return game.throttle; },
+    get firing(): boolean { return game.firing; },
+    get aimX(): number { return game.aimX; },
+    get aimY(): number { return game.aimY; },
+    get shells(): number {
+      let n = 0;
+      for (const s of game.shells) if (s.live) n++;
+      return n;
+    },
+    get t(): number { return game.t; },
   },
 });

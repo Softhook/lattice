@@ -71,6 +71,28 @@ export interface Boat {
   /** Seconds of muzzle flash left. The art reads it for the glow and the light field reads it
    *  for the pool, so the flash that lights the sea is the same event as the one you hear. */
   muzzle: number;
+  /**
+   * The water this raider was told to watch, and whether she has noticed you yet.
+   *
+   * **The whole reason the sea is not empty.** A fleet that exists only as a spawner is a fleet
+   * that appears out of nothing behind the camera, and a player reads that as the game cheating
+   * rather than as a patrol finding them. Half of them are on station from the first frame,
+   * circling their own piece of water, visible from a long way off — and they wake when the
+   * player comes inside {@link WAKE} or when something hits them.
+   */
+  stx: number;
+  sty: number;
+  awake: boolean;
+  /**
+   * Seconds of grounding immunity left.
+   *
+   * **Not a nicety — without it the recovery impulse feeds itself.** A hull shoved seaward off a
+   * beach arrives back on it a third of a second later at exactly the speed the shove gave her,
+   * takes the damage again, and is shoved again: a resonance at about three knots that costs two
+   * hull per tick. One seed died in eight tenths of a second to it, on the opening frame, with
+   * fifty camera shakes and nothing on screen to explain any of them.
+   */
+  bump: number;
 }
 
 /** A shell in flight. `z` is world pixels above the sea, which is the same unit the height
@@ -136,14 +158,35 @@ export interface GameHooks {
   readonly sound: (name: SoundEvent, gx: number, gy: number, force: number) => void;
   /** Shake the camera by `mag` screen pixels and hold the world for `stopTicks` ticks. */
   readonly punch: (mag: number, stopTicks: number, zoom: number) => void;
+  /**
+   * The run reached a beat worth naming: a magazine gone, the fleet answering, the last one left.
+   *
+   * A `Beat` and not a string, because the simulation deciding on the *words* would put the
+   * game's copy in the file that has to stay isomorphic and testable in Node. It reports what
+   * happened; `hud.ts` decides what that is called.
+   */
+  readonly beat: (what: Beat, left: number) => void;
 }
+
+/** What {@link GameHooks.beat} can report. A closed union, so a new beat cannot be added without
+ *  a place on screen for it. */
+export type Beat = 'magazine' | 'wave' | 'last' | 'aground' | 'light';
 
 /** Everything the run can ask to be heard. A closed union so a typo is a compile error. */
 export type SoundEvent =
   | 'cannon' | 'thud' | 'splash' | 'catch' | 'blast' | 'magazine' | 'hull' | 'sink' | 'shore';
 
 /** How the run ended, or that it has not. */
-export const Phase = { Playing: 0, Won: 1, Lost: 2 } as const;
+export const Phase = {
+  Playing: 0,
+  Won: 1,
+  /** Hull to zero. */
+  Lost: 2,
+  /** Caught by first light with magazines still standing. A separate member and not a flag on
+   *  `Lost`, because a capture act and an end card both want to tell them apart and a boolean
+   *  beside an enum is a second source of truth about the same question. */
+  Dawn: 3,
+} as const;
 /** See {@link Phase}. */
 export type Phase = (typeof Phase)[keyof typeof Phase];
 
@@ -156,10 +199,21 @@ export type Phase = (typeof Phase)[keyof typeof Phase];
 const THRUST = 15;
 /** Reverse is worth about a third of ahead, which is what makes a mistake cost something. */
 const ASTERN = 5.5;
-/** Linear and quadratic drag. Together they set the top speed at about nine tiles a second —
- *  roughly six hundred world pixels, which crosses a 1280-wide frame in two seconds. */
-const DRAG_LIN = 1.15;
-const DRAG_SQ = 0.032;
+/**
+ * Linear and quadratic drag. Together they set the top speed at about **six and a half tiles a
+ * second**, and that number is a *camera* decision rather than a naval one.
+ *
+ * At nine and a half — where the first build sat — a hull crossed the whole visible frame in two
+ * seconds, which meant the island she had just set alight was off the top of the screen before
+ * the second hut caught. The fire is the thing this game is about and the player was never
+ * looking at it: every shot in the first film cut from a broadside to open water. Six and a half
+ * keeps a burning shoreline in frame for four or five seconds, which is long enough for the
+ * spread to be a thing you *watch* rather than a thing you are told about afterwards.
+ *
+ * She is still faster than everything else on the water, and she still skids.
+ */
+const DRAG_LIN = 1.9;
+const DRAG_SQ = 0.05;
 /** Per-tick survival of the sideways component of velocity. 0.9 per tick is a keel that bites
  *  but does not grip: hard over at speed and the stern steps out, which is the entire feel. */
 const KEEL = 0.9;
@@ -172,8 +226,10 @@ const TURN_FLOOR = 0.3;
 
 /** The player's hull, and the denominator of the bar. */
 export const HULL = 100;
-/** Seconds between salvos. */
-const RELOAD = 0.46;
+/** Seconds between salvos. Exported because the reticle reads it: the sight hardens as the guns
+ *  come ready, which is the only reload indicator in the game and it is where the eye already is. */
+export const RELOAD_SECONDS = 0.46;
+const RELOAD = RELOAD_SECONDS;
 /** Tiles per second a shell leaves the muzzle at. */
 const SHELL_SPEED = 27;
 /** World pixels per second squared. Sets how high an arc gets for a given range. */
@@ -192,6 +248,29 @@ const BLAST = 1.5;
 /** What a direct hit does to a wooden thing. Over 1, so a hit is an ignition and not a maybe. */
 const HIT_HEAT = 1.35;
 
+/**
+ * How much heat each kind takes before it lights.
+ *
+ * One for everything wooden, so a single shell is an ignition — that is the promise the game
+ * makes in its second sentence and it has to be kept. The magazine is the exception, at three
+ * and a half: it is stone-plinthed, iron-banded, and it is the **objective**. One shell from
+ * twelve tiles out lighting it made the whole run a shooting-gallery formality — a soak pilot
+ * finished all four in twelve seconds of firing without ever closing the range — and the fix is
+ * not to make the shot harder to aim but to make the *commitment* real. Two salvos, or a fire
+ * you walked up the hill to it. Heat leaks at {@link COOL} a second, so a hit and a wander is
+ * not a plan.
+ */
+const LIGHT_AT: Readonly<Record<Kind, number>> = {
+  [Kind.Hut]: 1,
+  [Kind.Barrels]: 1,
+  [Kind.Post]: 1,
+  [Kind.Tree]: 1,
+  [Kind.Rack]: 1,
+  [Kind.Magazine]: 3.4,
+  [Kind.Wreck]: 1,
+  [Kind.Buoy]: 1,
+};
+
 /** Seconds of flame per second of fuel, and the rate heat leaks away from something that is only
  *  scorched. Together they decide whether a fire spreads or dies, which is the single most
  *  load-bearing pair of numbers in the game. */
@@ -201,13 +280,44 @@ const WIND_GAIN = 2.4;
 /** Heat lost per second by something that caught a little and then was left alone. */
 const COOL = 0.22;
 
+/** Tiles. How close a hull may come to a hulk before she is on it. Generously small: a wreck
+ *  the player cannot squeeze past is a wall, and the point of a hazard is that it can be run. */
+const WRECK_R = 1.15;
+
 /** Tiles. The magazine's blast radius, and it is bigger than it looks — standing off is the
  *  lesson the first one teaches. */
-const MAG_BLAST = 7.5;
+export const MAG_BLAST = 7.5;
+
+/**
+ * How long the night lasts, in seconds of simulation.
+ *
+ * **The arc, the fail state and the art direction, in one number.** Before it existed a run had
+ * no shape: a competent player could potter indefinitely and an incompetent one died to
+ * attrition after four minutes, and neither is ninety seconds of anything. A clock fixes the
+ * length, and making that clock *dawn* rather than a countdown means the picture carries it —
+ * `art/palette.ts` walks the whole scene from `NIGHT` toward `DUSK` across exactly this span, so
+ * a player who never reads the gauge still knows, from the colour of the sea, that they are
+ * running out of dark.
+ */
+export const RUN_SECONDS = 105;
 
 /** Raider pressure. The interval shortens and the ceiling rises with every magazine gone. */
-const SPAWN_BASE = 11;
-const SPAWN_MIN = 3.4;
+const SPAWN_BASE = 7.5;
+const SPAWN_MIN = 2.2;
+/**
+ * How many hulls come at once when a magazine goes up.
+ *
+ * A wave and not a faster trickle, because the two feel completely different: a trickle is
+ * weather and a wave is a *reply*. The player sees three sets of green lamps come out of the dark
+ * on the same beat and understands, with no text, that the thing they just did had a consequence.
+ */
+const WAVE = 3;
+/** How many raiders are already at sea when the run opens. */
+const ON_STATION = 5;
+/** Tiles. Inside this a raider on station notices the player and stops patrolling. */
+const WAKE = 21;
+/** Tiles. How far off her station a patrolling raider will drift before turning back. */
+const STATION_R = 5.5;
 
 // ── the state ──────────────────────────────────────────────────────────────────────────────
 
@@ -220,7 +330,7 @@ const BARRELS: readonly number[] = [-0.5, 0.5];
 
 /** Pool sizes. Fixed, because a pool that grows is a pool that allocates on the worst frame of
  *  the run — the one where the magazine went up. */
-const MAX_RAIDERS = 12;
+const MAX_RAIDERS = 16;
 const MAX_SHELLS = 96;
 const MAX_MOTES = 320;
 
@@ -235,6 +345,18 @@ export interface Game {
   readonly motes: readonly Mote[];
   /** Seconds of run. Sim time, so it does not advance during hit-stop. */
   t: number;
+  /**
+   * 0 at nightfall, 1 at first light. Read by the palette, the night mask and the HUD gauge —
+   * one number, so those three can never disagree about what time it is.
+   *
+   * **Squared, not linear.** A linear walk from `NIGHT` to `DUSK` has the sea visibly mauve at
+   * forty per cent, which is halfway through a run that is supposed to be a night raid, and by
+   * the time it *means* something the player has been watching it change for a minute and stopped
+   * reading it. Squaring holds the dark for the first half and then goes, which is both what a
+   * sunrise does and what the mechanic needs: the colour is a warning, and a warning that starts
+   * an hour early is scenery.
+   */
+  dawn: number;
   phase: Phase;
   /** Magazines still standing. The objective, and the escalation counter. */
   left: number;
@@ -258,6 +380,16 @@ export interface Game {
   rudder: number;
   /** True while the trigger is down. */
   firing: boolean;
+  /**
+   * Where the last hit on the player came from, and how long ago in seconds.
+   *
+   * Not an event, for the same reason `flashAge` is not: the tell has a *duration* and an event
+   * that has already been delivered cannot be asked how old it is. Written by every path that
+   * takes hull off the player, read by one arc at the edge of the frame.
+   */
+  hitX: number;
+  hitY: number;
+  hitAge: number;
   /** The last big explosion: where it was and how long ago, in seconds, counting up. The art
    *  reads it for the white flash and the light field for one enormous transient pool. Kept as
    *  three numbers on the game rather than as an event, because a flash has a *duration* and an
@@ -272,6 +404,7 @@ export function createGame(world: World, rng: Rng, hooks: GameHooks): Game {
   const boat = (): Boat => ({
     x: 0, y: 0, hx: 1, hy: 0, vx: 0, vy: 0, hull: 0, reload: 0,
     hurt: 0, fire: 0, sinking: -1, live: false, seed: 0, wake: 0, muzzle: 0, wx: 0, wy: 0,
+    stx: 0, sty: 0, awake: true, bump: 0,
   });
   const raiders: Boat[] = [];
   for (let i = 0; i < MAX_RAIDERS; i++) raiders.push(boat());
@@ -302,13 +435,51 @@ export function createGame(world: World, rng: Rng, hooks: GameHooks): Game {
   let total = 0;
   for (const p of world.props) if (p.kind === Kind.Magazine) total++;
 
-  return {
+  const game: Game = {
     world, rng, hooks, player, raiders, shells, motes,
-    t: 0, phase: Phase.Playing, left: total, total, burned: 0, sunk: 0,
+    t: 0, dawn: 0, phase: Phase.Playing, left: total, total, burned: 0, sunk: 0,
     spawn: 5, stop: 0, heat: 0, flashX: 0, flashY: 0, flashAge: 99,
+    hitX: 0, hitY: 0, hitAge: 99,
     aimX: player.x + player.hx * 8, aimY: player.y + player.hy * 8,
     throttle: 0, rudder: 0, firing: false,
   };
+
+  // The fleet, already at sea. One raider off the seaward side of each island in turn, skipping
+  // whichever station would put her on top of the player — an opening frame with a hostile hull
+  // inside gun range is an ambush, and an ambush in the first second is a coin toss.
+  for (let i = 0; i < ON_STATION; i++) {
+    const isle = world.islands[i % Math.max(1, world.islands.length)];
+    if (isle === undefined) break;
+    const slot = game.raiders[i];
+    if (slot === undefined) break;
+    const turn = i * 2.3 + 0.7;
+    // A cheap deterministic spread of directions with no trigonometry: walk a unit vector round
+    // by the same `v + k·perp(v)` rotation the hulls steer with, once per station.
+    let dx = 1;
+    let dy = 0;
+    for (let k = 0; k < i + 1; k++) {
+      const nx = dx - turn * dy;
+      const ny = dy + turn * dx;
+      const inv = 1 / Math.sqrt(nx * nx + ny * ny);
+      dx = nx * inv;
+      dy = ny * inv;
+    }
+    const d = isle.r + 6;
+    const sx = clamp(isle.cx + dx * d, 3, MAP - 4);
+    const sy = clamp(isle.cy + dy * d, 3, MAP - 4);
+    if (onLand(world, sx, sy)) continue;
+    const px = sx - player.x;
+    const py = sy - player.y;
+    if (px * px + py * py < 24 * 24) continue;
+    slot.x = sx; slot.y = sy; slot.wx = sx; slot.wy = sy;
+    slot.stx = sx; slot.sty = sy;
+    slot.hx = -dx; slot.hy = -dy;
+    slot.vx = 0; slot.vy = 0;
+    slot.hull = 2; slot.reload = rng.float(0.5, 2.5); slot.seed = rng.next();
+    slot.sinking = -1; slot.awake = false; slot.live = true; slot.bump = 0;
+  }
+
+  return game;
 }
 
 // ── the pools, taken from ──────────────────────────────────────────────────────────────────
@@ -404,6 +575,40 @@ function shoreCheck(game: Game, b: Boat, isPlayer: boolean): void {
   const w = game.world;
   b.x = clamp(b.x, 2, MAP - 3);
   b.y = clamp(b.y, 2, MAP - 3);
+
+  // ── hulks ────────────────────────────────────────────────────────────────────────────
+  //
+  // **A circle you are pushed out of, not a position you are rewound to.** The rewind below is
+  // right for an island and catastrophic for a hulk: a boat under full throttle into a wreck is
+  // reset to the same remembered water every tick, thrust puts her back inside on the next one,
+  // and the hull sits at one position for the rest of the run with the engine running. That is
+  // not a hypothetical — it was measured at 48.0, 18.5 for sixty-five seconds, and the run ended
+  // with the player pinned to a rock being shelled. A radial push-out cannot fail that way
+  // because the boat is *outside* the circle when the function returns, whatever she does next.
+  for (const i of w.wrecks) {
+    const p = w.props[i];
+    if (p === undefined) continue;
+    const dx = b.x - p.gx;
+    const dy = b.y - p.gy;
+    const d2 = dx * dx + dy * dy;
+    if (d2 >= WRECK_R * WRECK_R) continue;
+    const d = Math.sqrt(d2) || 0.001;
+    const nx = dx / d;
+    const ny = dy / d;
+    b.x = p.gx + nx * WRECK_R;
+    b.y = p.gy + ny * WRECK_R;
+    const into = b.vx * nx + b.vy * ny;
+    if (into < 0) {
+      // Reflect and lose most of it. 1.4 rather than 2 is a hull that scrapes along a wreck
+      // rather than one that bounces off it like a ball.
+      b.vx -= nx * into * 1.15;
+      b.vy -= ny * into * 1.15;
+      strike(game, b, isPlayer, -into);
+    }
+    return;
+  }
+
+  // ── land ─────────────────────────────────────────────────────────────────────────────
   if (!onLand(w, b.x, b.y)) {
     // The last tile of open water she was in. Cheap to keep and the only thing that makes the
     // grounding recovery below unconditional.
@@ -419,19 +624,93 @@ function shoreCheck(game: Game, b: Boat, isPlayer: boolean): void {
   // and the symptom was a player who had vanished from her own frame with no error anywhere.
   // A remembered position cannot fail that way, because it was water when it was written.
   const speed = Math.sqrt(b.vx * b.vx + b.vy * b.vy);
+  const offX = b.wx - b.x;
+  const offY = b.wy - b.y;
   b.x = b.wx;
   b.y = b.wy;
-  b.vx *= -0.22;
-  b.vy *= -0.22;
-  if (speed > 2.4) {
-    b.hurt = 1;
-    b.hull -= isPlayer ? speed * 0.9 : speed * 2;
-    game.hooks.sound('shore', b.x, b.y, clamp01(speed / 9));
-    if (isPlayer) game.hooks.punch(clamp(speed * 0.9, 2, 9), 2, 0.02);
-    for (let i = 0; i < 5; i++) {
-      const r = game.rng;
-      spawnMote(game, Puff.Spray, b.x, b.y, 6, r.float(-3, 3), r.float(-3, 3), r.float(2, 8) * 20, 0.5, 0.22);
+
+  // **She slides along the beach; she does not stop dead on it.**
+  //
+  // Three versions of this line have been wrong in three different ways and they are worth
+  // recording, because each looked correct until a run was traced:
+  //
+  // | what it did | how it failed |
+  // |---|---|
+  // | reverse a fraction of the velocity | a hull held at full ahead is rewound to the same water every tick and *never moves again* — one seed sat at 7.2, 12.9 for a hundred seconds and died there |
+  // | add an impulse seaward | she comes back at exactly the speed the shove gave her, takes the damage, is shoved again: a resonance at three knots that killed a run in eight tenths of a second |
+  // | zero the velocity | correct, and the shoreline becomes flypaper: every graze is a full stop |
+  //
+  // Removing only the component *into* the shore leaves the component *along* it untouched, so
+  // a glancing hit costs a little speed and a head-on one costs all of it — which is what a
+  // grounding is. The normal comes from the recovery offset, which at nine tiles a second and a
+  // sixtieth of a second is about a seventh of a tile, so it points genuinely seaward.
+  const off = Math.sqrt(offX * offX + offY * offY);
+  if (off > 0.0001) {
+    const nx = offX / off;
+    const ny = offY / off;
+    const into = b.vx * nx + b.vy * ny;
+    if (into < 0) {
+      b.vx -= nx * into;
+      b.vy -= ny * into;
     }
+    // A floor on how fast she is leaving, deliberately *below* the damage threshold so the
+    // recovery can never hurt the ship it is recovering.
+    const out = b.vx * nx + b.vy * ny;
+    if (out < 2.8) {
+      b.vx += nx * (2.8 - out);
+      b.vy += ny * (2.8 - out);
+    }
+    // **And she slews.** This is the line that finally makes a grounding recoverable, and it is
+    // the only one of the five attempts that is also *true*: a hull that puts her bow on a beach
+    // at speed is turned by it. Turning the *heading* rather than pushing the hull means the
+    // player's own thrust — the force that put her there, and the only one big enough to matter
+    // — starts working seaward within about a second, whatever they are holding down. Nothing
+    // that only touches velocity survives the keel.
+    // The size of it matters as much as the sign, and this is the number that was wrong twice.
+    // A grounding is a **rare event** — she touches once and is rewound, then drifts for half a
+    // second before touching again — while the rudder acts on *every* tick. At 0.09 radians a
+    // touch the helm out-turns the beach eight to one and the boat rotates steadily *into* the
+    // land, which is what a trace showed: six groundings in three seconds, heading going the
+    // wrong way the whole time. Scaled by impact speed and clamped at a quarter turn, one solid
+    // touch is decisive and a graze is barely felt.
+    const slew = clamp((b.hx * ny - b.hy * nx) * (0.1 + speed * 0.09), -0.42, 0.42);
+    const hxs = b.hx - slew * b.hy;
+    const hys = b.hy + slew * b.hx;
+    const hinv = 1 / Math.sqrt(hxs * hxs + hys * hys);
+    b.hx = hxs * hinv;
+    b.hy = hys * hinv;
+  } else {
+    b.vx *= -0.22;
+    b.vy *= -0.22;
+  }
+  strike(game, b, isPlayer, speed);
+}
+
+/** Remember where a hit on the player came from, so the frame can point at it. One call site per
+ *  damage source, which is the only way a tell like this stays honest. */
+function fromThere(game: Game, gx: number, gy: number): void {
+  game.hitX = gx;
+  game.hitY = gy;
+  game.hitAge = 0;
+}
+
+/**
+ * What hitting something solid costs. One place, so a hulk and a beach hurt the same way and
+ * there is one number to move when they should not.
+ */
+function strike(game: Game, b: Boat, isPlayer: boolean, speed: number): void {
+  if (speed <= 3.4 || b.bump > 0) return;
+  b.bump = 0.7;
+  b.hurt = 1;
+  b.hull -= isPlayer ? speed * 0.7 : speed * 2;
+  game.hooks.sound('shore', b.x, b.y, clamp01(speed / 9));
+  if (isPlayer) {
+    game.hooks.punch(clamp(speed * 0.9, 2, 9), 2, 0.02);
+    game.hooks.beat('aground', game.left);
+  }
+  for (let i = 0; i < 5; i++) {
+    const r = game.rng;
+    spawnMote(game, Puff.Spray, b.x, b.y, 6, r.float(-3, 3), r.float(-3, 3), r.float(2, 8) * 20, 0.5, 0.22);
   }
 }
 
@@ -552,7 +831,7 @@ function scorch(game: Game, x: number, y: number, radius: number, amount: number
     const d2 = dx * dx + dy * dy;
     if (d2 > r2) continue;
     p.heat += amount * (1 - Math.sqrt(d2) / radius);
-    if (p.heat >= 1) ignite(game, p);
+    if (p.heat >= LIGHT_AT[p.kind]) ignite(game, p);
   }
 }
 
@@ -564,7 +843,10 @@ function detonate(game: Game, p: Prop): void {
   game.flashY = p.gy;
   game.flashAge = 0;
   game.hooks.sound('magazine', p.gx, p.gy, 1);
-  game.hooks.punch(30, 6, 0.16);
+  // The last one is allowed to be louder than the others. It is the end of the run and the only
+  // moment in the game where more is the right answer.
+  game.hooks.punch(game.left === 0 ? 44 : 30, game.left === 0 ? 10 : 6, game.left === 0 ? 0.24 : 0.16);
+  game.hooks.beat(game.left === 1 ? 'last' : 'magazine', game.left);
   scorch(game, p.gx, p.gy, MAG_BLAST, 3);
 
   const r = game.rng;
@@ -572,9 +854,13 @@ function detonate(game: Game, p: Prop): void {
     const a = r.float(-1, 1);
     const b = r.float(-1, 1);
     const n = Math.sqrt(a * a + b * b) || 1;
-    const sp = r.float(4, 17);
+    // Eleven tiles a second for under two seconds, so an ember from a magazine can jump a strait
+    // and cannot cross a quadrant. Seventeen for two and a half could, and did: one seed lost two
+    // more objectives to sparks from the first, four seconds after it went up and thirty tiles
+    // away, which turned the length of a run into a lottery on the wind.
+    const sp = r.float(3, 11);
     spawnMote(game, i % 3 === 0 ? Puff.Debris : Puff.Ember, p.gx, p.gy, p.zPx + 18,
-      (a / n) * sp, (b / n) * sp, r.float(120, 460), r.float(0.9, 2.4), r.float(0.16, 0.4));
+      (a / n) * sp, (b / n) * sp, r.float(120, 380), r.float(0.8, 1.8), r.float(0.16, 0.4));
   }
   for (let i = 0; i < 10; i++) {
     spawnMote(game, Puff.Smoke, p.gx + r.float(-1.5, 1.5), p.gy + r.float(-1.5, 1.5), p.zPx + 20,
@@ -594,7 +880,14 @@ function detonate(game: Game, p: Prop): void {
       gun.hurt = 1;
     }
   }
-  game.spawn = Math.max(game.spawn, 6);
+  // A wave, and the fleet stands off for a few seconds first. Both are relief valves and both are
+  // legible: three sets of lamps arriving together says *reply* in a way a shorter interval never
+  // can, and the pause is what gives the player time to get off the beach before they arrive.
+  if (game.left > 0) {
+    for (let i = 0; i < WAVE; i++) spawnRaider(game, true);
+    game.hooks.beat('wave', game.left);
+  }
+  game.spawn = Math.max(game.spawn, 5);
 
   // Everything close enough is caught in it, including the player. The magazine does not care
   // whose side you are on, and finding that out is the best lesson the first island teaches.
@@ -614,6 +907,7 @@ function detonate(game: Game, p: Prop): void {
     pl.hurt = 1;
     pl.vx += (dx / (d || 1)) * 9 * share;
     pl.vy += (dy / (d || 1)) * 9 * share;
+    fromThere(game, p.gx, p.gy);
     game.hooks.sound('hull', pl.x, pl.y, 1);
   }
 }
@@ -657,7 +951,7 @@ function stepFire(game: Game, dt: number): void {
       const d = Math.sqrt(dx * dx + dy * dy) || 0.001;
       const lean = 1 + WIND_GAIN * Math.max(0, (dx * w.windX + dy * w.windY) / d);
       q.heat += SPREAD * intensity * lean * dt / d;
-      if (q.heat >= 1) ignite(game, q);
+      if (q.heat >= LIGHT_AT[q.kind]) ignite(game, q);
     }
 
     // Embers, which is how fire crosses a gap the neighbor table does not span. Rate-limited by
@@ -668,7 +962,7 @@ function stepFire(game: Game, dt: number): void {
         w.windX * r.float(1.5, 4.5) + r.float(-1, 1), w.windY * r.float(1.5, 4.5) + r.float(-1, 1),
         r.float(60, 150), r.float(1.4, 2.8), 0.1);
     }
-    if (game.rng.next() < intensity * dt * 1.1) {
+    if (game.rng.next() < intensity * dt * 1.8) {
       const r = game.rng;
       spawnMote(game, Puff.Smoke, p.gx + r.float(-0.4, 0.4), p.gy + r.float(-0.4, 0.4), p.zPx + p.size * 10,
         w.windX * 1.6, w.windY * 1.6, r.float(30, 70), r.float(2.2, 3.6), p.size * 0.4);
@@ -677,7 +971,7 @@ function stepFire(game: Game, dt: number): void {
     if (p.fuel <= 0) {
       p.state = Burn.Spent;
       p.flame = 0;
-      p.smoke = 6;
+      p.smoke = 14;
       game.burned++;
       if (p.kind === Kind.Magazine) detonate(game, p);
     }
@@ -724,6 +1018,7 @@ function land(game: Game, s: Shell): void {
       const share = 1 - Math.sqrt(d2) / 1.8;
       p.hull -= 7 * clamp01(share);
       p.hurt = 1;
+      fromThere(game, s.x, s.y);
       game.hooks.sound('hull', p.x, p.y, 1);
       game.hooks.punch(11, 2, 0.03);
     }
@@ -760,6 +1055,7 @@ function stepShells(game: Game, dt: number): void {
           if (dx * dx + dy * dy > FUSE * FUSE) continue;
           b.hull -= 1;
           b.hurt = 1;
+          b.awake = true;
           b.fire = Math.min(1, b.fire + 0.55);
           s.live = false;
           game.hooks.sound('blast', b.x, b.y, 0.8);
@@ -784,7 +1080,7 @@ function stepShells(game: Game, dt: number): void {
 // ── raiders and shore batteries ────────────────────────────────────────────────────────────
 
 /** Put a raider in the water, out of sight, on the side of the player the map has room for. */
-function spawnRaider(game: Game): void {
+function spawnRaider(game: Game, awake: boolean): void {
   let slot: Boat | undefined;
   for (const b of game.raiders) if (!b.live) { slot = b; break; }
   if (slot === undefined) return;
@@ -806,6 +1102,7 @@ function spawnRaider(game: Game): void {
     slot.vx = slot.hx * 3; slot.vy = slot.hy * 3;
     slot.hull = 2; slot.reload = r.float(0.5, 2.5); slot.hurt = 0; slot.fire = 0;
     slot.sinking = -1; slot.seed = r.next(); slot.wake = 0; slot.live = true;
+    slot.stx = x; slot.sty = y; slot.awake = awake; slot.bump = 0;
     return;
   }
 }
@@ -846,6 +1143,7 @@ function stepRaiders(game: Game, dt: number): void {
     }
     if (b.hurt > 0) b.hurt = Math.max(0, b.hurt - dt * 2.4);
     if (b.muzzle > 0) b.muzzle -= dt;
+    if (b.bump > 0) b.bump -= dt;
 
     if (b.hull <= 0) {
       b.sinking = 0;
@@ -858,23 +1156,53 @@ function stepRaiders(game: Game, dt: number): void {
     const dx = p.x - b.x;
     const dy = p.y - b.y;
     const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+
+    // On station: circle your own patch of water at half throttle until the player is inside
+    // WAKE. Two branches and no pathfinding — a patrol that navigates is a patrol whose cost
+    // scales with how many of them are off screen, and nobody is looking at them anyway.
+    if (!b.awake) {
+      if (dist < WAKE) {
+        b.awake = true;
+      } else {
+        const sdx = b.stx - b.x;
+        const sdy = b.sty - b.y;
+        const sd = Math.sqrt(sdx * sdx + sdy * sdy) || 1;
+        const rudder = sd > STATION_R
+          ? clamp((b.hx * (sdy / sd) - b.hy * (sdx / sd)) * 3.2, -1, 1)
+          : 0.42;
+        drive(b, dt, 0.5, rudder, THRUST * 0.62);
+        shoreCheck(game, b, false);
+        wake(game, b, dt);
+        continue;
+      }
+    }
+
     const tx = dx / dist;
     const ty = dy / dist;
     // Positive cross means the target is to port; the sign is the rudder.
     const cross = b.hx * ty - b.hy * tx;
     const facing = b.hx * tx + b.hy * ty;
-    const rudder = clamp(cross * 3.2, -1, 1);
+    let rudder = clamp(cross * 3.2, -1, 1);
+    // **Look where you are going.** A raider steering only at the player drives onto the nearest
+    // beach and stays there for the rest of the run, and a hostile hull parked on a hillside in a
+    // bright damage flash is the single most broken-looking thing in a frame. Two probes and a
+    // sign: if the water two tiles ahead is not water, put the helm over toward whichever bow is
+    // clear. It is not pathfinding and does not need to be — a raider that turns away from land
+    // is indistinguishable from one that meant to.
+    if (onLand(game.world, b.x + b.hx * 2.4, b.y + b.hy * 2.4)) {
+      rudder = onLand(game.world, b.x - b.hy * 2.4, b.y + b.hx * 2.4) ? 1 : -1;
+    }
     // Close to the ring, then hold it. Sitting still would make them easy; the ring keeps them
     // moving across the player's aim, which is what makes the shooting interesting.
-    const want = 9;
+    const want = 8;
     const throttle = dist > want ? 1 : dist < want * 0.6 ? -0.4 : 0.25;
     drive(b, dt, throttle, rudder, THRUST * 0.62);
     shoreCheck(game, b, false);
     wake(game, b, dt);
 
     b.reload -= dt;
-    if (b.reload <= 0 && dist < 14.5 && facing > 0.25) {
-      b.reload = game.rng.float(3.1, 4.8);
+    if (b.reload <= 0 && dist < 16 && facing > 0.2) {
+      b.reload = game.rng.float(2.2, 3.5);
       b.muzzle = 0.09;
       // Lead the shot by roughly the flight time, and then miss it a little on purpose. A
       // raider that solves the intercept exactly is a raider you cannot dodge, and a game whose
@@ -897,6 +1225,7 @@ function stepRaiders(game: Game, dt: number): void {
       p.vx += tx * push * dt * 0.7;
       p.vy += ty * push * dt * 0.7;
       p.hull -= dt * 4.5;
+      fromThere(game, b.x, b.y);
       if (p.hurt < 0.55) p.hurt = 0.55;
     }
   }
@@ -907,6 +1236,7 @@ function stepBatteries(game: Game, dt: number): void {
   const p = game.player;
   for (const b of game.world.batteries) {
     if (b.hurt > 0) b.hurt = Math.max(0, b.hurt - dt * 1.6);
+    if (b.flash > 0) b.flash -= dt;
     if (b.hp <= 0) continue;
     const dx = p.x - b.gx;
     const dy = p.y - b.gy;
@@ -926,6 +1256,7 @@ function stepBatteries(game: Game, dt: number): void {
     b.cd -= dt;
     if (b.cd <= 0 && b.ax * tx + b.ay * ty > 0.93) {
       b.cd = game.rng.float(4.6, 7.4);
+      b.flash = 0.12;
       const lead = dist / (SHELL_SPEED * 0.62);
       const r = game.rng;
       launch(game, b.gx, b.gy,
@@ -1023,12 +1354,16 @@ export function stepGame(game: Game, dt: number): void {
     return;
   }
   game.t += dt;
+  const spent = clamp01(game.t / RUN_SECONDS);
+  game.dawn = spent * spent;
   game.flashAge += dt;
+  game.hitAge += dt;
 
   const p = game.player;
   if (p.live) {
     if (p.hurt > 0) p.hurt = Math.max(0, p.hurt - dt * 1.8);
     if (p.muzzle > 0) p.muzzle -= dt;
+    if (p.bump > 0) p.bump -= dt;
     p.reload -= dt;
     drive(p, dt, game.throttle, game.rudder, THRUST);
     shoreCheck(game, p, true);
@@ -1049,8 +1384,15 @@ export function stepGame(game: Game, dt: number): void {
   let alive = 0;
   for (const b of game.raiders) if (b.live && b.sinking < 0) alive++;
   if (game.spawn <= 0) {
-    game.spawn = Math.max(SPAWN_MIN, SPAWN_BASE - gone * 1.4);
-    if (alive < 2 + gone * 1.4) spawnRaider(game);
+    game.spawn = Math.max(SPAWN_MIN, SPAWN_BASE - gone * 1.3);
+    if (alive < 3 + gone * 2) spawnRaider(game, true);
+  }
+
+  // Fifteen seconds of night left is the last moment a player can still change the outcome, so
+  // it is the last moment worth telling them. Fired once, off a threshold crossing rather than a
+  // range test, because a range test on a fixed step fires it nine hundred times.
+  if (game.t >= RUN_SECONDS - 15 && game.t - dt < RUN_SECONDS - 15) {
+    game.hooks.beat('light', game.left);
   }
 
   if (game.left === 0) game.phase = Phase.Won;
@@ -1060,5 +1402,9 @@ export function stepGame(game: Game, dt: number): void {
     game.phase = Phase.Lost;
     game.hooks.sound('sink', p.x, p.y, 1);
     game.hooks.punch(18, 5, 0.1);
+  } else if (game.dawn >= 1) {
+    // Caught in the open. She is not sunk and the world keeps burning behind the card, which is
+    // the right last frame for this ending: the raid failed, the fires it started did not.
+    game.phase = Phase.Dawn;
   }
 }

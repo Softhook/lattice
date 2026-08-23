@@ -16,7 +16,7 @@
  * ```
  */
 import { createRng } from '@latticekit/core';
-import { Burn, Kind, createWorld } from '../dist-ts/world.js';
+import { Burn, Kind, createWorld, onLand } from '../dist-ts/world.js';
 import { HULL, Phase, createGame, stepGame } from '../dist-ts/game.js';
 
 const seed = process.argv[2] ?? 'emberwake';
@@ -35,11 +35,13 @@ const tally = {};
 const game = createGame(world, createRng(`${seed}:run`), {
   sound: (name) => { sounds++; tally[name] = (tally[name] ?? 0) + 1; },
   punch: () => { shakes++; },
+  beat: (what) => { tally[`beat:${what}`] = (tally[`beat:${what}`] ?? 0) + 1; },
 });
 
 const dt = 1 / 60;
 let left = game.left;
 let worstHull = HULL;
+let stuck = 0;
 for (let tick = 0; tick < 60 * 240; tick++) {
   // The autopilot: run at the nearest standing magazine, hold nine tiles off, and fire.
   const p = game.player;
@@ -62,21 +64,46 @@ for (let tick = 0; tick < 60 * 240; tick++) {
   }
 
   if (best !== undefined) {
-    // **Orbit, do not charge.** A pilot that steers straight at the target and parks is a pilot
-    // that eats every shell fired at it, and tuning the game against one would produce a game
-    // nobody can lose. The heading wanted is the bearing to the magazine turned most of a right
-    // angle, pulled inward when it is far and outward when it is close — which is what a person
-    // does within ten seconds of playing.
+    // **Close, then orbit, then shoot.** Three regimes and not one, because a single steering
+    // rule that both approaches and circles is a spiral that converges too slowly to measure
+    // anything: the first version of this pilot spent a hundred and sixty seconds at fourteen
+    // tiles from an objective it never fired at, and reported the game as unwinnable.
     const ux = (best.gx - p.x) / (bestD || 1);
     const uy = (best.gy - p.y) / (bestD || 1);
-    const pull = Math.max(-0.9, Math.min(0.9, (bestD - 10) * 0.16));
-    const wx = -uy * 0.8 + ux * pull;
-    const wy = ux * 0.8 + uy * pull;
+    const RING = 9;
+    let wx;
+    let wy;
+    if (bestD > RING + 2.5) { wx = ux; wy = uy; }
+    else if (bestD < RING - 2.5) { wx = -ux; wy = -uy; }
+    else { wx = -uy; wy = ux; }
+    // Look where you are going. The map has skerries and hulks in it now, and a pilot that steers
+    // only at its objective grounds itself thirty times in a run — which measures the autopilot's
+    // blindness and reports it as the game's difficulty.
+    const foul = (ax, ay) =>
+      onLand(world, p.x + ax, p.y + ay) ||
+      world.wrecks.some((i) => Math.hypot(world.props[i].gx - (p.x + ax), world.props[i].gy - (p.y + ay)) < 1.6);
+    for (let probe = 0; probe < 3; probe++) {
+      const reach = 3.4 - probe;
+      if (!foul(wx * reach, wy * reach)) break;
+      // Swing the wanted heading a quarter turn to whichever side is clear, and keep it.
+      if (!foul(-wy * reach, wx * reach)) { const t2 = wx; wx = -wy; wy = t2; break; }
+      if (!foul(wy * reach, -wx * reach)) { const t2 = wx; wx = wy; wy = -t2; break; }
+      wx = -wx; wy = -wy;
+    }
     const n = Math.hypot(wx, wy) || 1;
     game.rudder = Math.max(-1, Math.min(1, (p.hx * (wy / n) - p.hy * (wx / n)) * 3));
-    game.throttle = 1;
-    if (threat !== undefined) {
-      // Lead the target by the shell's own flight time, which is the same sum the raiders do.
+    // Back her off. A pilot with no astern is a pilot that can only ever push harder into
+    // whatever it is stuck on, which measures the game's shoreline and reports it as difficulty.
+    stuck = Math.hypot(p.vx, p.vy) < 1.6 ? stuck + 1 : 0;
+    game.throttle = stuck > 30 && stuck < 90 ? -1 : 1;
+    if (stuck > 90) stuck = 0;
+    if (bestD < 14) {
+      // The magazine first, whenever it is in range. A pilot that shoots the nearest raider
+      // unconditionally never fires at an objective again after the first one.
+      game.aimX = best.gx;
+      game.aimY = best.gy;
+      game.firing = true;
+    } else if (threat !== undefined) {
       const flight = threatD / 27;
       game.aimX = threat.x + threat.vx * flight;
       game.aimY = threat.y + threat.vy * flight;
@@ -84,9 +111,10 @@ for (let tick = 0; tick < 60 * 240; tick++) {
     } else {
       game.aimX = best.gx;
       game.aimY = best.gy;
-      game.firing = bestD < 15;
+      game.firing = false;
     }
   }
+
   stepGame(game, dt);
   if (p.hull < worstHull) worstHull = p.hull;
   if (game.left !== left) {
@@ -100,7 +128,7 @@ for (let tick = 0; tick < 60 * 240; tick++) {
   if (!Number.isFinite(p.x)) { console.log(`NaN position at tick ${String(tick)}`); break; }
 }
 
-const verdict = game.phase === Phase.Won ? 'WON' : game.phase === Phase.Lost ? 'LOST' : 'UNFINISHED';
+const verdict = game.phase === Phase.Won ? 'WON' : game.phase === Phase.Lost ? 'SUNK' : game.phase === Phase.Dawn ? 'DAWN' : 'UNFINISHED';
 console.log(
   `${verdict} at ${game.t.toFixed(1)}s — hull ${game.player.hull.toFixed(0)} (worst ${worstHull.toFixed(0)}), ` +
   `${String(game.burned)} burned, ${String(game.sunk)} sunk, ${String(sounds)} sounds, ${String(shakes)} shakes`,
