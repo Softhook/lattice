@@ -8,15 +8,20 @@
  *
  * ## The cut, and what the music does under it
  *
+ * Timings are the **locked** ones, measured off the cut file rather than planned against it.
+ *
  * | time | on screen | music |
  * |---|---|---|
- * | 0:00–0:03 | night sea, the boat idling, one lamp | two engine thumps, sea air, and two struck notes a semitone apart. Nothing else |
- * | 0:03–0:07 | the first salvo | the piece starts. A struck hit and the sequencer's downbeat land together on the flash |
- * | 0:07–0:12 | escalation, a near miss at speed | a layer per bar, a bell per bar on the note the sequencer cannot play, and a run into the blast |
- * | 0:12–0:17 | **the magazine goes up** | the loudest event in the piece, one second of nothing but its own ring, then embers re-lighting |
- * | 0:17–0:21 | the gauntlet | a pedal D and continuous sixteenths. The motif, whole, twice. Denser, not louder |
- * | 0:21–0:23 | dawn | the pulse simply stops. Three bells falling, and the sea |
- * | 0:23–0:28 | the card, then the reveal | one struck D minor chord, ringing under the card and never faded |
+ * | 0:00–0:03 | night sea, the boat under way, one lamp | two engine thumps, sea air, and two struck notes a semitone apart. Nothing else |
+ * | 0:03–0:08 | broadside. Both guns, the village catching behind her | the piece starts. A struck hit and the sequencer's downbeat land together, a layer per bar after |
+ * | 0:08–0:13 | the gauntlet, and she runs aground at 0:10 | pedal D, four on the floor, the motif whole. The grounding strips the texture for half a second |
+ * | 0:13–0:13.53 | the fuse | everything stops but a run of plucks climbing, and one breath of air swelling |
+ * | **0:13.53** | **the white flash** | the loudest instant in the piece. The one hard sync point in the file |
+ * | 0:13.6–0:14.2 | the frame still washed out | no note is struck. What is there is the blast's own decay and a single high tone |
+ * | 0:14.2–0:18 | aftermath, the shore alight | four bells, slow and wide, over a pulse at a quarter strength |
+ * | 0:18–0:21.5 | first light. Mauve over a burning archipelago | the pulse is cut, not faded. Three bells falling, the sea, and the boat still running |
+ * | 0:21.5–0:23.5 | the title card | one struck D minor chord. It is still ringing when the card goes |
+ * | 0:23.5–0:28 | the reveal and the install line | two soft chimes over the chord's decay. Nothing new is stated |
  *
  * ## The decisions worth arguing with
  *
@@ -26,17 +31,17 @@
  * understood coming back. The progression moves the bass a *semitone* (D → Eb) rather than the
  * usual fourth, which is the same idea at the bottom of the mix.
  *
- * **The ending is the first bar with no Eb in it.** Everything up to 0:21 leans on that
- * semitone. The card lands on a plain D minor — D, F, A, no flat second anywhere — so the
- * resolution is not a brighter chord arriving, it is the tension *stopping*. That reads as
- * relief rather than as triumph, which is what a raid that ends because the night ends needs.
- * There is no major chord in this file.
+ * **The ending is the first bar with no Eb in it.** Everything up to 0:18 leans on that semitone.
+ * The card lands on a plain D minor — D, F, A, no flat second anywhere — so the resolution is not
+ * a brighter chord arriving, it is the tension *stopping*. That reads as relief rather than as
+ * triumph, which is what a raid that ends because the night ends needs. There is no major chord
+ * in this file.
  *
  * **Struck and plucked, never sustained.** Bells, a low toll, a pluck, and drums. A synthesized
  * pad is what makes procedural audio sound like a screensaver, and the practical reason is
  * harder: a pad smears across a hard cut, where a bell simply stops being struck and its tail is
  * a decision the edit gets to make. The only sustained things here are three filtered-noise
- * gestures — sea, blast air, dawn — each with an attack and a decay, each struck once.
+ * gestures — sea, blast air, first light — each with an attack and a decay, each struck once.
  *
  * **The harmony is implied and almost never stated by the sequencer.** The deck transposes a
  * whole track by the bar's root, so any interval a track plays must be consonant with *every*
@@ -55,47 +60,77 @@
 import { createAudio, createDeck, validateSong, validateSounds, LOOKAHEAD_SEC, SEMITONE } from '@latticekit/audio';
 
 // ---------------------------------------------------------------------------
-// The cut. These seven numbers are the brief's and are not negotiable
+// The cut. These are measured off the locked edit and are not negotiable
 // ---------------------------------------------------------------------------
 
-/** Total length of the render. The trailer is twenty-eight seconds and the file is too. */
-export const DURATION_SEC = 28;
+/**
+ * Total length of the render. The picture is 1,681 frames at 60 fps — 28.017 s — and this is the
+ * next multiple of a sample above it, so the score outlasts the last frame by three milliseconds
+ * rather than ending three milliseconds early. A file shorter than the picture is a hole; a file
+ * longer than it is a trim in the edit.
+ */
+export const DURATION_SEC = 28.02;
 
 /** 120 bpm. A bar is exactly 2 s, a sixteenth is exactly 0.125 s, and both are exact in binary. */
 const BPM = 120;
 const BEAT_SEC = 60 / BPM;
 const BAR_SEC = BEAT_SEC * 4;
 
-/** Cold open. Night sea, the boat idling, one lamp. Almost still, and the music is almost nothing. */
+/** Cold open. Night sea, the boat under way, one lamp. The music is four events. */
 const T_OPEN = 0;
-/** The first salvo. Muzzle flash, camera shake. The first real downbeat lands **on** the flash. */
-const T_SALVO = 3;
-/** Escalation. Enemy fire, a near miss at speed. The only stretch allowed to feel busy. */
-const T_BUILD = 7;
-/** The magazine. The single loudest instant in the piece, followed by a hole. */
-const T_DETONATE = 12;
-/** Embers: the shore alight. Not a crescendo through the blast — a separate thing re-lighting. */
-const T_EMBERS = 13;
-/** The gauntlet. Running the channel with everything burning. Relentless, not louder. */
-const T_GAUNTLET = 17;
-/** Dawn. The palette washes and it is over. Release, not resolution. */
-const T_DAWN = 21;
-/** The title card. One clean resolution, struck here and still ringing at 0:28. */
-const T_CARD = 23;
-/** The reveal, under the card's decay. One note, an octave over the chord that is still sounding. */
-const T_REVEAL = 25.5;
+/** Broadside. Both guns, the village catching. The first real downbeat lands **on** the cut. */
+const T_BROADSIDE = 3;
+/** The gauntlet. Full ahead through the skerries under fire. The most driven passage. */
+const T_GAUNTLET = 8;
+/** She runs aground. Peril, not failure — a hit, a scrape, and half a second of stripped texture. */
+const T_AGROUND = 10;
+/** How long the grounding holds the texture down. Half a second; a whole bar reads as a stall. */
+const T_AGROUND_END = 10.5;
+/** The fuse. Everything the sequencer was doing stops and a run of plucks climbs alone. */
+const T_FUSE = 13;
+/**
+ * **The white flash.** One frame of full-frame white, and the one instant in this file that
+ * cannot drift by a single frame. Everything else here is allowed to breathe.
+ */
+const T_FLASH = 13.53;
+/**
+ * Aftermath. The shore alight; four bells, slow and wide, over a pulse at a quarter strength.
+ *
+ * Also the end of the blind stretch: 0:13.6 to here is the half second the frame is still white,
+ * and nothing may be struck inside it. The only two things sounding there are the blast's own
+ * decay and one 2.3 kHz tone.
+ */
+const T_AFTERMATH = 14.2;
+/**
+ * Where the pulse comes back, and it is not {@link T_AFTERMATH}.
+ *
+ * Three hundred milliseconds later, because a kick drum is the one thing that would fill the tail
+ * of the blind stretch, and the picture is still recovering when the bells come in.
+ */
+const T_PULSE_RETURN = 14.5;
+/** First light. The palette washes mauve. Release, and the pulse is cut rather than faded. */
+const T_FIRST_LIGHT = 18;
+/** The title card. One clean resolution, struck here and still ringing when the card goes. */
+const T_TITLE = 21.5;
+/** The end card: the reveal. A chime over the chord's decay; nothing new is stated. */
+const T_REVEAL = 23.5;
+/** The install line, two seconds later. The last sound in the file, and the quietest struck one. */
+const T_INSTALL = 25.4;
 
 /**
  * Where the sequencer runs, in three windows.
  *
- * Every `from` is a landmark and every `to` is either a landmark or a deliberate hair before one.
- * The raid stops at 11.875 rather than at 12.0 so there is a 125 ms hole in front of the blast:
- * an impact with music underneath it is a mix, and an impact with nothing in front of it is an
- * impact. See {@link schedule} for why hitting an exact `to` takes a forced pump.
+ * Every boundary is a picture cut and a bar line at once, which is the only reason the handoffs
+ * work: 0:08 is both the cut to the gauntlet and the downbeat of a new song, so the texture
+ * changes with no gap and no overlap. The aftermath's window starts at 0:14.5 rather than at
+ * 0:14.2 because the blind half-second after the flash has to stay empty, and a kick drum inside
+ * it is the one thing that would fill it.
+ *
+ * See {@link schedule} for why hitting an exact `to` takes a forced pump and a subtraction.
  */
-const DECK_RAID = { from: T_SALVO, to: 11.875 };
-const DECK_EMBERS = { from: T_EMBERS, to: T_GAUNTLET };
-const DECK_DRIVE = { from: T_GAUNTLET, to: T_DAWN };
+const DECK_BROADSIDE = { from: T_BROADSIDE, to: T_GAUNTLET };
+const DECK_GAUNTLET = { from: T_GAUNTLET, to: T_FUSE };
+const DECK_AFTERMATH = { from: T_PULSE_RETURN, to: T_FIRST_LIGHT };
 
 // ---------------------------------------------------------------------------
 // Pitch. One key, walked a semitone at a time
@@ -153,11 +188,11 @@ function bell(f) {
       // The twelfth is a triangle with its corner at 9 kHz, and it is where the top octave of
       // this whole mix comes from. Two sines and a hammer measured 30 dB down up there and read
       // as a muffled thud with tinkling over it.
-      { wave: 'triangle', hz: f * 3, gain: 0.03, hold: 0.4, cutoff: 9000 },
-      { wave: 'noise', hz: 0, gain: 0.04, hold: 0.045, highpass: 2400, cutoff: 11000 },
+      { wave: 'triangle', hz: f * 3, gain: 0.036, hold: 0.4, cutoff: 12000 },
+      { wave: 'noise', hz: 0, gain: 0.05, hold: 0.045, highpass: 3000, cutoff: 14000 },
       // A real bell's upper partials die first, so this one is gone in a tenth of a second and
       // is not a whole-number ratio. Integer partials are an organ; 4.76 is metal.
-      { wave: 'sine', hz: f * 4.76, gain: 0.02, hold: 0.12 },
+      { wave: 'sine', hz: f * 4.76, gain: 0.024, hold: 0.16 },
     ],
   };
 }
@@ -165,7 +200,8 @@ function bell(f) {
 /**
  * The big one. Same physics, an octave of extra tail, and everything above 1.2 kHz taken off.
  *
- * Used exactly three times — the shockwave at 0:12 and the two lowest notes of the card — because
+ * Used exactly four times — the shockwave at 0:13.53, the two lowest notes of the title card, and one
+ * quiet re-strike under the reveal — because
  * a 4.5 s tail struck twice is a chord by accident, and because the only reason to pay for four
  * and a half seconds of decay is that something has to still be ringing when the file ends.
  */
@@ -178,7 +214,8 @@ function toll(f) {
       { wave: 'sine', hz: f * 1.2, gain: 0.05, hold: 2.4, cutoff: 1800 },
       { wave: 'sine', hz: f * 2, gain: 0.06, hold: 1.8, cutoff: 3000, delay: 0.006 },
       { wave: 'sine', hz: f * 3, gain: 0.028, hold: 0.7, cutoff: 6000 },
-      { wave: 'noise', hz: 0, gain: 0.05, hold: 0.055, highpass: 1200, cutoff: 7000 },
+      { wave: 'sine', hz: f * 4.76, gain: 0.018, hold: 0.22 },
+      { wave: 'noise', hz: 0, gain: 0.055, hold: 0.055, highpass: 1600, cutoff: 11000 },
     ],
   };
 }
@@ -221,7 +258,7 @@ function glint(f) {
     layers: [
       { wave: 'triangle', hz: f, gain: 0.14, hold: 0.42, cutoff: 4200 },
       { wave: 'sine', hz: f * 2, gain: 0.05, hold: 0.2, cutoff: 6200 },
-      { wave: 'noise', hz: 0, gain: 0.032, hold: 0.02, highpass: 3000, cutoff: 11000 },
+      { wave: 'noise', hz: 0, gain: 0.04, hold: 0.022, highpass: 3400, cutoff: 14000 },
     ],
   };
 }
@@ -232,7 +269,7 @@ function low(f) {
     bus: 'sfx',
     minGapMs: 200,
     layers: [
-      { wave: 'sine', hz: f, gain: 0.13, hold: 2.4, cutoff: 340 },
+      { wave: 'sine', hz: f, gain: 0.115, hold: 2, cutoff: 300 },
       { wave: 'triangle', hz: f * 2, gain: 0.045, hold: 0.8, cutoff: 600 },
     ],
   };
@@ -261,8 +298,9 @@ function hull() {
  * The hit on the muzzle flash. Percussion, not foley — the trailer has its own gunfire and a
  * score that also fires a gun is two guns.
  *
- * A body, a crack, and a low struck D twelve milliseconds behind them so that the loudest thing
- * in the first salvo has a pitch and belongs to the key.
+ * A body, a crack, and a low struck D twelve milliseconds behind them so the loudest thing in the
+ * broadside has a pitch and belongs to the key. Struck twice: on the broadside at 0:03, and harder
+ * on the grounding at 0:10, where it is a hull against rock rather than a gun.
  */
 function strike() {
   return {
@@ -296,24 +334,48 @@ function pass() {
 }
 
 /**
+ * What is left in your ears after the magazine. One sine, one and a half seconds, once.
+ *
+ * The picture found this rather than the numbers did: after the blast the top three octaves of
+ * the spectrogram were the darkest in the file, so the hole read as a *dull* rumble rather than as
+ * a held breath — which is the opposite of what a shockwave does to a listener. A lone D two
+ * octaves over the tune, with a 50 ms attack so it swells in behind the blast rather than being
+ * struck with it, is the whole fix and it is one oscillator.
+ *
+ * It is also the only unfiltered tone in the file. A low-pass on a 2.3 kHz sine removes nothing
+ * and costs a node.
+ */
+function ring() {
+  return {
+    bus: 'sfx',
+    minGapMs: 900,
+    layers: [{ wave: 'sine', hz: hz('D7'), gain: 0.042, hold: 1.8, attack: 0.05 }],
+  };
+}
+
+/**
  * The magazine, at 0:12. The loudest event in the piece and the only one that stops the trailer
  * rather than moving it.
  *
- * Sub falling from 96 Hz to 34, a body of low noise, a low triangle a beat behind so the blast has
- * a pitch, and — the layer that makes it a magazine rather than a kick drum — 1.1 s of high hiss
- * with a slow attack, which is debris. The sub is deliberately shorter than it wants to be: at
- * 1.5 s the hole after it measured 2 dB below the montage it was the opposite of, because the
- * impact was filling the silence it had just made.
+ * Sub falling from 96 Hz to 34, a body of low noise, a low triangle behind them so the blast has a
+ * pitch, and — the layer that makes it a magazine rather than a kick drum — half a second of high
+ * hiss with a slow attack, which is debris.
+ *
+ * **Every hold here is shorter than it wants to be, and that is measured rather than tasteful.**
+ * At 0.85 s of sub and 1.1 s of debris the blind stretch the picture leaves at 0:13.6–0:14.2 —
+ * the half second the frame is still white — came out at −18.4 dB RMS, which is 1 dB *under the
+ * gauntlet it had just interrupted*. The impact was filling the silence it had itself made. Halved,
+ * it is a violent thing that gets out of the way, which is louder in the only sense that matters.
  */
 function detonate() {
   return {
     bus: 'sfx',
     minGapMs: 800,
     layers: [
-      { wave: 'sine', hz: 96, toHz: 34, gain: 0.21, hold: 0.85, cutoff: 260 },
-      { wave: 'noise', hz: 0, gain: 0.1, hold: 0.42, highpass: 90, cutoff: 1400 },
-      { wave: 'triangle', hz: hz('D3'), toHz: hz('D2'), gain: 0.055, hold: 0.7, cutoff: 620, delay: 0.014 },
-      { wave: 'noise', hz: 0, gain: 0.05, hold: 1.1, attack: 0.02, highpass: 1600, cutoff: 7000 },
+      { wave: 'sine', hz: 96, toHz: 34, gain: 0.33, hold: 0.28, cutoff: 260 },
+      { wave: 'noise', hz: 0, gain: 0.16, hold: 0.22, highpass: 90, cutoff: 1400 },
+      { wave: 'triangle', hz: hz('D3'), toHz: hz('D2'), gain: 0.07, hold: 0.3, cutoff: 620, delay: 0.014 },
+      { wave: 'noise', hz: 0, gain: 0.06, hold: 0.35, attack: 0.02, highpass: 1600, cutoff: 7000 },
     ],
   };
 }
@@ -331,12 +393,12 @@ function air() {
     minGapMs: 700,
     layers: [
       { wave: 'noise', hz: 0, gain: 0.032, hold: 1.7, attack: 0.5, highpass: 260, cutoff: 1300, pan: -0.3 },
-      { wave: 'noise', hz: 0, gain: 0.02, hold: 1.3, attack: 0.75, highpass: 1500, cutoff: 4800, pan: 0.4 },
+      { wave: 'noise', hz: 0, gain: 0.024, hold: 1.3, attack: 0.75, highpass: 1800, cutoff: 6500, pan: 0.4 },
     ],
   };
 }
 
-/** Dawn: the same idea an octave brighter and twice as slow, so the palette washing has a sound. */
+/** First light: the same idea an octave brighter and twice as slow, so the palette washing has a sound. */
 function wash() {
   return {
     bus: 'sfx',
@@ -372,7 +434,7 @@ function chime(f) {
 /** Pitched instruments, by the name an event names them with. */
 const PITCHED = { bell, toll, chime, ghost, glint, low };
 /** Unpitched instruments. Their id is just the instrument name. */
-const FIXED = { hull, strike, pass, detonate, air, wash };
+const FIXED = { hull, strike, pass, ring, detonate, air, wash };
 
 // ---------------------------------------------------------------------------
 // The one-shots, in time order
@@ -428,138 +490,177 @@ function events() {
   const out = [];
 
   // --- 0:00 cold open -----------------------------------------------------
-  // Two engine thumps and the sea. The whole act is four events, because everything after 0:03
-  // depends on there being somewhere to go; open big here and the blast at 0:12 is a level.
-  out.push(at(T_OPEN, 'air', undefined, 0.72, undefined, 'floor'));
-  out.push(at(T_OPEN + 0.15, 'hull', undefined, 0.85, 0, 'floor'));
-  out.push(at(1.7, 'hull', undefined, 0.72, 0, 'floor'));
+  // Two engine thumps and the sea. The whole act is five events, because everything after 0:03
+  // depends on there being somewhere to go; open big here and the flash at 0:13.53 is a level.
+  out.push(at(T_OPEN, 'air', undefined, 0.42, undefined, 'floor'));
+  out.push(at(T_OPEN + 0.15, 'hull', undefined, 0.58, 0, 'floor'));
+  out.push(at(1.7, 'hull', undefined, 0.46, 0, 'floor'));
   // The lamp, and the thing out past it. Two notes a semitone apart is the entire piece stated
   // before the piece starts, and it costs twenty voices.
-  struck(out, 0.6, 'bell', 'D5', 0.5, -0.22);
-  struck(out, 2.1, 'bell', 'Eb5', 0.44, 0.18);
+  struck(out, 0.6, 'bell', 'D5', 0.34, -0.22);
+  struck(out, 2.1, 'bell', 'Eb5', 0.3, 0.18);
   // The inhale. Air has a 0.5 s attack and a 1.7 s hold, so struck here it peaks exactly on the
-  // flash and is already falling when the sequencer takes over. Nothing else lifts into 0:03.
-  out.push(at(2.35, 'air', undefined, 0.6, undefined, 'floor'));
+  // cut and is already falling when the sequencer takes over. Nothing else lifts into 0:03.
+  out.push(at(2.35, 'air', undefined, 0.44, undefined, 'floor'));
 
-  // --- 0:03 the first salvo -----------------------------------------------
+  // --- 0:03 broadside -----------------------------------------------------
   // The hit, the root, and a low toll, all on the same instant as the sequencer's downbeat.
-  out.push(at(T_SALVO, 'strike', undefined, 1, 0, 'floor'));
-  out.push(at(T_SALVO, 'low', 'D2', 0.62, 0, 'floor'));
-  struck(out, T_SALVO, 'toll', 'D3', 0.5, 0.1);
+  out.push(at(T_BROADSIDE, 'strike', undefined, 1, 0, 'floor'));
+  out.push(at(T_BROADSIDE, 'low', 'D2', 0.62, 0, 'floor'));
+  struck(out, T_BROADSIDE, 'toll', 'D3', 0.5, 0.1);
   // One bell a bar, each on the note the sequencer is forbidden: F is the minor third over the D
   // bars, G is the third of the Eb bar, Bb is the flat sixth. The sequencer plays roots, fifths
   // and octaves and *cannot* play any of these — a third transposed by the progression would be
   // a Gb over the Eb bar, which is not in the key.
-  out.push(at(3.5, 'glint', 'A5', 0.46, 0.2, 'melody'));
   struck(out, 4, 'bell', 'F5', 0.52, -0.16);
-  out.push(at(4.5, 'glint', 'D6', 0.4, 0.24, 'melody'));
   struck(out, 5, 'bell', 'G5', 0.52, 0.14);
-  out.push(at(6, 'glint', 'Bb5', 0.46, -0.2, 'melody'));
-  out.push(at(6.5, 'glint', 'F5', 0.42, 0.18, 'melody'));
-  out.push(at(6.75, 'glint', 'A5', 0.48, -0.12, 'melody'));
-
-  // --- 0:07 escalation ----------------------------------------------------
-  // The sequencer gains a layer on every bar line; this column supplies the crescendo, because
-  // `intensity` gates whole tracks on and off and there is no per-track gain anywhere in the
-  // package. Every decibel of the build between 0:07 and 0:12 is written here by hand.
-  const climb = [
-    [7, 'A5', 0.5, -0.18],
-    [7.25, 'F5', 0.46, 0.16],
-    [7.5, 'D6', 0.54, -0.1],
-    [8, 'Bb5', 0.54, 0.2],
-    [8.375, 'G5', 0.5, -0.16],
-    [8.75, 'Eb6', 0.6, 0.12],
-    [9, 'C6', 0.6, -0.14],
-    [9.25, 'G5', 0.52, 0.18],
-    [9.5, 'Eb6', 0.64, -0.1],
-    [9.75, 'C6', 0.58, 0.14],
-    [10.5, 'D6', 0.68, 0.16],
-    [10.625, 'A5', 0.6, -0.18],
-    [10.75, 'F6', 0.72, 0.1],
+  struck(out, 6, 'bell', 'Bb5', 0.5, -0.14);
+  // The plucked line, thickening a bar at a time. `intensity` gates whole tracks on and off and
+  // there is no per-track gain anywhere in the package, so every decibel of crescendo across
+  // these five seconds is written by hand in this column.
+  const broadside = [
+    [3.5, 'A5', 0.44, 0.2],
+    [4.5, 'D6', 0.42, 0.24],
+    [5.5, 'Bb5', 0.46, -0.2],
+    [5.75, 'G5', 0.44, 0.16],
+    [6.5, 'F5', 0.48, 0.18],
+    [6.75, 'A5', 0.5, -0.12],
+    [7, 'C6', 0.54, -0.16],
+    [7.25, 'G5', 0.5, 0.14],
+    [7.5, 'Eb6', 0.58, -0.1],
+    [7.75, 'C6', 0.56, 0.18],
   ];
-  for (const [time, note, gain, pan] of climb) out.push(at(time, 'glint', note, gain, pan, 'melody'));
-  // The near miss. Hard left, because the boat went past on one side and not on both.
-  out.push(at(10.4, 'pass', undefined, 0.95, -0.55, 'floor'));
+  for (const [time, note, gain, pan] of broadside) out.push(at(time, 'glint', note, gain, pan, 'melody'));
 
-  // --- 0:11 the run into the blast ----------------------------------------
-  // Sixteenths into thirty-seconds up the scale, gain climbing, and it stops at 11.84 — 160 ms
-  // of nothing in front of the magazine. An impact with music under it is a mix.
-  const run = [
-    [11, 'D5'],
-    [11.125, 'F5'],
-    [11.25, 'G5'],
-    [11.375, 'A5'],
-    [11.5, 'Bb5'],
-    [11.5625, 'C6'],
-    [11.625, 'D6'],
-    [11.6875, 'Eb6'],
-    [11.75, 'F6'],
-    [11.78125, 'G6'],
-    [11.8125, 'A6'],
-  ];
-  run.forEach(([time, note], index) => {
-    out.push(at(time, 'glint', note, 0.62 + index * 0.032, index % 2 === 0 ? -0.16 : 0.16, 'melody'));
-  });
-
-  // --- 0:12 the magazine --------------------------------------------------
-  // The blast, and a toll struck with it whose 4.5 s tail *is* the content of the silence after
-  // it. Without that, the hole is a file that stopped rather than a shockwave.
-  out.push(at(T_DETONATE, 'detonate', undefined, 1, 0, 'floor'));
-  struck(out, T_DETONATE, 'toll', 'D3', 0.92, 0);
-  // The air rushing back, 350 ms behind the blast, peaking three quarters of a second after it.
-  out.push(at(T_DETONATE + 0.35, 'air', undefined, 0.8, undefined, 'floor'));
-
-  // --- 0:13 the shore alight ----------------------------------------------
-  // A single low fifth under it, then five bells climbing and accelerating — 1.5 s, 1.0, 0.75,
-  // 0.5 — so the four seconds before the gauntlet lean forward without getting louder. The
-  // sequencer comes back at a quarter of its intensity and adds one layer at 0:15.
-  out.push(at(T_EMBERS, 'low', 'A1', 0.55, 0, 'floor'));
-  struck(out, T_EMBERS, 'bell', 'A3', 0.5, -0.2);
-  struck(out, 14.5, 'bell', 'D4', 0.5, 0.16);
-  struck(out, 15.5, 'bell', 'F4', 0.52, -0.14);
-  struck(out, 16.25, 'bell', 'A4', 0.54, 0.12);
-  struck(out, 16.75, 'bell', 'D5', 0.56, -0.1);
-
-  // --- 0:17 the gauntlet --------------------------------------------------
-  // The motif, whole, for the first time: D Eb A F on the half beat. Then the same four notes an
-  // octave up at twice the speed, on the pluck, and then nothing — the melody runs out before the
-  // pulse does, which is what makes 0:21 read as an ending rather than as a fade.
-  out.push(at(T_GAUNTLET, 'low', 'D2', 0.66, 0, 'floor'));
+  // --- 0:08 the gauntlet --------------------------------------------------
+  // The motif, whole, for the first time: D Eb A F on the half beat, over a pedal D and four on
+  // the floor. `Eb` up to `A` is a tritone and it is the only one in the piece.
+  out.push(at(T_GAUNTLET, 'low', 'D2', 0.55, 0, 'floor'));
   MOTIF.forEach((note, index) => {
-    struck(out, T_GAUNTLET + index * 0.5, 'bell', note, 0.58 + index * 0.04, [-0.18, 0.16, -0.12, 0.1][index]);
-  });
-  MOTIF_HIGH.forEach((note, index) => {
-    out.push(at(19.5 + index * 0.25, 'glint', note, 0.6 + index * 0.05, index % 2 === 0 ? -0.2 : 0.2, 'melody'));
+    struck(out, T_GAUNTLET + index * 0.5, 'bell', note, 0.53 + index * 0.045, [-0.18, 0.16, -0.12, 0.1][index]);
   });
 
-  // --- 0:21 dawn ----------------------------------------------------------
-  // The sequencer stops on the bar line and is not faded. Three bells falling, slowing, and the
-  // wash under them. The fourth note of the fall is the card, two seconds later.
-  out.push(at(T_DAWN, 'wash', undefined, 0.95, undefined, 'floor'));
-  out.push(at(T_DAWN, 'low', 'D2', 0.4, 0, 'floor'));
-  const falling = [T_DAWN + 0.05, 21.6, 22.25];
-  DAWN_FALL.forEach((note, index) => {
-    struck(out, falling[index], 'bell', note, 0.5 - index * 0.04, [0.14, -0.12, 0.08][index]);
-  });
-
-  // --- 0:23 the card ------------------------------------------------------
-  // D minor, struck low to high by one hand: eight to seventy milliseconds apart, which is what a
-  // person playing a chord sounds like and is also worth about a decibel of peak against striking
-  // them together. No Eb anywhere in it — that absence is the resolution.
-  out.push(at(T_CARD, 'low', 'D2', 0.95, 0, 'floor'));
-  const chord = [
-    ['toll', 'D3', 0.008, 0.62, -0.08],
-    ['toll', 'D4', 0.02, 0.46, 0.1],
-    ['bell', 'A4', 0.032, 0.44, -0.14],
-    ['bell', 'D5', 0.044, 0.52, 0.06],
-    ['bell', 'F5', 0.058, 0.48, -0.05],
-    ['bell', 'A5', 0.07, 0.36, 0.16],
-    ['bell', 'D6', 0.086, 0.3, -0.18],
+  // --- 0:10 aground -------------------------------------------------------
+  // Peril, not failure, and the difference is entirely in what happens *after* it. A hit, a scrape
+  // thrown to one side, and the flat second struck hard over the pedal — then half a second with
+  // the ostinato, both hats and the drive gone, so the boat is drifting rather than stopped. The
+  // texture comes back at 0:10.5 harder than it left, which is the whole "not failure".
+  out.push(at(T_AGROUND, 'strike', undefined, 0.5, 0, 'floor'));
+  out.push(at(T_AGROUND + 0.02, 'pass', undefined, 0.6, 0.5, 'floor'));
+  struck(out, T_AGROUND, 'bell', 'Eb5', 0.42, -0.15);
+  // Coming back. Two plucks on the half beat and then the motif again, an octave up and twice as
+  // fast — the same four notes the bells played at 0:08, which is what makes the recovery read as
+  // the same boat rather than as a new passage.
+  const recover = [
+    [10.75, 'A5', 0.5, 0.2],
+    [11, 'F6', 0.56, -0.18],
+    [11.25, 'D6', 0.54, 0.14],
   ];
-  for (const [kind, note, offset, gain, pan] of chord) struck(out, T_CARD + offset, kind, note, gain, pan);
-  // The reveal, two and a half seconds later, on the fifth that is still ringing underneath. One
-  // note: the card has a chord already and a second chord here would be a second ending.
-  struck(out, T_REVEAL, 'chime', 'A5', 0.4, 0.1);
+  for (const [time, note, gain, pan] of recover) out.push(at(time, 'glint', note, gain, pan, 'melody'));
+  MOTIF_HIGH.forEach((note, index) => {
+    out.push(at(11.5 + index * 0.25, 'glint', note, 0.62 + index * 0.05, index % 2 === 0 ? -0.2 : 0.2, 'melody'));
+  });
+  // The last two before the fuse, so the run of plucks at 0:13 arrives as an acceleration of
+  // something already moving rather than as a new idea.
+  out.push(at(12.5, 'glint', 'Bb5', 0.62, -0.16, 'melody'));
+  out.push(at(12.75, 'glint', 'D6', 0.66, 0.14, 'melody'));
+
+  // --- 0:13 the fuse ------------------------------------------------------
+  // Sixteenths into thirty-seconds into sixty-fourths, climbing an octave and a half in four
+  // hundred milliseconds, and it stops at 13.40625 — 124 ms of nothing in front of the flash. An impact with
+  // music underneath it is a mix; an impact with nothing in front of it is an impact.
+  const fuse = [
+    [13, 'D5'],
+    [13.125, 'F5'],
+    [13.25, 'A5'],
+    [13.3125, 'C6'],
+    [13.375, 'D6'],
+    [13.40625, 'F6'],
+  ];
+  fuse.forEach(([time, note], index) => {
+    out.push(at(time, 'glint', note, 0.66 + index * 0.05, index % 2 === 0 ? -0.16 : 0.16, 'melody'));
+  });
+  // The breath. Air's attack is 0.5 s, so struck at 13.03 it peaks within twenty milliseconds of
+  // the white frame and is the only thing rising through the ninety-millisecond gap.
+  out.push(at(T_FUSE + 0.03, 'air', undefined, 0.32, undefined, 'floor'));
+
+  // --- 0:13.53 the white flash --------------------------------------------
+  // The loudest instant in the file, and the only one that stops the trailer rather than moving
+  // it. The toll struck with it has a four-and-a-half-second tail, and that tail is the entire
+  // content of the blind half-second afterwards: without it the wash is a file that stopped.
+  out.push(at(T_FLASH, 'detonate', undefined, 1, 0, 'floor'));
+  // The toll is struck at a *fifth* of the strength the same note gets on the title card, and the
+  // reason is the blind stretch rather than the blast. At 0.5 its 146 Hz hum measured −20.9 dB in
+  // the 100–300 band across 0:13.6–0:14.2, which made the half second the picture is white the
+  // boomiest passage in the file — the exact opposite of air being sucked out. What is left in
+  // there now is a lone 2.3 kHz tone, which is what a shockwave leaves in a person.
+  struck(out, T_FLASH, 'toll', 'D3', 0.2, 0);
+  // The tone it left in your ears, and the air coming back behind it. Between them they are the
+  // only things in 0:13.6–0:14.2, which is the stretch the picture is still white through.
+  out.push(at(T_FLASH + 0.06, 'ring', undefined, 0.9, 0.12, 'floor'));
+  // Air's attack is half a second, so this is placed by where it *peaks* and not by where it is
+  // struck: at 0:13.88 it swelled to full inside the blind stretch and was the loudest thing in
+  // it. Here it arrives as the picture comes back.
+  out.push(at(T_FLASH + 0.62, 'air', undefined, 0.44, undefined, 'floor'));
+
+  // --- 0:14.2 aftermath ---------------------------------------------------
+  // Four bells, slow and *decelerating* — 1.1 s, 1.0, 0.9 — over the pulse at a quarter strength.
+  // Deliberately not a rise into first light: the shore burning is not a build, and an accelerando
+  // here would make 0:18 a climax instead of a cut.
+  out.push(at(T_AFTERMATH, 'low', 'A1', 0.26, 0, 'floor'));
+  struck(out, T_AFTERMATH + 0.1, 'bell', 'A3', 0.4, -0.2);
+  struck(out, 15.4, 'bell', 'D4', 0.44, 0.16);
+  struck(out, 16.4, 'bell', 'F4', 0.46, -0.14);
+  struck(out, 17.3, 'bell', 'A4', 0.44, 0.12);
+
+  // --- 0:18 first light ---------------------------------------------------
+  // The sequencer stops on the cut and is not faded. Three bells falling, slowing, with the wash
+  // under them — and the fourth note of that fall is the card, three and a half seconds later.
+  out.push(at(T_FIRST_LIGHT, 'wash', undefined, 0.68, undefined, 'floor'));
+  out.push(at(T_FIRST_LIGHT, 'low', 'D2', 0.4, 0, 'floor'));
+  // The boat, still running, alone again. The same two thumps that opened the film, in the same
+  // order and a little quieter — the only literal repeat in twenty-eight seconds, and the reason
+  // the last stretch reads as *coming back* rather than as running out of music.
+  out.push(at(T_FIRST_LIGHT + 0.2, 'hull', undefined, 0.42, 0, 'floor'));
+  out.push(at(20.3, 'hull', undefined, 0.34, 0, 'floor'));
+  // A second wash with a one-second attack, so first light is still opening when the card lands.
+  out.push(at(20, 'wash', undefined, 0.5, undefined, 'floor'));
+  const falling = [T_FIRST_LIGHT + 0.1, 18.95, 20.05];
+  DAWN_FALL.forEach((note, index) => {
+    struck(out, falling[index], 'bell', note, 0.44 - index * 0.04, [0.14, -0.12, 0.08][index]);
+  });
+
+  // --- 0:21.5 the title card ----------------------------------------------
+  // D minor, struck low to high by one hand: eight to eighty-six milliseconds apart, which is what
+  // a person playing a chord sounds like and is also worth about a decibel of peak against
+  // striking them together. No Eb anywhere in it — that absence is the resolution.
+  out.push(at(T_TITLE, 'low', 'D2', 0.95, 0, 'floor'));
+  const chord = [
+    ['toll', 'D3', 0.008, 0.56, -0.08],
+    ['toll', 'D4', 0.02, 0.41, 0.1],
+    ['bell', 'A4', 0.032, 0.39, -0.14],
+    ['bell', 'D5', 0.044, 0.46, 0.06],
+    ['bell', 'F5', 0.058, 0.42, -0.05],
+    ['bell', 'A5', 0.07, 0.32, 0.16],
+    ['bell', 'D6', 0.086, 0.26, -0.18],
+  ];
+  for (const [kind, note, offset, gain, pan] of chord) struck(out, T_TITLE + offset, kind, note, gain, pan);
+
+  // --- 0:23.5 the reveal, and 0:25.4 the install line ---------------------
+  // Two soft chimes over a chord that is still ringing, and nothing else. The card has a
+  // resolution already; a second chord here would be a second ending, and an end card that lands
+  // its own chord teaches the viewer that the film was over two seconds ago.
+  // The toll is what actually carries the end card. Bells decay at about 20 dB a second here —
+  // that is `exponentialRampToValueAtTime` to the floor and there is no second stage to ask for —
+  // so the chord struck at 0:21.5 is 18 dB down by the reveal and effectively gone a second later.
+  // Re-striking the bass of the same chord at a third of its strength is the only way to have a
+  // resolution still ringing at 0:28, and it states nothing new. Its tail lands at 28.006 s,
+  // fourteen milliseconds inside the file, which `problems` checks rather than assumes.
+  out.push(at(T_REVEAL, 'toll', 'D3', 0.3, -0.06, 'melody'));
+  struck(out, T_REVEAL + 0.014, 'chime', 'A5', 0.55, 0.1);
+  out.push(at(T_REVEAL + 0.026, 'bell', 'D5', 0.3, -0.12, 'melody'));
+  out.push(at(T_REVEAL + 0.04, 'bell', 'A4', 0.26, 0.14, 'melody'));
+  struck(out, T_INSTALL, 'chime', 'D5', 0.34, -0.08);
 
   out.sort((a, b) => a.at - b.at);
   return out;
@@ -615,7 +716,11 @@ const KICK = { wave: 'sine', gain: 0.15, hold: 0.12, cutoff: 380, sweepTo: 0.38,
 const BEATER = { wave: 'noise', gain: 0.03, hold: 0.014, highpass: 700, cutoff: 4000 };
 
 /**
- * The raid, 0:03–0:12 and again under the embers at 0:13.
+ * The raid: the broadside at 0:03–0:08, and the same song again under the aftermath at 0:14.5–0:18.
+ *
+ * Played twice at two different intensities rather than written twice, and that is the point of it:
+ * the thing that comes back after the magazine is the *same machine* restarting, which is a whole
+ * dramatic idea that costs one extra `deck.play` and no new data.
  *
  * `D – Eb – D – C`: the bass moves a *semitone* and then a whole tone down, which is a chase and
  * not a cadence. The same four bars started on the Eb would read as a resolution arriving; started
@@ -636,19 +741,19 @@ export const SONG_RAID = {
     { id: 'beat', voice: BEATER, notes: [{ step: 0 }, { step: 8 }] },
     {
       id: 'bass',
-      voice: { wave: 'triangle', gain: 0.075, hold: 0.5, cutoff: 300 },
+      voice: { wave: 'triangle', gain: 0.075, hold: 0.75, cutoff: 300 },
       notes: [{ step: 0 }, { step: 8, semis: 12 }, { step: 11, semis: 7 }],
     },
     {
       // The offbeat. First layer in, and the one that turns a pulse into a boat moving.
       id: 'tick',
-      voice: { wave: 'noise', gain: 0.045, hold: 0.022, highpass: 5200, cutoff: 12000 },
+      voice: { wave: 'noise', gain: 0.045, hold: 0.03, highpass: 5200, cutoff: 12000 },
       notes: [{ step: 2 }, { step: 6 }, { step: 10 }, { step: 14 }],
       minIntensity: 0.4,
     },
     {
       id: 'drive',
-      voice: { wave: 'triangle', gain: 0.085, hold: 0.16, cutoff: 3600 },
+      voice: { wave: 'triangle', gain: 0.085, hold: 0.3, cutoff: 3600 },
       // Roots, fifths and octaves only. The deck transposes the whole track by the bar's root, so
       // a third here would be minor over the D bars and diminished over the Eb.
       notes: [
@@ -657,6 +762,7 @@ export const SONG_RAID = {
         { step: 4, semis: 36 },
         { step: 6, semis: 31 },
         { step: 7, semis: 24 },
+        { step: 8, semis: 24 },
         { step: 10, semis: 36 },
         { step: 11, semis: 31 },
         { step: 13, semis: 24 },
@@ -669,7 +775,7 @@ export const SONG_RAID = {
     { id: 'kick2', voice: KICK, notes: [{ step: 4 }, { step: 12 }], minIntensity: 0.8 },
     {
       id: 'hat',
-      voice: { wave: 'noise', gain: 0.05, hold: 0.026, highpass: 7500, cutoff: 13500 },
+      voice: { wave: 'noise', gain: 0.05, hold: 0.034, highpass: 7500, cutoff: 13500 },
       notes: [{ step: 0 }, { step: 2 }, { step: 4 }, { step: 6 }, { step: 8 }, { step: 10 }, { step: 12 }, { step: 14 }],
       minIntensity: 0.85,
     },
@@ -677,10 +783,21 @@ export const SONG_RAID = {
       // A struck double octave on the downbeat of the Eb and C bars only, so the loop stops
       // announcing where it begins.
       id: 'clang',
-      voice: { wave: 'triangle', gain: 0.09, hold: 0.7, cutoff: 4200 },
+      voice: { wave: 'triangle', gain: 0.09, hold: 1, cutoff: 4200 },
       notes: [{ step: 0, semis: 36 }],
       bars: [1, 3],
       minIntensity: 0.7,
+    },
+    {
+      // The one track that sustains, and it exists because of a measurement rather than a taste:
+      // the escalation read 1 dB *quieter* than the bar before it, because the sequencer's parts
+      // are all short and the hand-struck line was carrying the whole crescendo. A held fifth in
+      // the three steps nothing else speaks on is the cheapest energy in the file.
+      id: 'swell',
+      voice: { wave: 'triangle', gain: 0.06, hold: 0.9, cutoff: 2400 },
+      notes: [{ step: 5, semis: 19 }, { step: 9, semis: 19 }, { step: 15, semis: 12 }],
+      melodic: true,
+      minIntensity: 0.65,
     },
   ],
 };
@@ -697,19 +814,26 @@ export const SONG_DRIVE = {
   bpm: BPM,
   steps: 16,
   rootHz: hz('D2'),
-  progression: [0, 0],
+  // Three bars of pedal D, so the bar mask can put the sixteenth hat on the two bars *after* the
+  // grounding and not on the one before it. Two bars would put it on half the entrance instead.
+  progression: [0, 0, 0],
   seed: 23,
   tracks: [
     { id: 'kick', voice: KICK, notes: [{ step: 0 }, { step: 4 }, { step: 8 }, { step: 12 }] },
     { id: 'beat', voice: BEATER, notes: [{ step: 0 }, { step: 4 }, { step: 8 }, { step: 12 }] },
     {
       id: 'bass',
-      voice: { wave: 'triangle', gain: 0.07, hold: 0.28, cutoff: 320 },
+      voice: { wave: 'triangle', gain: 0.085, hold: 0.42, cutoff: 320 },
       notes: [{ step: 0 }, { step: 3 }, { step: 6 }, { step: 8, semis: 12 }, { step: 11 }, { step: 14 }],
     },
     {
+      // The ostinato, and the reason the grounding at 0:10 has a sound. `minIntensity` is a
+      // threshold rather than a fade, so dropping the intensity to 0.3 for half a second removes
+      // this, both hats and nothing else — kick, beater and bass keep going underneath, which is
+      // a boat that has stopped moving rather than a boat that has stopped.
       id: 'ost',
-      voice: { wave: 'triangle', gain: 0.075, hold: 0.14, cutoff: 3800 },
+      voice: { wave: 'triangle', gain: 0.095, hold: 0.26, cutoff: 3800 },
+      minIntensity: 0.5,
       notes: [
         { step: 1, semis: 24 },
         { step: 2, semis: 31 },
@@ -727,14 +851,18 @@ export const SONG_DRIVE = {
     },
     {
       id: 'hat',
-      voice: { wave: 'noise', gain: 0.05, hold: 0.024, highpass: 7500, cutoff: 13500 },
+      voice: { wave: 'noise', gain: 0.055, hold: 0.03, highpass: 7500, cutoff: 13500 },
       notes: [{ step: 2 }, { step: 6 }, { step: 10 }, { step: 14 }],
+      minIntensity: 0.4,
     },
     {
+      // Sixteenths, and only from the second bar — 0:10 onward — so the densest thing in the file
+      // arrives on the recovery and not on the entrance.
       id: 'hat2',
-      voice: { wave: 'noise', gain: 0.034, hold: 0.018, highpass: 9000, cutoff: 15000 },
+      voice: { wave: 'noise', gain: 0.04, hold: 0.022, highpass: 9000, cutoff: 15000 },
       notes: [{ step: 1 }, { step: 3 }, { step: 5 }, { step: 7 }, { step: 9 }, { step: 11 }, { step: 13 }, { step: 15 }],
-      bars: [1],
+      bars: [1, 2],
+      minIntensity: 0.75,
     },
   ],
 };
@@ -748,14 +876,17 @@ export const SONG_DRIVE = {
  * change is at 0:15 rather than 0:14.
  */
 function intensityAt(seconds) {
-  if (seconds < 5) return 0.25;
-  if (seconds < 7) return 0.45;
-  if (seconds < 9) return 0.65;
-  if (seconds < 11) return 0.85;
-  if (seconds < T_DETONATE) return 1;
-  if (seconds < 15) return 0.3;
-  if (seconds < T_GAUNTLET) return 0.6;
-  return 1;
+  // Broadside: one more layer on each of the two bar lines inside it.
+  if (seconds < 5) return 0.3;
+  if (seconds < 7) return 0.6;
+  if (seconds < T_GAUNTLET) return 0.9;
+  // The gauntlet opens at full and stays there. The only movement is the grounding.
+  if (seconds < T_AGROUND) return 1;
+  if (seconds < T_AGROUND_END) return 0.3;
+  if (seconds < T_FUSE) return 1;
+  // Aftermath: a quarter strength, and one layer back on the bar line at 0:16.5.
+  if (seconds < 16.5) return 0.25;
+  return 0.55;
 }
 
 // ---------------------------------------------------------------------------
@@ -783,10 +914,17 @@ export const MASTER_GAIN = 1;
  * normalizer: an adaptive one would make the level a function of the loudest accident in the take,
  * and two renders of two edits would then sit at two different levels.
  *
- * `render.mjs` prints the peak after applying it, so this number is checked on every render
- * rather than trusted. See the report for the measurement it came from.
+ * The raw render peaks at 0.3596 — −8.9 dBFS — which is where the arithmetic left it and is
+ * nowhere near a delivery level. 0.3596 × 2.478 = 0.8911, which is −1.00 dBFS. `render.mjs` prints
+ * the peak *after* applying it and `build.mjs` refuses a master outside a window around it, so
+ * this number is checked on every render rather than trusted.
+ *
+ * **Nothing inside `@latticekit/audio` could do this.** `Mixer.setGain` clamps into `[0, 1]`,
+ * `PlayOptions.gain` clamps into `[0, 1]`, and every recipe gain is a fraction chosen so the
+ * validators can prove one sound cannot clip. There is no gain stage in the package that can
+ * exceed one, so the mix arrives 9 dB quiet and the only place to fix it is here.
  */
-export const OUTPUT_TRIM = 2.27;
+export const OUTPUT_TRIM = 2.478;
 
 /**
  * The voice ceiling, raised, and the one place this score argues with the package.
@@ -874,9 +1012,9 @@ export function schedule(context, options = {}) {
     // fade is zero is skipped outright. Any positive fade therefore silently deletes the downbeat
     // the song starts on — which here is the hit on the muzzle flash.
     const windows = [
-      { window: DECK_RAID, song: SONG_RAID },
-      { window: DECK_EMBERS, song: SONG_RAID },
-      { window: DECK_DRIVE, song: SONG_DRIVE },
+      { window: DECK_BROADSIDE, song: SONG_RAID },
+      { window: DECK_GAUNTLET, song: SONG_DRIVE },
+      { window: DECK_AFTERMATH, song: SONG_RAID },
     ];
     for (const { window, song } of windows) {
       timeline.push({ at: window.from, order: 0, run: () => deck.play(song, { fadeSec: 0 }) });
@@ -925,25 +1063,54 @@ export function schedule(context, options = {}) {
   return { audio, deck, refused };
 }
 
-/** The last instant a sound is still ramping, measured from its play. Longest layer wins. */
-function tailSec(definition) {
-  let longest = 0;
+/**
+ * The exponential floor every decay in this package lands on. `render.ts` writes
+ * `exponentialRampToValueAtTime(0.0001, end)` because a ramp to zero is a spec violation, so this
+ * is the shape of *every* envelope here and there is no way to ask for another.
+ */
+const GAIN_FLOOR = 0.0001;
+
+/**
+ * How loud a sound still is when the file ends, in linear gain, summed over its layers.
+ *
+ * This is the check that matters at the end of a trailer and no validator in the package can make
+ * it, because nothing in `@latticekit/audio` knows a file has an end. The naive version — "does
+ * any tail cross `DURATION_SEC`" — is far too strict: a bell struck at 0:25.5 with a three-second
+ * hold formally runs to 0:28.5 and is at **−71 dBFS** by 0:28, which is not a truncation, it is
+ * silence. What matters is the level of the step, so that is what is computed.
+ *
+ * The envelope is `peak → GAIN_FLOOR` exponentially over `attack + hold`, which is
+ * `peak · (floor / peak)^(t / life)`. Tier B — `**` is `pow` — and that is fine here and only
+ * here: this number is printed to a human and is never hashed and never persisted.
+ */
+function levelAtCut(event, definition) {
+  let total = 0;
   for (const layer of definition.layers) {
-    const end = (layer.delay ?? 0) + (layer.attack ?? 0.006) + layer.hold;
-    if (end > longest) longest = end;
+    const life = (layer.attack ?? 0.006) + Math.max(0, layer.hold);
+    const begins = event.at + (layer.delay ?? 0);
+    const t = DURATION_SEC - begins;
+    if (t <= 0 || t >= life) continue;
+    const peak = layer.gain * (event.gain ?? 1);
+    if (peak <= GAIN_FLOOR) continue;
+    // @tier-b: presentation only. Printed to a human, never hashed and never persisted.
+    total += peak * (GAIN_FLOOR / peak) ** (t / life);
   }
-  return longest;
+  return total;
 }
+
+/** Anything quieter than this at the cut is inaudible under a hard cut to silence. −60 dBFS. */
+const TRUNCATION_CEILING = 0.001;
 
 /**
  * Everything the package can tell us about this score without rendering it, plus two things it
  * cannot. Run before every render — a table fault is a worse sound with no error.
  *
- * The two extra checks are both about the file's edges, which no validator in the package knows
- * exist: an event outside `[0, DURATION_SEC]` is written to a file that has already ended, and a
- * *tail* that runs past the end is a decay chopped mid-air. The card chord's tail lands at 27.5 s
- * and the reveal's at 27.7 s precisely so this check stays quiet; the last 20 ms of the file is
- * the exponential floor, which is −80 dBFS and inaudible, rather than a step.
+ * The two extra checks are both about the file's edges: an event outside `[0, DURATION_SEC]` is
+ * written into a file that has already ended, and a decay still above
+ * {@link TRUNCATION_CEILING} at the cut is a click rather than an ending.
+ *
+ * The fault `validateSounds` documents as the one it *cannot* see — a sound declared and never
+ * played — is inexpressible here, because {@link SOUNDS} is generated from {@link EVENTS}.
  */
 export function problems() {
   const found = [
@@ -960,9 +1127,11 @@ export function problems() {
     if (event.at < 0 || event.at > DURATION_SEC) {
       found.push(`event ${event.id} at ${event.at} s is outside the render`);
     }
-    const ends = event.at + tailSec(definition);
-    if (ends > DURATION_SEC) {
-      found.push(`event ${event.id} at ${event.at} s rings until ${ends.toFixed(3)} s and is cut off by the file end`);
+    const level = levelAtCut(event, definition);
+    if (level > TRUNCATION_CEILING) {
+      found.push(
+        `event ${event.id} at ${event.at} s is still at ${(20 * Math.log10(level)).toFixed(1)} dBFS when the file ends — that step is a click`,
+      );
     }
   }
   return found;
@@ -971,24 +1140,28 @@ export function problems() {
 /** The landmarks, for the edit and for the analysis to rule onto the picture. */
 export const CUES = {
   open: T_OPEN,
-  salvo: T_SALVO,
-  build: T_BUILD,
-  detonate: T_DETONATE,
-  embers: T_EMBERS,
+  broadside: T_BROADSIDE,
   gauntlet: T_GAUNTLET,
-  dawn: T_DAWN,
-  card: T_CARD,
+  aground: T_AGROUND,
+  fuse: T_FUSE,
+  /** The one instant that cannot move. Everything else here is allowed to breathe. */
+  flash: T_FLASH,
+  aftermath: T_AFTERMATH,
+  firstLight: T_FIRST_LIGHT,
+  title: T_TITLE,
   reveal: T_REVEAL,
+  install: T_INSTALL,
+  pulseReturn: T_PULSE_RETURN,
+  /** The stretch the picture is still white through, where nothing may be struck. */
+  blind: [T_FLASH + 0.07, T_AFTERMATH],
   /** Every bar line the sequencer actually plays, across all three windows. */
-  bars: [
-    ...Array.from({ length: 5 }, (unused, index) => DECK_RAID.from + index * BAR_SEC),
-    ...Array.from({ length: 2 }, (unused, index) => DECK_EMBERS.from + index * BAR_SEC),
-    ...Array.from({ length: 2 }, (unused, index) => DECK_DRIVE.from + index * BAR_SEC),
-  ],
+  bars: [DECK_BROADSIDE, DECK_GAUNTLET, DECK_AFTERMATH].flatMap((window) =>
+    Array.from({ length: Math.ceil((window.to - window.from) / BAR_SEC) }, (unused, index) => window.from + index * BAR_SEC),
+  ),
   /** Where each sequencer window stops scheduling. */
-  stops: [DECK_RAID.to, DECK_EMBERS.to, DECK_DRIVE.to],
+  stops: [DECK_BROADSIDE.to, DECK_GAUNTLET.to, DECK_AFTERMATH.to],
   /** The sixteenth-note grid, per window, for the transient alignment check. */
-  grid: [DECK_RAID, DECK_EMBERS, DECK_DRIVE].flatMap((window) =>
+  grid: [DECK_BROADSIDE, DECK_GAUNTLET, DECK_AFTERMATH].flatMap((window) =>
     Array.from({ length: Math.ceil((window.to - window.from) / 0.125) + 1 }, (unused, index) => window.from + index * 0.125),
   ),
 };

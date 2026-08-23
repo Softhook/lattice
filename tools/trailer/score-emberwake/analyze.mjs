@@ -8,7 +8,22 @@
  *
  * Prints the numbers that can falsify a mix — true peak, per-section RMS, the level inside the
  * hole, whether the stems sum to the master, whether the tail is cut off — and writes
- * `score.png`: a waveform over a log-frequency spectrogram with the cut points ruled onto it.
+ * `score.png`: a waveform over a log-frequency spectrogram with the cut points ruled onto it and a
+ * half-second ruler along the bottom — a bright column you cannot locate is a column you cannot
+ * act on. Tall white ticks are every five seconds, mid ticks every second.
+ *
+ * | rule | colour |
+ * |---|---|
+ * | broadside 0:03, the title card 0:21.5 | white |
+ * | the gauntlet 0:08 | grey |
+ * | aground 0:10 | pink |
+ * | the fuse 0:13 | amber |
+ * | **the white flash 0:13.53** | red |
+ * | aftermath 0:14.2 | orange |
+ * | first light 0:18 | green |
+ * | the reveal 0:23.5, the install line 0:25.4 | blue |
+ * | every bar line the sequencer plays | dark grey, dotted |
+ * | every instant the sequencer stops scheduling | purple |
  *
  * The picture is the point. A number can tell you the mix does not clip; only the picture tells
  * you that the escalation is a solid block of mid-range with no gaps in it, that the hole after the
@@ -246,13 +261,15 @@ function heat(unit) {
 const WIDTH = 1600;
 const WAVE_HEIGHT = 150;
 const SPECTRO_HEIGHT = 400;
+/** A half-second ruler along the bottom, so a bright column can be *located* and not only seen. */
+const RULER_HEIGHT = 16;
 const FFT_SIZE = 2048;
 /** The picture's frequency range. 40 Hz is under the lowest note; 14 kHz is over the top hat. */
 const LOW_HZ = 40;
 const HIGH_HZ = 14000;
 
 function picture(channels, rate, file) {
-  const height = WAVE_HEIGHT + SPECTRO_HEIGHT;
+  const height = WAVE_HEIGHT + SPECTRO_HEIGHT + RULER_HEIGHT;
   const rgb = Buffer.alloc(WIDTH * height * 3);
   const set = (x, y, color) => {
     if (x < 0 || x >= WIDTH || y < 0 || y >= height) return;
@@ -307,20 +324,39 @@ function picture(channels, rate, file) {
 
   // --- the cut points, ruled on -------------------------------------------
   const rules = [
-    [CUES.salvo, [255, 255, 255]],
-    [CUES.build, [200, 200, 200]],
-    [CUES.detonate, [255, 90, 90]],
-    [CUES.embers, [255, 150, 70]],
-    [CUES.gauntlet, [255, 220, 90]],
-    [CUES.dawn, [120, 255, 190]],
-    [CUES.card, [255, 255, 255]],
+    [CUES.broadside, [255, 255, 255]],
+    [CUES.gauntlet, [200, 200, 200]],
+    [CUES.aground, [255, 140, 200]],
+    [CUES.fuse, [255, 190, 90]],
+    [CUES.flash, [255, 70, 70]],
+    [CUES.aftermath, [255, 150, 70]],
+    [CUES.firstLight, [120, 255, 190]],
+    [CUES.title, [255, 255, 255]],
     [CUES.reveal, [120, 200, 255]],
+    [CUES.install, [90, 150, 200]],
     ...CUES.bars.map((time) => [time, [70, 70, 80]]),
     ...CUES.stops.map((time) => [time, [150, 90, 160]]),
   ];
   for (const [time, color] of rules) {
     const x = Math.round((time / DURATION_SEC) * WIDTH);
-    for (let y = 0; y < height; y += 3) set(x, y, color);
+    // Solid across the waveform and the ruler, dotted across the spectrogram. A solid line all the
+    // way down hides exactly the thing the spectrogram is there to show; a dotted line all the way
+    // up is invisible against a waveform.
+    for (let y = 0; y < WAVE_HEIGHT; y += 1) set(x, y, color);
+    for (let y = WAVE_HEIGHT; y < WAVE_HEIGHT + SPECTRO_HEIGHT; y += 3) set(x, y, color);
+    for (let y = WAVE_HEIGHT + SPECTRO_HEIGHT; y < height; y += 1) set(x, y, color);
+  }
+
+  // --- the ruler ----------------------------------------------------------
+  const base = WAVE_HEIGHT + SPECTRO_HEIGHT;
+  for (let x = 0; x < WIDTH; x += 1) set(x, base, [40, 44, 52]);
+  for (let half = 0; half <= DURATION_SEC * 2; half += 1) {
+    const x = Math.min(WIDTH - 1, Math.round((half / 2 / DURATION_SEC) * WIDTH));
+    const five = half % 10 === 0;
+    const whole = half % 2 === 0;
+    const tall = five ? RULER_HEIGHT - 2 : whole ? 8 : 4;
+    const shade = five ? [225, 230, 238] : whole ? [130, 138, 150] : [70, 76, 86];
+    for (let y = base + 1; y < base + 1 + tall; y += 1) set(x, y, shade);
   }
 
   writeFileSync(file, png(WIDTH, height, rgb));
@@ -340,17 +376,19 @@ function main() {
   console.log(`peak ${show(db(whole.peak))}   rms ${show(db(whole.rms))}`);
 
   const sections = [
-    ['cold open   0.0-3.0', 0, 3],
-    ['salvo       3.0-7.0', 3, 7],
-    ['escalation  7.0-11.9', 7, 11.875],
-    ['  run-up   11.0-11.9', 11, 11.875],
-    ['  the gap  11.87-12.0', 11.875, 12],
-    ['detonation 12.0-12.4', 12, 12.4],
-    ['the hole   12.6-13.0', 12.6, 13],
-    ['embers     13.0-17.0', 13, 17],
-    ['gauntlet   17.0-21.0', 17, 21],
-    ['dawn       21.0-23.0', 21, 23],
-    ['card       23.0-28.0', 23, 28],
+    ['cold open    0.0-3.0', 0, 3],
+    ['broadside    3.0-8.0', 3, 8],
+    ['gauntlet     8.0-10.0', 8, 10],
+    ['  aground   10.0-10.5', 10, 10.5],
+    ['  recovery  10.5-13.0', 10.5, 13],
+    ['the fuse    13.0-13.44', 13, 13.4375],
+    ['  the gap  13.44-13.53', 13.4375, 13.53],
+    ['THE FLASH  13.53-13.93', 13.53, 13.93],
+    ['blind      13.60-14.20', 13.6, 14.2],
+    ['aftermath   14.2-18.0', 14.2, 18],
+    ['first light 18.0-21.5', 18, 21.5],
+    ['title card 21.5-23.5', 21.5, 23.5],
+    ['end card   23.5-28.02', 23.5, 28.02],
     ['last 20 ms', DURATION_SEC - 0.02, DURATION_SEC],
   ];
   console.log('');
@@ -360,8 +398,9 @@ function main() {
   }
 
   // --- the arc, one second at a time --------------------------------------
-  // A montage that builds has to build in *energy*, not only in layer count, and a bar chart of
-  // RMS is the only honest way to see whether it does.
+  // A passage that builds has to build in *energy* and not only in layer count, and a bar chart of
+  // RMS a second at a time is the only honest way to see whether it does — or whether, as this one
+  // did on its first render, the busiest stretch is a decibel quieter than the bar before it.
   console.log('');
   for (let second = 0; second < DURATION_SEC; second += 1) {
     const band = measure(channels, second, second + 1, sampleRate);
@@ -386,14 +425,69 @@ function main() {
     ...CUES.grid,
     ...HAND_STRUCK,
     CUES.open,
-    CUES.salvo,
-    CUES.detonate,
-    CUES.embers,
+    CUES.broadside,
     CUES.gauntlet,
-    CUES.dawn,
-    CUES.card,
+    CUES.aground,
+    CUES.fuse,
+    CUES.flash,
+    CUES.aftermath,
+    CUES.firstLight,
+    CUES.title,
     CUES.reveal,
+    CUES.install,
   ];
+  // --- did something land ON each cut point? ------------------------------
+  // The one question a trailer score has to answer and the section table cannot: an edit cuts on
+  // an instant, and if the music arrives 40 ms after the picture the whole thing feels loose.
+  // 60 ms after the cut against the 200 ms before it — a landing is a big positive number.
+  console.log('');
+  const landings = [
+    ['broadside', CUES.broadside],
+    ['the gauntlet', CUES.gauntlet],
+    ['aground', CUES.aground],
+    ['the fuse', CUES.fuse],
+    ['THE FLASH', CUES.flash],
+    ['first light', CUES.firstLight],
+    ['the title card', CUES.title],
+    ['the reveal', CUES.reveal],
+    ['the install line', CUES.install],
+  ];
+  for (const [name, time] of landings) {
+    const after = measure(channels, time, time + 0.06, sampleRate);
+    // 120 ms up to the cut itself, not 200 ms up to 40 ms before it. The wider window swallowed
+    // the last note of the run into the blast and reported the biggest event in the piece as a
+    // 6.7 dB step, which is a measurement of the run and not of the impact.
+    const before = measure(channels, time - 0.12, time - 0.004, sampleRate);
+    const step = db(after.peak) - db(before.peak);
+    console.log(
+      `  ${name.padEnd(14)} ${time.toFixed(3)} s   peak ${show(db(after.peak)).padStart(8)}   ` +
+        `${step >= 0 ? '+' : ''}${step.toFixed(1)} dB over the 120 ms before it`,
+    );
+  }
+
+  // --- the two things the locked cut makes non-negotiable -----------------
+  // The flash is a single frame of full-frame white and the impact belongs *on* it. A score that
+  // is 30 ms early there is a score that is two frames early, which is visible.
+  const flashWindow = measure(channels, CUES.flash, CUES.flash + 1 / 60, sampleRate);
+  const flashRunUp = measure(channels, CUES.flash - 1 / 60, CUES.flash, sampleRate);
+  console.log('');
+  console.log(
+    `  the flash at ${CUES.flash.toFixed(3)} s: the frame it lands on peaks at ${show(db(flashWindow.peak))}, ` +
+      `the frame before it at ${show(db(flashRunUp.peak))} — a ${(db(flashWindow.peak) - db(flashRunUp.peak)).toFixed(1)} dB step across one frame`,
+  );
+  // And nothing may be struck while the frame is still washed out.
+  const blind = measure(channels, CUES.blind[0], CUES.blind[1], sampleRate);
+  const before = measure(channels, 12.5, 13, sampleRate);
+  // Two numbers, because one is misleading. The window's RMS is dominated by its first fifty
+  // milliseconds — the blast is still ending — and reads as "quieter", where what the picture
+  // needs is "emptying". The last hundred milliseconds is where the hole actually is.
+  const blindTail = measure(channels, CUES.blind[1] - 0.1, CUES.blind[1], sampleRate);
+  console.log(
+    `  blind ${CUES.blind[0].toFixed(2)}-${CUES.blind[1].toFixed(2)} s: rms ${show(db(blind.rms))} over the whole window ` +
+      `(${(db(blind.rms) - db(before.rms)).toFixed(1)} dB under the half second before the fuse), ` +
+      `${show(db(blindTail.rms))} across its last 100 ms`,
+  );
+
   const found = onsets(channels, sampleRate);
   const drift = alignment(found, grid);
   console.log('');
@@ -404,13 +498,23 @@ function main() {
   // sample late. This is here permanently because the defect that produced it fires on about one
   // start time in ten and is invisible to every other reading in this file.
   const clicks = [];
+  const NEAR = 16;
   for (const [channel, data] of channels.entries()) {
-    for (let i = 3; i < frames - 3; i += 1) {
-      const near = Math.max(Math.abs(data[i - 3]), Math.abs(data[i - 2]), Math.abs(data[i + 2]), Math.abs(data[i + 3]));
-      // Ratio 25 with a wide margin either side: the envelope leak this exists to catch measured
-      // 121, and the loudest honest single-sample outlier in band-limited noise measured 12.
-      if (Math.abs(data[i]) > 0.02 && Math.abs(data[i]) > near * 25) {
-        clicks.push(`${(i / sampleRate).toFixed(5)} s ch${channel} ${data[i].toFixed(4)}`);
+    for (let i = NEAR; i < frames - NEAR; i += 1) {
+      if (Math.abs(data[i]) <= 0.02) continue;
+      // The neighbourhood is a *window* and not four samples, which the previous version of this
+      // check got wrong and reported me a false positive for. A hi-hat band-passed at 7.5–13.5 kHz
+      // has a period of about four samples at 48 kHz, so the samples two and three away from a
+      // peak land on its zero crossings — measured 0.066 against 0.002, a ratio of 32, in the
+      // middle of an ordinary and perfectly clean noise burst. Sixteen samples either side always
+      // contain a full cycle of anything below Nyquist, so a genuine lone impulse is the only
+      // thing that can still score.
+      let near = 0;
+      for (let k = 2; k <= NEAR; k += 1) {
+        near = Math.max(near, Math.abs(data[i - k]), Math.abs(data[i + k]));
+      }
+      if (Math.abs(data[i]) > near * 25) {
+        clicks.push(`${(i / sampleRate).toFixed(5)} s ch${channel} ${data[i].toFixed(4)} vs ${near.toFixed(4)}`);
       }
     }
   }
