@@ -1,0 +1,11 @@
+# Everything here is output and all of it is reproducible from the source beside it:
+#
+#   node tools/trailer/score-v2/build.mjs
+#
+# Committing 30 MB of wav to hold artifacts one command regenerates is the same mistake as
+# committing a build, and it is the mistake this kit is loudest about not making anywhere else.
+# It has already been made once in this tree by accident. `tools/trailer/.gitignore` says this
+# about the first score and `score-emberwake/.gitignore` about the second; this file says it
+# about the third, in its own directory, because that directory is the unit anyone will copy.
+*.wav
+*.png

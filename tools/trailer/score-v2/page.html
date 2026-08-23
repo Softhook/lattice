@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>lattice trailer score — offline render</title>
+    <!--
+      The whole reason this is a page and not a Node script: `@latticekit/audio` drives Web Audio,
+      and the honest way to render it is the same `OfflineAudioContext` a browser would use — not
+      a re-implementation of the package's node graph that could be wrong in a way the real one
+      is not.
+
+      The import map is the only build step. `packages/*/dist` is served as-is, so what renders
+      here is the published module graph and not a bundler's idea of it.
+    -->
+    <script type="importmap">
+      {
+        "imports": {
+          "@latticekit/audio": "/audio/index.js",
+          "@latticekit/core": "/core/index.js"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <pre id="log">rendering…</pre>
+    <script type="module">
+      import { CUES, DURATION_SEC, MASTER_GAIN, OUTPUT_TRIM, problems, schedule, STEMS } from '/score.mjs';
+      import { encodeWav } from '/wav.mjs';
+
+      const RATE = 48000;
+      const out = document.getElementById('log');
+      const say = async (line) => {
+        out.textContent += `\n${line}`;
+        await fetch('/log', { method: 'POST', body: line });
+      };
+
+      window.addEventListener('error', (event) => {
+        fetch('/log', { method: 'POST', body: `PAGE ERROR ${event.message} @ ${event.filename}:${event.lineno}` });
+      });
+      window.addEventListener('unhandledrejection', (event) => {
+        fetch('/log', { method: 'POST', body: `PAGE REJECTION ${String(event.reason)}` });
+      });
+
+      /**
+       * An irregular pump cadence, for the determinism check. Every gap is under the deck's
+       * 1.5 s horizon, so a correct sequencer must produce exactly the same samples as a steady
+       * one: the notes are pinned to the audio clock and the pump only decides when to ask.
+       */
+      const JITTER = [0.013, 0.4, 0.077, 1.2, 0.21, 0.9, 0.033, 0.6];
+      const jittered = () => {
+        let index = 0;
+        return (previous) => previous + JITTER[index++ % JITTER.length];
+      };
+
+      const sha = async (text) => {
+        const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+        return [...new Uint8Array(digest)].slice(0, 8).map((b) => b.toString(16).padStart(2, '0')).join('');
+      };
+
+      async function render(pass) {
+        const context = new OfflineAudioContext(2, Math.round(DURATION_SEC * RATE), RATE);
+        // The plan stream is what the package actually promises to be deterministic: pure policy,
+        // Tier A arithmetic, no device. Hashing it separates "the kit decided the same thing" from
+        // "the browser computed the same samples", which turn out to be different questions.
+        const plans = [];
+        const { refused } = schedule(context, {
+          stems: pass.stems,
+          plans,
+          pumpAt: pass.jitter ? jittered() : undefined,
+          intensity: pass.flat ? () => 1 : undefined,
+        });
+        if (refused.length > 0) {
+          await say(`${pass.name}: ${refused.length} events REFUSED by the voice ceiling or throttle — ${refused.map((e) => `${e.id}@${e.at}`).join(' ')}`);
+        }
+        const buffer = await context.startRendering();
+        const channels = [0, 1].map((index) => {
+          const data = buffer.getChannelData(index);
+          // The one mastering move, and it is a constant. See OUTPUT_TRIM.
+          for (let i = 0; i < data.length; i += 1) data[i] *= OUTPUT_TRIM;
+          return data;
+        });
+        const { bytes, clipped, peak } = encodeWav(channels, RATE);
+        await say(
+          `${pass.name}: ${plans.length} voices, plan ${await sha(plans.join('\n'))} ` +
+            `(as a set ${await sha([...plans].sort().join('\n'))}), ` +
+            `peak ${peak.toFixed(4)} (${(20 * Math.log10(peak)).toFixed(2)} dBFS), ${clipped} over full scale`,
+        );
+        if (pass.name === 'score') await landmarks(plans);
+        await fetch('/meta', {
+          method: 'POST',
+          body: JSON.stringify({
+            name: pass.name,
+            voices: plans.length,
+            order: await sha(plans.join('\n')),
+            set: await sha([...plans].sort().join('\n')),
+            peak,
+            clipped,
+          }),
+        });
+        await fetch(`/out?name=${encodeURIComponent(pass.name)}`, { method: 'POST', body: bytes });
+      }
+
+      /**
+       * Did the sequencer actually stop where the score says it does?
+       *
+       * The deck has no way to be told "schedule up to time X" and no way to stop on a beat, so
+       * the last note before each hard edge is arithmetic that has to be *checked* rather than
+       * assumed. A note one sixteenth late at 0:08.5 puts a hi-hat inside the cut to black, one
+       * late at 0:16 puts the writer's pulse over the turn, and one late at 0:21.2 puts a kick
+       * drum inside the run into the flash.
+       */
+      async function landmarks(plans) {
+        // Which plans came from the sequencer, by **bus** rather than by a list of track ids.
+        // `score-emberwake/page.html` matched a regex of every track name, which is a list that
+        // silently stops being true the first time a song gains a track — and a check that has
+        // quietly stopped looking at half the sequencer reports every edge as clean. One-shots
+        // are on `sfx` and `ui`; the deck writes `music` and nothing else does.
+        const isDeck = (line) => line.split(' ')[1] === 'music';
+        const deck = plans
+          .filter(isDeck)
+          .map((line) => Number(line.split(' ')[8]))
+          .sort((a, b) => a - b);
+        for (const edge of CUES.stops) {
+          const before = deck.filter((start) => start < edge - 1e-9).pop();
+          const after = deck.find((start) => start >= edge - 1e-9);
+          await say(
+            `sequencer stop ${edge.toFixed(3)} s: last note at ${before === undefined ? 'none' : before.toFixed(4)}, ` +
+              `next at ${after === undefined ? 'none' : after.toFixed(4)}`,
+          );
+        }
+        // The whole reason `struck` exists twice over: the biggest one-shots must not be silently
+        // dropped by the ceiling, and a dropped one leaves no trace in the samples.
+        const oneShots = plans.filter((line) => !isDeck(line));
+        await say(`one-shot layers scheduled: ${oneShots.length}; deck layers: ${deck.length}`);
+      }
+
+      try {
+        const faults = problems();
+        for (const fault of faults) await say(`VALIDATOR ${fault}`);
+        await say(`master gain ${MASTER_GAIN}, trim ${OUTPUT_TRIM}, stems ${STEMS.join(' ')}`);
+        const passes = await (await fetch('/job')).json();
+        for (const pass of passes) await render(pass);
+        await fetch('/done', { method: 'POST', body: 'ok' });
+      } catch (error) {
+        await say(`FATAL ${String(error && error.stack ? error.stack : error)}`);
+        await fetch('/done', { method: 'POST', body: 'failed' });
+      }
+    </script>
+  </body>
+</html>
