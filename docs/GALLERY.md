@@ -23,6 +23,36 @@ not belong in an exhibit.
 
 ---
 
+## Three places a runnable thing can live, and which one you want
+
+This document governs the first of them. The other two exist because the rules below are right
+for a gallery and wrong for everything else, and someone kept trying to fit the wrong thing
+through the wrong door.
+
+| directory | served at | what it is | bound by |
+|---|---|---|---|
+| `examples/` | `/x/<dir>/` | **the gallery.** One idea each, shown well, under 200 logic lines | every rule in this document |
+| `from-one-sentence/` | `/g/<name>/` | **the record.** Three games built by three vendors' agents from one sentence, in empty directories, with no access to this repository | nothing. It is evidence, and evidence is not edited |
+| `showcase/` | `/play/<name>/` | **the answer to "what is the most this can do".** Deliberately maximal | everything here **except** the line rule |
+
+The distinction that matters is between the first and the third, because they pull in opposite
+directions and both are correct. A gallery of twenty maximal demos teaches nothing — the line
+rule is the reason an exhibit can be read in one sitting, and restraint is what makes eighteen
+of them legible instead of one of them impressive. But restraint everywhere left the kit with no
+answer to the question every visitor asks first, and "read these eighteen small things and
+imagine them combined" is not an answer.
+
+So `showcase/` keeps the first frame, the movement, the determinism, the seed in the URL, the
+zero assets and the `ui` overlay — every rule here that is about honesty — and drops the only one
+that is about size. **It is not a second hero and it may not claim the hero exemption**; the hero
+clause below is about a row in this gallery and `showcase/` is not in this gallery.
+
+`from-one-sentence/` is a third thing again and the rules do not reach it at all. Its value is
+that nobody touched it. A stale URL inside one of those transcripts stays stale, because a log
+edited to match the present has stopped being a log.
+
+---
+
 ## What makes an exhibit good
 
 1. **The first frame is the pitch.** A visitor decides in about a second. It must be
