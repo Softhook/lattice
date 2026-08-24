@@ -281,11 +281,15 @@ function updateOne(
   if (threatCount > 0) {
     c.state = 'flee';
     c.eatTimer = 0;
-    const jitterAngle = (c.rng.next() - 0.5) * 0.8;
-    const baseAngle = Math.atan2(-threatDy, -threatDx) + jitterAngle; // @tier-b — flee scatter angle, pixels only
-    const fleeDx = Math.cos(baseAngle); // @tier-b
-    const fleeDy = Math.sin(baseAngle); // @tier-b
-    moveWithSeparation(c, c.gx + fleeDx * 6, c.gy + fleeDy * 6, speed * 1.45, dt, world, allCreatures, buildings);
+    // Flee smoothly away from the threat center of mass without per-frame random angle jitter
+    const avgThreatDx = threatDx / threatCount;
+    const avgThreatDy = threatDy / threatCount;
+    const threatDist = Math.sqrt(avgThreatDx * avgThreatDx + avgThreatDy * avgThreatDy); // @tier-b
+    if (threatDist > 0.01) {
+      const fleeDx = -avgThreatDx / threatDist;
+      const fleeDy = -avgThreatDy / threatDist;
+      moveWithSeparation(c, c.gx + fleeDx * 8, c.gy + fleeDy * 8, speed * 1.4, dt, world, allCreatures, buildings);
+    }
     return;
   }
 
@@ -413,9 +417,7 @@ function updateOne(
     }
   }
 
-  // 4. Default Peaceful Wander
-  c.state = 'wander';
-  c.eatTimer = 0;
+  // 4. Default Peaceful Wander with Waypoint Rest
   c.idleTimer -= dt;
   if (c.idleTimer <= 0 || isNaN(c.targetGx)) {
     // Pick a new random wander target nearby
@@ -423,12 +425,20 @@ function updateOne(
     const dist  = 3 + c.rng.next() * 5;
     c.targetGx  = clamp(Math.round(c.gx + Math.cos(angle) * dist), 8, W - 9); // @tier-b
     c.targetGy  = clamp(Math.round(c.gy + Math.sin(angle) * dist), 8, H - 9); // @tier-b
-    c.idleTimer = 2.5 + c.rng.next() * 4;
+    c.idleTimer = 3.5 + c.rng.next() * 3.5;
   }
-  moveWithSeparation(c, c.targetGx, c.targetGy, speed * 0.55, dt, world, allCreatures, buildings);
+
+  const distToTargetSq = (c.targetGx - c.gx) ** 2 + (c.targetGy - c.gy) ** 2;
+  if (distToTargetSq > 0.36) {
+    c.state = 'wander';
+    moveWithSeparation(c, c.targetGx, c.targetGy, speed * 0.55, dt, world, allCreatures, buildings);
+  } else {
+    // Arrived at destination waypoint — rest peacefully without jitter
+    c.state = 'idle';
+  }
 }
 
-/** Move a creature with soft Boid separation, map margin avoidance, and solid building barrier collision. */
+/** Move a creature with soft Boid separation, map margin avoidance, facing hysteresis, and solid barrier sliding. */
 function moveWithSeparation(
   c: Creature,
   tx: number,
@@ -447,7 +457,7 @@ function moveWithSeparation(
     dy /= d;
   }
 
-  // 1. Soft Boid Separation force to prevent stacking and conga lines
+  // 1. Soft Boid Separation force to prevent stacking
   let sepX = 0;
   let sepY = 0;
   for (let i = 0; i < allCreatures.length; i++) {
@@ -456,15 +466,15 @@ function moveWithSeparation(
     const ox = c.gx - other.gx;
     const oy = c.gy - other.gy;
     const distSq = ox * ox + oy * oy;
-    if (distSq < 2.0 && distSq > 0.0001) {
+    if (distSq < 1.44 && distSq > 0.0001) {
       const dist = Math.sqrt(distSq); // @tier-b
-      const strength = (1.4 - dist) / 1.4;
-      sepX += (ox / dist) * strength * 0.8;
-      sepY += (oy / dist) * strength * 0.8;
+      const strength = (1.2 - dist) / 1.2;
+      sepX += (ox / dist) * strength * 0.35;
+      sepY += (oy / dist) * strength * 0.35;
     }
   }
 
-  // 2. Soft Map Margin Avoidance (keep creatures dispersed in open world)
+  // 2. Soft Map Margin Avoidance
   const MARGIN = 10;
   if (c.gx < MARGIN) sepX += (MARGIN - c.gx) * 0.2;
   if (c.gx > W - MARGIN) sepX -= (c.gx - (W - MARGIN)) * 0.2;
@@ -478,10 +488,21 @@ function moveWithSeparation(
 
   const dirX = moveX / moveLen;
   const dirY = moveY / moveLen;
-  if (Math.abs(dirX) > Math.abs(dirY)) {
-    c.facing = dirX > 0 ? 'e' : 'w';
+
+  // 3. Directional Hysteresis: prevent rapid facing oscillation along diagonal movement
+  const isCurrentlyHorizontal = c.facing === 'e' || c.facing === 'w';
+  if (isCurrentlyHorizontal) {
+    if (Math.abs(dirY) > Math.abs(dirX) * 1.35 && Math.abs(dirY) > 0.15) {
+      c.facing = dirY > 0 ? 's' : 'n';
+    } else if (Math.abs(dirX) > 0.1) {
+      c.facing = dirX > 0 ? 'e' : 'w';
+    }
   } else {
-    c.facing = dirY > 0 ? 's' : 'n';
+    if (Math.abs(dirX) > Math.abs(dirY) * 1.35 && Math.abs(dirX) > 0.15) {
+      c.facing = dirX > 0 ? 'e' : 'w';
+    } else if (Math.abs(dirY) > 0.1) {
+      c.facing = dirY > 0 ? 's' : 'n';
+    }
   }
 
   const step = speed * dt;
@@ -493,13 +514,26 @@ function moveWithSeparation(
 
   const tileX = Math.floor(nx);
   const tileY = Math.floor(ny);
-  // Ensure solid buildings (walls, towers) physically keep out animals
+
+  // 4. Smooth movement with axis-aligned obstacle sliding
   if (isWalkable(world, tileX, tileY) && !isTileOccupiedBySolidBuilding(tileX, tileY, buildings)) {
     c.gx = clamp(nx, 2, W - 3);
     c.gy = clamp(ny, 2, H - 3);
   } else {
-    c.targetGx = NaN;
-    c.targetGy = NaN;
+    // Try sliding along X axis
+    const curTileY = Math.floor(c.gy);
+    if (isWalkable(world, tileX, curTileY) && !isTileOccupiedBySolidBuilding(tileX, curTileY, buildings)) {
+      c.gx = clamp(nx, 2, W - 3);
+    } else {
+      // Try sliding along Y axis
+      const curTileX = Math.floor(c.gx);
+      if (isWalkable(world, curTileX, tileY) && !isTileOccupiedBySolidBuilding(curTileX, tileY, buildings)) {
+        c.gy = clamp(ny, 2, H - 3);
+      } else {
+        c.targetGx = NaN;
+        c.targetGy = NaN;
+      }
+    }
   }
 }
 
