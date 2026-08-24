@@ -31,13 +31,13 @@ import { P1_COLOR, P2_COLOR, RABBIT, DEER, WOLF, TROLL, FOX } from './palette.js
 
 // ── Sprite definitions ─────────────────────────────────────────────────────────
 
-/** Player capsule — index determines color accent; facing renders visor & gear in strict back-to-front depth order. */
+/** Player capsule — index determines color accent; facing renders visor & gear with exact centering and strict back-to-front depth order. */
 function makePlayerMassing(bodyColor: Ink): Massing {
   const visorColor = 0xffe066ff; // Bright gold visor
   const packColor  = 0x243342ff; // Adventurer backpack
 
   return (w: SolidWriter, v: Variant, _rng: Rng) => {
-    // 1. Contact shadow at base
+    // 1. Contact shadow at base (centered at 0.5, 0.5)
     w.shadow(0.15, 0.15, 0.7, 0.7, 0.25);
 
     const facing = v.flags; // 0: 'n', 1: 's', 2: 'e', 3: 'w'
@@ -45,53 +45,59 @@ function makePlayerMassing(bodyColor: Ink): Massing {
     // Strict isometric painter's order (draw back/north elements first, front/south elements last)
     if (facing === 1) {
       // ── Facing South (faces camera) ──
-      // Backpack is on the back (North), draw FIRST
-      w.box(0.32, 0.16, 0.36, 0.14, { color: packColor, h: 0.55, z: 0.55 });
-      // Legs
-      w.box(0.26, 0.28, 0.2, 0.44, { color: bodyColor, h: 0.45, outline: false });
-      w.box(0.54, 0.28, 0.2, 0.44, { color: bodyColor, h: 0.45, outline: false });
-      // Torso & Head
-      w.box(0.22, 0.24, 0.56, 0.52, { color: bodyColor, h: 0.85, z: 0.45 });
-      w.box(0.28, 0.28, 0.44, 0.44, { color: bodyColor, h: 0.5, z: 1.3 });
-      // Visor is on the front (South), draw LAST
-      w.box(0.32, 0.62, 0.36, 0.1, { color: visorColor, h: 0.16, z: 1.44 });
+      // Backpack is on North face (back), draw FIRST: centered at gx = 0.50
+      w.box(0.33, 0.14, 0.34, 0.12, { color: packColor, h: 0.6, z: 0.55 });
+      // Legs (centered at gx = 0.50)
+      w.box(0.27, 0.35, 0.18, 0.3, { color: bodyColor, h: 0.45, outline: false });
+      w.box(0.55, 0.35, 0.18, 0.3, { color: bodyColor, h: 0.45, outline: false });
+      // Torso (centered at gx = 0.50, gy = 0.50)
+      w.box(0.25, 0.25, 0.5, 0.5, { color: bodyColor, h: 0.9, z: 0.45 });
+      // Head (centered at gx = 0.50, gy = 0.50)
+      w.box(0.28, 0.28, 0.44, 0.44, { color: bodyColor, h: 0.5, z: 1.35 });
+      // Visor is on South face (front), draw LAST: centered at gx = 0.50
+      w.box(0.34, 0.70, 0.32, 0.04, { color: visorColor, h: 0.18, z: 1.48 });
 
     } else if (facing === 0) {
       // ── Facing North (faces away from camera) ──
-      // Visor is on the front (North), draw FIRST
-      w.box(0.32, 0.24, 0.36, 0.08, { color: visorColor, h: 0.16, z: 1.44 });
-      // Legs
-      w.box(0.26, 0.28, 0.2, 0.44, { color: bodyColor, h: 0.45, outline: false });
-      w.box(0.54, 0.28, 0.2, 0.44, { color: bodyColor, h: 0.45, outline: false });
-      // Torso & Head
-      w.box(0.22, 0.24, 0.56, 0.52, { color: bodyColor, h: 0.85, z: 0.45 });
-      w.box(0.28, 0.28, 0.44, 0.44, { color: bodyColor, h: 0.5, z: 1.3 });
-      // Backpack is on the back (South, facing camera), draw LAST
-      w.box(0.32, 0.64, 0.36, 0.15, { color: packColor, h: 0.58, z: 0.55 });
+      // Visor is on North face (front), draw FIRST: centered at gx = 0.50
+      w.box(0.34, 0.26, 0.32, 0.04, { color: visorColor, h: 0.18, z: 1.48 });
+      // Legs (centered at gx = 0.50)
+      w.box(0.27, 0.35, 0.18, 0.3, { color: bodyColor, h: 0.45, outline: false });
+      w.box(0.55, 0.35, 0.18, 0.3, { color: bodyColor, h: 0.45, outline: false });
+      // Torso (centered at gx = 0.50, gy = 0.50)
+      w.box(0.25, 0.25, 0.5, 0.5, { color: bodyColor, h: 0.9, z: 0.45 });
+      // Head (centered at gx = 0.50, gy = 0.50)
+      w.box(0.28, 0.28, 0.44, 0.44, { color: bodyColor, h: 0.5, z: 1.35 });
+      // Backpack is on South face (back), draw LAST: centered at gx = 0.50
+      w.box(0.33, 0.74, 0.34, 0.12, { color: packColor, h: 0.6, z: 0.55 });
 
     } else if (facing === 2) {
       // ── Facing East (+gx) ──
-      // Backpack is on West (-gx), draw FIRST
-      w.box(0.14, 0.3, 0.14, 0.4, { color: packColor, h: 0.55, z: 0.55 });
-      // Legs
-      w.box(0.28, 0.28, 0.44, 0.44, { color: bodyColor, h: 0.45, outline: false });
-      // Torso & Head
-      w.box(0.24, 0.24, 0.52, 0.52, { color: bodyColor, h: 0.85, z: 0.45 });
-      w.box(0.28, 0.28, 0.44, 0.44, { color: bodyColor, h: 0.5, z: 1.3 });
-      // Visor is on East (+gx), draw LAST
-      w.box(0.64, 0.32, 0.08, 0.36, { color: visorColor, h: 0.16, z: 1.44 });
+      // Backpack is on West face (back), draw FIRST: centered at gy = 0.50
+      w.box(0.14, 0.33, 0.12, 0.34, { color: packColor, h: 0.6, z: 0.55 });
+      // Legs (centered at gy = 0.50)
+      w.box(0.35, 0.27, 0.3, 0.18, { color: bodyColor, h: 0.45, outline: false });
+      w.box(0.35, 0.55, 0.3, 0.18, { color: bodyColor, h: 0.45, outline: false });
+      // Torso (centered at gx = 0.50, gy = 0.50)
+      w.box(0.25, 0.25, 0.5, 0.5, { color: bodyColor, h: 0.9, z: 0.45 });
+      // Head (centered at gx = 0.50, gy = 0.50)
+      w.box(0.28, 0.28, 0.44, 0.44, { color: bodyColor, h: 0.5, z: 1.35 });
+      // Visor is on East face (front), draw LAST: centered at gy = 0.50
+      w.box(0.70, 0.34, 0.04, 0.32, { color: visorColor, h: 0.18, z: 1.48 });
 
     } else {
       // ── Facing West (-gx) ──
-      // Visor is on West (-gx), draw FIRST
-      w.box(0.22, 0.32, 0.08, 0.36, { color: visorColor, h: 0.16, z: 1.44 });
-      // Legs
-      w.box(0.28, 0.28, 0.44, 0.44, { color: bodyColor, h: 0.45, outline: false });
-      // Torso & Head
-      w.box(0.24, 0.24, 0.52, 0.52, { color: bodyColor, h: 0.85, z: 0.45 });
-      w.box(0.28, 0.28, 0.44, 0.44, { color: bodyColor, h: 0.5, z: 1.3 });
-      // Backpack is on East (+gx), draw LAST
-      w.box(0.64, 0.3, 0.15, 0.4, { color: packColor, h: 0.58, z: 0.55 });
+      // Visor is on West face (front), draw FIRST: centered at gy = 0.50
+      w.box(0.26, 0.34, 0.04, 0.32, { color: visorColor, h: 0.18, z: 1.48 });
+      // Legs (centered at gy = 0.50)
+      w.box(0.35, 0.27, 0.3, 0.18, { color: bodyColor, h: 0.45, outline: false });
+      w.box(0.35, 0.55, 0.3, 0.18, { color: bodyColor, h: 0.45, outline: false });
+      // Torso (centered at gx = 0.50, gy = 0.50)
+      w.box(0.25, 0.25, 0.5, 0.5, { color: bodyColor, h: 0.9, z: 0.45 });
+      // Head (centered at gx = 0.50, gy = 0.50)
+      w.box(0.28, 0.28, 0.44, 0.44, { color: bodyColor, h: 0.5, z: 1.35 });
+      // Backpack is on East face (back), draw LAST: centered at gy = 0.50
+      w.box(0.74, 0.33, 0.12, 0.34, { color: packColor, h: 0.6, z: 0.55 });
     }
   };
 }
