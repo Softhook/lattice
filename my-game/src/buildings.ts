@@ -282,13 +282,14 @@ export function canPlaceBuilding(
   return true;
 }
 
-/** Apply troll / monster damage to buildings within 1.5 tiles. */
+/** Apply troll / monster damage to buildings within 1.5 tiles. Returns true if any building was hit. */
 export function damageBuildings(
   buildings: Building[],
   trollX: number,
   trollY: number,
   dmgPerTick: number,
-): void {
+): boolean {
+  let hit = false;
   for (let i = 0; i < buildings.length; i++) {
     const b = buildings[i];
     if (b === undefined || b.hp <= 0) continue;
@@ -296,6 +297,8 @@ export function damageBuildings(
     const dy = Math.abs(trollY - (b.gy + b.d * 0.5));
     if (dx < 1.4 + b.w * 0.5 && dy < 1.4 + b.d * 0.5) {
       b.hp -= dmgPerTick;
+      hit = true;
     }
   }
+  return hit;
 }

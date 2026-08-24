@@ -176,6 +176,7 @@ const moveVec2: Vec2Out = { dx: 0, dy: 0 };
 // Unlock audio on first keypress or canvas interaction
 function onFirstGesture(): void {
   audio.unlock();
+  audio.play('wake');
   window.removeEventListener('keydown', onFirstGesture);
   window.removeEventListener('pointerdown', onFirstGesture);
 }
@@ -187,6 +188,7 @@ window.addEventListener('pointerdown', onFirstGesture, { once: true });
 let tickCount = 0;
 let currentDarkness = 0;
 let autosaveTimer = 0;
+let prevDaylight = 1.0;
 
 loop.onUpdate((dt, tick) => {
   input.tick(tick);
@@ -212,6 +214,8 @@ loop.onUpdate((dt, tick) => {
       if (res.type !== 'none') {
         audio.play(res.type);
         updateDomHud();
+      } else {
+        audio.play('attack');
       }
     } else {
       const placed = buildAtFacing(p1, world, buildings);
@@ -219,6 +223,8 @@ loop.onUpdate((dt, tick) => {
         buildings.push(placed);
         audio.play('build');
         updateDomHud();
+      } else {
+        audio.play('deny');
       }
     }
   }
@@ -227,6 +233,8 @@ loop.onUpdate((dt, tick) => {
     if (changed) {
       audio.play('dig');
       input.setTerrain({ field: world.field, maxHeightPx: world.currentMaxHeightPx });
+    } else {
+      audio.play('deny');
     }
   }
   if (edges.p1Raise) {
@@ -234,6 +242,8 @@ loop.onUpdate((dt, tick) => {
     if (changed) {
       audio.play('raise');
       input.setTerrain({ field: world.field, maxHeightPx: world.currentMaxHeightPx });
+    } else {
+      audio.play('deny');
     }
   }
 
@@ -249,6 +259,8 @@ loop.onUpdate((dt, tick) => {
       if (res.type !== 'none') {
         audio.play(res.type);
         updateDomHud();
+      } else {
+        audio.play('attack');
       }
     } else {
       const placed = buildAtFacing(p2, world, buildings);
@@ -256,6 +268,8 @@ loop.onUpdate((dt, tick) => {
         buildings.push(placed);
         audio.play('build');
         updateDomHud();
+      } else {
+        audio.play('deny');
       }
     }
   }
@@ -264,6 +278,8 @@ loop.onUpdate((dt, tick) => {
     if (changed) {
       audio.play('dig');
       input.setTerrain({ field: world.field, maxHeightPx: world.currentMaxHeightPx });
+    } else {
+      audio.play('deny');
     }
   }
   if (edges.p2Raise) {
@@ -271,6 +287,8 @@ loop.onUpdate((dt, tick) => {
     if (changed) {
       audio.play('raise');
       input.setTerrain({ field: world.field, maxHeightPx: world.currentMaxHeightPx });
+    } else {
+      audio.play('deny');
     }
   }
 
@@ -282,6 +300,12 @@ loop.onUpdate((dt, tick) => {
   if (creEvents.playerAttacked) {
     audio.play('hurt');
   }
+  if (creEvents.roarOccurred) {
+    audio.play('roar');
+  }
+  if (creEvents.howlOccurred) {
+    audio.play('howl');
+  }
 
   tickFloraRegrowth(SEED, flora, world, dt);
 
@@ -289,7 +313,14 @@ loop.onUpdate((dt, tick) => {
   for (let i = 0; i < creatures.length; i++) {
     const c = creatures[i];
     if (c !== undefined && c.species === 'troll' && c.hp > 0) {
-      damageBuildings(buildings, c.gx, c.gy, dt * 0.4);
+      const hit = damageBuildings(buildings, c.gx, c.gy, dt * 0.4);
+      if (hit && tickCount % 45 === 0) {
+        const d1 = (p1.gx - c.gx) * (p1.gx - c.gx) + (p1.gy - c.gy) * (p1.gy - c.gy);
+        const d2 = (p2.gx - c.gx) * (p2.gx - c.gx) + (p2.gy - c.gy) * (p2.gy - c.gy);
+        if (d1 < 256 || d2 < 256) {
+          audio.play('stomp');
+        }
+      }
     }
   }
 
@@ -356,6 +387,17 @@ loop.onRender((_alpha, t, nowMs) => {
   const daylight = Math.sin(cycle * Math.PI) * 0.5 + 0.5;
   const darkness = clamp((0.55 - daylight) * 1.8, 0, 0.85);
   currentDarkness = darkness;
+
+  // Drive ambient day/night sound bed
+  audio.setBedTone(daylight, darkness);
+
+  // Trigger dusk and dawn chime boundaries
+  if (prevDaylight >= 0.5 && daylight < 0.5) {
+    audio.play('dusk_chime');
+  } else if (prevDaylight < 0.5 && daylight >= 0.5) {
+    audio.play('dawn_chime');
+  }
+  prevDaylight = daylight;
 
   // Render split-screen frame
   renderVerdant(

@@ -20,14 +20,14 @@
       "source": "find packages -type f -not -path '*/node_modules/*' -not -path '*/dist/*' -not -path '*/coverage/*' \u2014 207 .ts, 19 .json, 9 .md, nothing else"
     },
     "tests": {
-      "value": 2665,
+      "value": 2681,
       "unit": "",
-      "source": "npx vitest run \u2014 2648 passed (2648)"
+      "source": "npx vitest run \u2014 2681 passed (2681)"
     },
     "testFiles": {
-      "value": 101,
+      "value": 104,
       "unit": "",
-      "source": "npx vitest run \u2014 100 passed (100)"
+      "source": "npx vitest run \u2014 104 passed (104)"
     },
     "publicSymbols": {
       "value": 527,
@@ -35,9 +35,9 @@
       "source": "unique names across .lattice/kit.json packages.*.exports (raw sum 544; VERSION appears in eight)"
     },
     "gzipTotal": {
-      "value": 83.02,
+      "value": 82.82,
       "unit": "kB",
-      "source": "npm run size \u2014 total 83.02 kB, exclusive backends charged at the heaviest, never summed"
+      "source": "npm run size \u2014 total 82.82 kB, exclusive backends charged at the heaviest, never summed"
     },
     "frameBudget": {
       "value": 8,
@@ -83,19 +83,19 @@
   "sizes": [
     {
       "package": "core",
-      "gzipKb": 7.4,
+      "gzipKb": 7.37,
       "budgetKb": 12
     },
     {
       "package": "iso",
-      "gzipKb": 11.47,
+      "gzipKb": 11.42,
       "budgetKb": 12
     },
     {
       "package": "draw",
-      "gzipKb": 12.33,
+      "gzipKb": 12.27,
       "budgetKb": 12.5,
-      "note": "exclusive backends, charged at the heaviest: canvas2d 12.33 charged, record 11.31, shared 10.19"
+      "note": "exclusive backends, charged at the heaviest: canvas2d 12.27 charged, record 11.31, shared 10.19"
     },
     {
       "package": "loop",
@@ -104,28 +104,28 @@
     },
     {
       "package": "input",
-      "gzipKb": 15.39,
+      "gzipKb": 15.38,
       "budgetKb": 16,
       "note": "override 16 kB, argued in .lattice/kit.json \u2014 budgets.overrides.input"
     },
     {
       "package": "audio",
-      "gzipKb": 7.77,
+      "gzipKb": 7.74,
       "budgetKb": 12
     },
     {
       "package": "persist",
-      "gzipKb": 5.79,
+      "gzipKb": 5.8,
       "budgetKb": 12
     },
     {
       "package": "sim",
-      "gzipKb": 7.58,
+      "gzipKb": 7.57,
       "budgetKb": 12
     },
     {
       "package": "ui",
-      "gzipKb": 8.72,
+      "gzipKb": 8.7,
       "budgetKb": 12
     }
   ]

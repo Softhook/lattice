@@ -171,6 +171,7 @@ export function populateWorld(worldSeed: number, world: WorldTerrain): Creature[
 export interface CreatureEvents {
   playerAttacked: boolean;
   roarOccurred: boolean;
+  howlOccurred: boolean;
 }
 
 /**
@@ -192,7 +193,7 @@ export function updateCreatures(
   darkness: number,
   dt: number,
 ): CreatureEvents {
-  const events: CreatureEvents = { playerAttacked: false, roarOccurred: false };
+  const events: CreatureEvents = { playerAttacked: false, roarOccurred: false, howlOccurred: false };
 
   for (let i = 0; i < creatures.length; i++) {
     const c = creatures[i];
@@ -351,6 +352,8 @@ function updateOne(
             const nightDmg = baseDmg * (1 + darkness * 0.4);
             damagePlayer(bestTarget.targetRef, dt * nightDmg * c.traits.size);
             events.playerAttacked = true;
+            if (c.species === 'troll') events.roarOccurred = true;
+            if (c.species === 'wolf' && darkness > 0.3) events.howlOccurred = true;
           } else {
             // Target is a prey animal
             bestTarget.targetRef.hp -= dt * 18 * c.traits.size;
