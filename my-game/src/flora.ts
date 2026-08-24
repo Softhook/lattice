@@ -294,13 +294,56 @@ export function populateFlora(seed: number, world: WorldTerrain): FloraItem[] {
   return items;
 }
 
-/** Find and remove a flora item at or adjacent to (gx, gy). Returns the harvested item. */
-export function harvestFloraAt(flora: FloraItem[], gx: number, gy: number): FloraItem | undefined {
+export interface HarvestYield {
+  readonly item: FloraItem;
+  readonly wood: number;
+  readonly stone: number;
+  readonly fiber: number;
+  readonly label: string;
+}
+
+/** Find and remove a flora item at or adjacent to (gx, gy). Returns the harvested yield. */
+export function harvestFloraAt(flora: FloraItem[], gx: number, gy: number): HarvestYield | undefined {
   const index = flora.findIndex((f) => Math.abs(f.gx - gx) <= 0.8 && Math.abs(f.gy - gy) <= 0.8);
   if (index === -1) return undefined;
-  const harvested = flora[index];
+  const item = flora[index];
+  if (item === undefined) return undefined;
   flora.splice(index, 1);
-  return harvested;
+
+  let wood = 0;
+  let stone = 0;
+  let fiber = 0;
+  let label = '';
+
+  switch (item.kind) {
+    case 'pine':
+      wood = 4;
+      label = '+4 WOOD (PINE CHOPPED)';
+      break;
+    case 'oak':
+      wood = 6;
+      label = '+6 WOOD (OAK CHOPPED)';
+      break;
+    case 'rock':
+      stone = 5;
+      label = '+5 STONE (BOULDER MINED)';
+      break;
+    case 'bush':
+      wood = 2;
+      fiber = 2;
+      label = '+2 WOOD, +2 FIBER (BUSH HARVESTED)';
+      break;
+    case 'flowers':
+      fiber = 2;
+      label = '+2 FIBER (FLOWERS GATHERED)';
+      break;
+    case 'mushroom':
+      fiber = 2;
+      label = '+2 FIBER (MUSHROOM FORAGED)';
+      break;
+  }
+
+  return { item, wood, stone, fiber, label };
 }
 
 /** Find the closest edible flora within radius for herbivores. */

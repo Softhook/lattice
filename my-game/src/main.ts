@@ -145,6 +145,7 @@ let prevKeys = new Set<string>();
 // ── Game update (fixed 60 Hz) ─────────────────────────────────────────────────
 
 let tickCount = 0;
+let currentDarkness = 0;
 
 loop.onUpdate((dt, tick) => {
   input.tick(tick);
@@ -152,11 +153,11 @@ loop.onUpdate((dt, tick) => {
   const curr  = keyState.held;
   const edges = pollActions(prevKeys, curr);
 
-  // ── Player movement ──────────────────────────────────────────────────────────
+  // ── Player movement (blocked by water and solid buildings) ───────────────────
   const { dx: dx1, dy: dy1 } = pollP1Movement(curr);
   const { dx: dx2, dy: dy2 } = pollP2Movement(curr);
-  movePlayer(p1, dx1, dy1, world, dt);
-  movePlayer(p2, dx2, dy2, world, dt);
+  movePlayer(p1, dx1, dy1, world, buildings, dt);
+  movePlayer(p2, dx2, dy2, world, buildings, dt);
 
   // ── Player 1 Actions ─────────────────────────────────────────────────────────
   if (edges.p1Cycle) {
@@ -166,6 +167,7 @@ loop.onUpdate((dt, tick) => {
   if (edges.p1Build) {
     if (p1.mode === 'move') {
       interactAtFacing(p1, world, flora, buildings);
+      updateDomHud();
     } else {
       const placed = buildAtFacing(p1, world, buildings);
       if (placed !== undefined) {
@@ -191,6 +193,7 @@ loop.onUpdate((dt, tick) => {
   if (edges.p2Build) {
     if (p2.mode === 'move') {
       interactAtFacing(p2, world, flora, buildings);
+      updateDomHud();
     } else {
       const placed = buildAtFacing(p2, world, buildings);
       if (placed !== undefined) {
@@ -210,13 +213,14 @@ loop.onUpdate((dt, tick) => {
 
   prevKeys = snapshotKeys(curr);
 
-  // ── Creature & Flora Ecosystem ───────────────────────────────────────────────
-  updateCreatures(creatures, world, [p1, p2], flora, dt);
+  // ── Creature & Flora Ecosystem (with nocturnal aggression & building barriers) ─
+  updateCreatures(creatures, world, [p1, p2], flora, buildings, currentDarkness, dt);
   tickFloraRegrowth(SEED, flora, world, dt);
 
   // ── Troll building damage ────────────────────────────────────────────────────
-  for (const c of creatures) {
-    if (c.species === 'troll' && c.hp > 0) {
+  for (let i = 0; i < creatures.length; i++) {
+    const c = creatures[i];
+    if (c !== undefined && c.species === 'troll' && c.hp > 0) {
       damageBuildings(buildings, c.gx, c.gy, dt * 0.4);
     }
   }
@@ -243,8 +247,14 @@ loop.onUpdate((dt, tick) => {
 function updateDomHud(): void {
   const p1ToolEl = document.getElementById('p1-tool');
   const p2ToolEl = document.getElementById('p2-tool');
-  if (p1ToolEl) p1ToolEl.textContent = p1.mode.toUpperCase();
-  if (p2ToolEl) p2ToolEl.textContent = p2.mode.toUpperCase();
+  if (p1ToolEl) {
+    const m = p1.mode.replace('_', ' ').toUpperCase();
+    p1ToolEl.textContent = `${m} [🪵${p1.inventory.wood} 🪨${p1.inventory.stone} 🌿${p1.inventory.fiber}]`;
+  }
+  if (p2ToolEl) {
+    const m = p2.mode.replace('_', ' ').toUpperCase();
+    p2ToolEl.textContent = `${m} [🪵${p2.inventory.wood} 🪨${p2.inventory.stone} 🌿${p2.inventory.fiber}]`;
+  }
 }
 
 // ── Render (display rate) ─────────────────────────────────────────────────────
@@ -266,6 +276,7 @@ loop.onRender((_alpha, t, nowMs) => {
   const cycle    = (t % 120) / 120;
   const daylight = Math.sin(cycle * Math.PI) * 0.5 + 0.5;
   const darkness = clamp((0.55 - daylight) * 1.8, 0, 0.85);
+  currentDarkness = darkness;
 
   // Render split-screen frame
   renderVerdant(

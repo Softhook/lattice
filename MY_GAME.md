@@ -25,15 +25,16 @@ Players cooperate to shape the world (dig and build) and defend against hostile 
 | **Build / Action** | <kbd>E</kbd> | <kbd>O</kbd> |
 | **Switch Mode** | <kbd>F</kbd> | <kbd>H</kbd> |
 
-### Modes
-- **Move Mode**: Normal movement. Action keys do nothing.
-- **Dig Mode**: Action keys dig the tile the player is currently facing, lowering the terrain.
-- **Build Mode**: Action keys place the selected structure at the facing tile:
-  - **Wall**: Block that blocks movement and shields players.
-  - **Floor**: Platform for walking and bridges.
-  - **Tower**: Large structure; trolls attack towers first.
-  - **Ramp**: Sloped platform allowing players to walk up dug cliffs.
-  - Pressing <kbd>F</kbd> / <kbd>H</kbd> cycles through the building types before returning to Move Mode.
+### Modes & Controls
+- **Move Mode**: Action key (<kbd>E</kbd> / <kbd>O</kbd>) harvests resources from facing tile (chopping trees for Wood, mining boulders for Stone, foraging bushes for Wood/Fiber) or repairs damaged buildings.
+- **Dig / Raise**: <kbd>Q</kbd> / <kbd>U</kbd> digs down; <kbd>R</kbd> / <kbd>Y</kbd> raises terrain.
+- **Build Mode**: Action key places selected structure if the player has the required materials:
+  - **Wood Wall** (4 Wood): 1×1 solid timber palisade; blocks and keeps out animals.
+  - **Stone Wall** (4 Stone): 1×1 heavy masonry fortification with high HP.
+  - **Wood Tower** (12 Wood, 2 Stone): 2×2 timber lookout tower emitting lantern light at night.
+  - **Stone Tower** (6 Wood, 14 Stone): 2×2 massive fortress tower with defensive lantern beacon.
+  - **Floor** (2 Wood): 1×1 wooden plank decking and bridges.
+  - Pressing <kbd>F</kbd> / <kbd>H</kbd> cycles through the building modes and returns to Move Mode.
 
 ---
 

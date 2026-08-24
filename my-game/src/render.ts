@@ -47,9 +47,9 @@ import type { WorldTerrain } from './world.js';
 import { W, H, MAT_WATER } from './world.js';
 import type { Creature } from './creatures.js';
 import type { Player } from './players.js';
-import { facingTile, MAX_HP } from './players.js';
+import { facingTile, MAX_HP, canAffordBuilding } from './players.js';
 import type { Building, BuildingKind } from './buildings.js';
-import { defFor, canPlaceBuilding, LANTERN_GLOW } from './buildings.js';
+import { defFor, canPlaceBuilding, LANTERN_GLOW, BUILDING_COSTS } from './buildings.js';
 import type { FloraItem } from './flora.js';
 import { defForFlora, floraVariant } from './flora.js';
 import {
@@ -105,16 +105,14 @@ const UI_HP_GOOD    = hex('#2ecc71');
 const UI_HP_BAD     = hex('#e74c3c');
 const UI_TEXT_WHITE = hex('#ecf0f1');
 const UI_TOOL_GOLD  = hex('#f1c40f');
+const UI_WOOD_COL   = hex('#d4a373');
+const UI_STONE_COL  = hex('#b0bec5');
+const UI_FIBER_COL  = hex('#81c784');
 
 // ── Zoom-scaling 2:1 Isometric Ground Light Pool ───────────────────────────────
 
 /**
  * Render an illuminated light pool lying flat in the ground plane.
- *
- * In a 2:1 isometric projection, a circular light pool on the ground projects to a
- * horizontal ellipse of width (2 * radiusTiles * HALF_W * zoom) and height
- * (radiusTiles * HALF_W * zoom). It scales seamlessly with camera zoom and stays locked
- * to ground tiles.
  */
 export function drawLightPool(
   pen: Pen,
@@ -171,7 +169,7 @@ export function renderVerdant(
   cycle: number,
   seed: number,
 ): void {
-  // Open the frame — clears the canvas and builds the pen with camera1 and light1.
+  // Open the frame — clears canvas and builds pen with camera1 and light1.
   const pen = beginFrame({
     surface,
     camera: camera1,
@@ -231,6 +229,9 @@ function drawViewport(
 ): void {
   ORDER.clear();
 
+  // Initialize light accumulator for this viewport's camera and pen
+  light.begin(pen, darkness, NIGHT_COLOR);
+
   // 1. Add buildings
   for (const b of liveBuildings) {
     const def = defFor(b.kind);
@@ -273,7 +274,10 @@ function drawViewport(
   let isLegal = false;
 
   if (ghostDef !== undefined && buildKind !== undefined) {
-    isLegal = canPlaceBuilding(buildKind, ghostTile.gx, ghostTile.gy, world, liveBuildings);
+    const canPlace = canPlaceBuilding(buildKind, ghostTile.gx, ghostTile.gy, world, liveBuildings);
+    const canAfford = canAffordBuilding(activePlayer, buildKind);
+    isLegal = canPlace && canAfford;
+
     FP_SCRATCH.gx = ghostTile.gx; FP_SCRATCH.gy = ghostTile.gy; FP_SCRATCH.w = ghostDef.w; FP_SCRATCH.d = ghostDef.d;
     ghostBasePx = footprintBase(world.field, FP_SCRATCH as unknown as Footprint);
     ORDER.add(ghostTile.gx, ghostTile.gy, ghostDef.w, ghostDef.d, ghostBasePx + spriteHeightPx(ghostDef, VARIANT_ZERO));
@@ -289,7 +293,7 @@ function drawViewport(
     maxHeightPx: world.currentMaxHeightPx,
 
     backdrop(pen) {
-      // Celestial sky backdrop with sun/moon arc and stars
+      // Atmospheric sky gradient and stars (no sun/moon discs)
       drawSky(pen, daylight, cycle);
       // Distant horizon mountain ranges
       farRanges(pen, seed, daylight);
@@ -351,9 +355,13 @@ function drawViewport(
           (VARIANT_SCRATCH as any).progress = 1;
           drawSprite(pen, def, b.gx, b.gy, VARIANT_SCRATCH, b.basePx);
 
-          // Watchtower beacon lantern emits warm pool of light at night
-          if (b.kind === 'tower' && darkness > 0) {
-            drawLightPool(pen, b.gx + 1, b.gy + 1, b.basePx, 5.5, darkness * 0.95, LANTERN_GLOW);
+          // Towers emit warm protective beacon light pools at night
+          if (darkness > 0) {
+            if (b.kind === 'wood_tower') {
+              light.add(b.gx + 1, b.gy + 1, b.basePx + 48, 6.0, darkness * 0.95, LANTERN_GLOW);
+            } else if (b.kind === 'stone_tower') {
+              light.add(b.gx + 1, b.gy + 1, b.basePx + 65, 7.5, darkness * 1.0, LANTERN_GLOW);
+            }
           }
 
         } else if (idx < numBuildings + numFlora) {
@@ -373,9 +381,13 @@ function drawViewport(
           const basePx = heightAt(world.field, c.gx, c.gy);
           drawSprite(pen, def, c.gx, c.gy, v, basePx);
 
-          // Hostile trolls emit a menacing subtle red ambient aura at night
-          if (c.species === 'troll' && darkness > 0) {
-            drawLightPool(pen, c.gx, c.gy, basePx, 3.2, darkness * 0.45, hex('#e74c3c'));
+          // Hostile predators emit subtle auras in darkness
+          if (darkness > 0) {
+            if (c.species === 'troll') {
+              light.add(c.gx, c.gy, basePx, 3.5, darkness * 0.55, hex('#e74c3c'));
+            } else if (c.species === 'wolf') {
+              light.add(c.gx, c.gy, basePx, 2.4, darkness * 0.4, hex('#e67e22'));
+            }
           }
 
         } else if (idx < numBuildings + numFlora + numCreatures + numPlayers) {
@@ -389,11 +401,11 @@ function drawViewport(
 
           // Player torchlight at night
           if (darkness > 0) {
-            drawLightPool(pen, p.gx, p.gy, basePx, 4.0, darkness * 0.85, TOOL_GOLD);
+            light.add(p.gx, p.gy, basePx, 4.5, darkness * 0.95, TOOL_GOLD);
           }
 
         } else if (idx === ghostIndex && ghostDef !== undefined) {
-          // Ghost preview — correctly depth-sorted against players, trees and structures!
+          // Ghost preview — depth-sorted against players, trees and structures
           drawGhost(pen, ghostDef, ghostTile.gx, ghostTile.gy, VARIANT_ZERO, isLegal, ghostBasePx);
         }
       }
@@ -409,23 +421,14 @@ function drawViewport(
       const viewW = pen.camera.viewW;
       const viewH = pen.camera.viewH;
 
-      // 1. Ambient darkness wash across the viewport
-      if (darkness > 0) {
-        pen.surface.poly(
-          Float64Array.of(0, 0, viewW, 0, viewW, viewH, 0, viewH),
-          4,
-          withAlpha(NIGHT_COLOR, darkness * 0.52),
-        );
-      }
-
-      // 2. Divider line (drawn once on left viewport)
+      // Divider line (drawn once on left viewport)
       if (isLeft) {
         const fullW = pen.surface.width;
         const cx    = fullW * 0.5;
         pen.surface.stroke(Float64Array.of(cx, 0, cx, viewH), 2, false, hex('#2d4020'), 2);
       }
 
-      // 3. Player HUD Card
+      // ── Player HUD Card ─────────────────────────────────────────────────────
       const pIdx = activePlayer.index;
       const pColor = pIdx === 0 ? P1_COLOR : P2_COLOR;
       const pAccent = pIdx === 0 ? P1_ACCENT : P2_ACCENT;
@@ -433,8 +436,8 @@ function drawViewport(
 
       const padX = 14;
       const padY = 14;
-      const hudW = 240;
-      const hudH = 74;
+      const hudW = 270;
+      const hudH = 100;
 
       const isHurt = activePlayer.hurtFlash > 0;
       const cardBorder = isHurt ? hex('#e74c3c') : pColor;
@@ -464,7 +467,7 @@ function drawViewport(
         isHurt ? 2.5 : 1.5,
       );
 
-      // Header row: Player Tag + HP number
+      // 1. Header row: Player Tag + HP number
       screenText(
         pen,
         padX + 10,
@@ -486,11 +489,11 @@ function drawViewport(
         { ...DEFAULT_TEXT, size: 11, weight: 700, align: 1, baseline: 0 },
       );
 
-      // Health bar container
+      // 2. Health bar
       const barX = padX + 10;
       const barY = padY + 24;
       const barW = hudW - 20;
-      const barH = 8;
+      const barH = 7;
 
       pen.surface.poly(
         Float64Array.of(barX, barY, barX + barW, barY, barX + barW, barY + barH, barX, barY + barH),
@@ -506,52 +509,111 @@ function drawViewport(
         );
       }
 
-      // Tool / Mode badge
+      // 3. Inventory Bar Row
+      const invY = padY + 41;
+      const inv = activePlayer.inventory;
+      screenText(
+        pen,
+        padX + 10,
+        invY,
+        `WOOD: ${inv.wood}`,
+        UI_WOOD_COL,
+        { ...DEFAULT_TEXT, size: 11, weight: 700, align: -1, baseline: 0 },
+      );
+      screenText(
+        pen,
+        padX + 100,
+        invY,
+        `STONE: ${inv.stone}`,
+        UI_STONE_COL,
+        { ...DEFAULT_TEXT, size: 11, weight: 700, align: -1, baseline: 0 },
+      );
+      screenText(
+        pen,
+        padX + 190,
+        invY,
+        `FIBER: ${inv.fiber}`,
+        UI_FIBER_COL,
+        { ...DEFAULT_TEXT, size: 11, weight: 700, align: -1, baseline: 0 },
+      );
+
+      // 4. Tool / Mode badge
       const toolX = padX + 10;
-      const toolY = padY + 38;
+      const toolY = padY + 58;
       const toolW = hudW - 20;
-      const toolH = 26;
+      const toolH = 32;
 
       pen.surface.poly(
         Float64Array.of(toolX, toolY, toolX + toolW, toolY, toolX + toolW, toolY + toolH, toolX, toolY + toolH),
         4,
         hex('#132110'),
       );
+
+      const actKey = pIdx === 0 ? '[E]' : '[O]';
+      const cycleKey = pIdx === 0 ? '[F] Mode' : '[H] Mode';
+
+      let modeText = '';
+      let modeColor = hex('#bdc3c7');
+
+      if (activePlayer.mode === 'move') {
+        modeText = `MOVE  ${actKey} HARVEST/INTERACT`;
+      } else {
+        const cost = BUILDING_COSTS[activePlayer.mode];
+        const affordable = canAffordBuilding(activePlayer, activePlayer.mode);
+        const name = activePlayer.mode.replace('_', ' ').toUpperCase();
+        modeText = `${name} (${cost.wood}W, ${cost.stone}S) ${actKey}`;
+        modeColor = affordable ? UI_TOOL_GOLD : hex('#e74c3c');
+      }
+
       pen.surface.stroke(
         Float64Array.of(toolX, toolY, toolX + toolW, toolY, toolX + toolW, toolY + toolH, toolX, toolY + toolH),
         4,
         true,
-        activePlayer.mode === 'move' ? hex('#34495e') : UI_TOOL_GOLD,
+        activePlayer.mode === 'move' ? hex('#34495e') : modeColor,
         1,
       );
-
-      const actKey = pIdx === 0 ? '[E]' : '[O]';
-      const modeText = activePlayer.mode === 'move' ? `MOVE  ${actKey} INTERACT` : `BUILD: ${activePlayer.mode.toUpperCase()}  ${actKey}`;
-      const cycleKey = pIdx === 0 ? '[F] Mode' : '[H] Mode';
 
       screenText(
         pen,
         toolX + 8,
-        toolY + 13,
+        toolY + 16,
         modeText,
-        activePlayer.mode === 'move' ? hex('#bdc3c7') : UI_TOOL_GOLD,
+        modeColor,
         { ...DEFAULT_TEXT, size: 10, weight: 700, align: -1, baseline: 0 },
       );
 
       screenText(
         pen,
         toolX + toolW - 8,
-        toolY + 13,
+        toolY + 16,
         cycleKey,
         hex('#8da882'),
         { ...DEFAULT_TEXT, size: 10, weight: 600, align: 1, baseline: 0 },
       );
 
+      // 5. Floating action notification if present
+      if (activePlayer.lastActionMsg.length > 0 && activePlayer.msgTimer > 0) {
+        const msgY = padY + hudH + 16;
+        const alpha = Math.min(1, activePlayer.msgTimer * 2);
+        const msgCol = activePlayer.lastActionMsg.startsWith('NEED')
+          ? withAlpha(hex('#ff7675'), alpha)
+          : withAlpha(hex('#55efc4'), alpha);
+
+        screenText(
+          pen,
+          padX + 10,
+          msgY,
+          activePlayer.lastActionMsg,
+          msgCol,
+          { ...DEFAULT_TEXT, size: 12, weight: 800, align: -1, baseline: 0 },
+        );
+      }
+
       // Respawn banner if knocked down
       if (activePlayer.respawnTimer > 0) {
         const respawnSec = Math.ceil(activePlayer.respawnTimer);
         const bannerY = viewH * 0.45;
-        const bannerW = Math.min(300, viewW - 40);
+        const bannerW = Math.min(320, viewW - 40);
         const bannerX = (viewW - bannerW) * 0.5;
 
         pen.surface.poly(
