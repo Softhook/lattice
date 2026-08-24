@@ -1,7 +1,7 @@
 /**
  * Verdant — main entry point.
  *
- * Wiring only: surfaces, cameras, loop, input, keyboard state, and the game tick.
+ * Wiring only: surfaces, cameras, loop, audio, input, persistent storage, and the game tick.
  * No game logic lives here. This file is the ordering that cannot be wrong.
  */
 
@@ -21,7 +21,7 @@ import { createInput } from '@latticekit/input';
 
 import {
   createWorld,
-  W, H, MAX_HEIGHT_PX, STEP_PX,
+  W, H, MAX_HEIGHT_PX,
 } from './world.js';
 import { populateFlora, tickFloraRegrowth } from './flora.js';
 import {
@@ -49,14 +49,17 @@ import {
   pollP1Movement,
   pollP2Movement,
   pollActions,
-  snapshotKeys,
+  copyKeys,
+  createActionEdges,
+  type Vec2Out,
 } from './input.js';
 import {
   createVerdantPalette,
   renderVerdant,
   resizeCameras,
 } from './render.js';
-import { NIGHT_COLOR } from './palette.js';
+import { createGameAudio } from './audio.js';
+import { createVerdantStore, extractSaveState } from './storage.js';
 
 // ── Seed ───────────────────────────────────────────────────────────────────────
 
@@ -65,11 +68,18 @@ const SEED = urlSeed !== null ? parseInt(urlSeed, 10) : hashString('verdant-v1')
 
 // ── Canvas + Surface ───────────────────────────────────────────────────────────
 
-const canvas  = document.getElementById('viewport') as HTMLCanvasElement;
-const surface = createCanvas2dSurface(canvas);
+const canvasEl = document.getElementById('viewport');
+if (!(canvasEl instanceof HTMLCanvasElement)) {
+  throw new Error('main: expected #viewport HTMLCanvasElement in DOM');
+}
+const surface = createCanvas2dSurface(canvasEl);
 const palette = createVerdantPalette();
 const light1  = createLightField(surface, { scale: 0.5, falloff: 1.8, bloom: 0.3 });
 const light2  = createLightField(surface, { scale: 0.5, falloff: 1.8, bloom: 0.3 });
+
+// ── Audio ──────────────────────────────────────────────────────────────────────
+
+const audio = createGameAudio();
 
 // ── World & Nature ─────────────────────────────────────────────────────────────
 
@@ -77,7 +87,7 @@ const world     = createWorld(SEED);
 const flora     = populateFlora(SEED, world);
 const buildings: Building[] = [];
 
-// World bounding rectangle in world pixels.
+// World bounding rectangle in world pixels
 const worldRect: Rect = { minX: 0, minY: 0, maxX: 0, maxY: 0 };
 tileBounds(0, 0, W, H, MAX_HEIGHT_PX, worldRect);
 
@@ -86,7 +96,26 @@ tileBounds(0, 0, W, H, MAX_HEIGHT_PX, worldRect);
 const [p1, p2] = createPlayers();
 const creatures = populateWorld(SEED, world);
 
-// Helper to lock camera center on a player's coordinates with smooth continuous elevation
+// ── Persistent Storage ────────────────────────────────────────────────────────
+
+const store = createVerdantStore(SEED, () => extractSaveState(SEED, [p1, p2], buildings));
+const opened = store.open();
+if (opened.source === 'save' && opened.state && opened.state.p1 && opened.state.p2) {
+  // Restore saved player inventories & stats
+  const s = opened.state;
+  p1.inventory.wood = s.p1.wood;
+  p1.inventory.stone = s.p1.stone;
+  p1.inventory.fiber = s.p1.fiber;
+  p1.hp = s.p1.hp;
+
+  p2.inventory.wood = s.p2.wood;
+  p2.inventory.stone = s.p2.stone;
+  p2.inventory.fiber = s.p2.fiber;
+  p2.hp = s.p2.hp;
+}
+
+// ── Camera Locking ────────────────────────────────────────────────────────────
+
 function lockCameraToPlayer(camera: Camera, player: typeof p1): void {
   const pgx = player.gx;
   const pgy = player.gy;
@@ -98,7 +127,6 @@ function lockCameraToPlayer(camera: Camera, player: typeof p1): void {
 
 // ── Cameras ────────────────────────────────────────────────────────────────────
 
-// Each camera covers half the window width.
 const initHalfW  = Math.max(1, Math.floor(window.innerWidth / 2));
 const initViewH  = Math.max(1, window.innerHeight - 32);
 
@@ -127,94 +155,134 @@ const loop = createLoop({
   frames: browserFrames(),
 });
 
-// ── Input (pointer + camera panning for Player 1's viewport) ──────────────────
+// ── Input ──────────────────────────────────────────────────────────────────────
 
 const input = createInput({
-  element: canvas,
+  element: canvasEl,
   camera:  camera1,
   step:    loop,
   terrain: { field: world.field, maxHeightPx: world.currentMaxHeightPx },
   actions: {},
 });
 
-// ── Keyboard ───────────────────────────────────────────────────────────────────
+// ── Keyboard & Hot-Path Scratch Structures (Zero Allocation) ───────────────────
 
 const { state: keyState, dispose: disposeKeys } = createKeyState();
-let prevKeys = new Set<string>();
+const prevKeys = new Set<string>();
+const edges = createActionEdges();
+const moveVec1: Vec2Out = { dx: 0, dy: 0 };
+const moveVec2: Vec2Out = { dx: 0, dy: 0 };
+
+// Unlock audio on first keypress or canvas interaction
+function onFirstGesture(): void {
+  audio.unlock();
+  window.removeEventListener('keydown', onFirstGesture);
+  window.removeEventListener('pointerdown', onFirstGesture);
+}
+window.addEventListener('keydown', onFirstGesture, { once: true });
+window.addEventListener('pointerdown', onFirstGesture, { once: true });
 
 // ── Game update (fixed 60 Hz) ─────────────────────────────────────────────────
 
 let tickCount = 0;
 let currentDarkness = 0;
+let autosaveTimer = 0;
 
 loop.onUpdate((dt, tick) => {
   input.tick(tick);
 
-  const curr  = keyState.held;
-  const edges = pollActions(prevKeys, curr);
+  const curr = keyState.held;
+  pollActions(prevKeys, curr, edges);
 
-  // ── Player movement (blocked by water and solid buildings) ───────────────────
-  const { dx: dx1, dy: dy1 } = pollP1Movement(curr);
-  const { dx: dx2, dy: dy2 } = pollP2Movement(curr);
-  movePlayer(p1, dx1, dy1, world, buildings, dt);
-  movePlayer(p2, dx2, dy2, world, buildings, dt);
+  // ── Player movement ───────────────────────────────────────────────────────────
+  pollP1Movement(curr, moveVec1);
+  pollP2Movement(curr, moveVec2);
+  movePlayer(p1, moveVec1.dx, moveVec1.dy, world, buildings, dt);
+  movePlayer(p2, moveVec2.dx, moveVec2.dy, world, buildings, dt);
 
   // ── Player 1 Actions ─────────────────────────────────────────────────────────
   if (edges.p1Cycle) {
     cycleBuildKind(p1);
+    audio.play('click');
     updateDomHud();
   }
   if (edges.p1Build) {
     if (p1.mode === 'move') {
-      interactAtFacing(p1, world, flora, buildings);
-      updateDomHud();
+      const res = interactAtFacing(p1, world, flora, buildings);
+      if (res.type !== 'none') {
+        audio.play(res.type);
+        updateDomHud();
+      }
     } else {
       const placed = buildAtFacing(p1, world, buildings);
       if (placed !== undefined) {
         buildings.push(placed);
+        audio.play('build');
         updateDomHud();
       }
     }
   }
   if (edges.p1Dig) {
-    digAtFacing(p1, world);
-    input.setTerrain({ field: world.field, maxHeightPx: world.currentMaxHeightPx });
+    const changed = digAtFacing(p1, world);
+    if (changed) {
+      audio.play('dig');
+      input.setTerrain({ field: world.field, maxHeightPx: world.currentMaxHeightPx });
+    }
   }
   if (edges.p1Raise) {
-    raiseAtFacing(p1, world);
-    input.setTerrain({ field: world.field, maxHeightPx: world.currentMaxHeightPx });
+    const changed = raiseAtFacing(p1, world);
+    if (changed) {
+      audio.play('raise');
+      input.setTerrain({ field: world.field, maxHeightPx: world.currentMaxHeightPx });
+    }
   }
 
   // ── Player 2 Actions ─────────────────────────────────────────────────────────
   if (edges.p2Cycle) {
     cycleBuildKind(p2);
+    audio.play('click');
     updateDomHud();
   }
   if (edges.p2Build) {
     if (p2.mode === 'move') {
-      interactAtFacing(p2, world, flora, buildings);
-      updateDomHud();
+      const res = interactAtFacing(p2, world, flora, buildings);
+      if (res.type !== 'none') {
+        audio.play(res.type);
+        updateDomHud();
+      }
     } else {
       const placed = buildAtFacing(p2, world, buildings);
       if (placed !== undefined) {
         buildings.push(placed);
+        audio.play('build');
         updateDomHud();
       }
     }
   }
   if (edges.p2Dig) {
-    digAtFacing(p2, world);
-    input.setTerrain({ field: world.field, maxHeightPx: world.currentMaxHeightPx });
+    const changed = digAtFacing(p2, world);
+    if (changed) {
+      audio.play('dig');
+      input.setTerrain({ field: world.field, maxHeightPx: world.currentMaxHeightPx });
+    }
   }
   if (edges.p2Raise) {
-    raiseAtFacing(p2, world);
-    input.setTerrain({ field: world.field, maxHeightPx: world.currentMaxHeightPx });
+    const changed = raiseAtFacing(p2, world);
+    if (changed) {
+      audio.play('raise');
+      input.setTerrain({ field: world.field, maxHeightPx: world.currentMaxHeightPx });
+    }
   }
 
-  prevKeys = snapshotKeys(curr);
+  // Snapshot held keys without heap allocations
+  copyKeys(curr, prevKeys);
 
-  // ── Creature & Flora Ecosystem (with nocturnal aggression & building barriers) ─
-  updateCreatures(creatures, world, [p1, p2], flora, buildings, currentDarkness, dt);
+  // ── Creature & Flora Ecosystem ───────────────────────────────────────────────
+  const creEvents = updateCreatures(creatures, world, [p1, p2], flora, buildings, currentDarkness, dt);
+  if (creEvents.playerAttacked) {
+    audio.play('hurt');
+  }
+
   tickFloraRegrowth(SEED, flora, world, dt);
 
   // ── Troll building damage ────────────────────────────────────────────────────
@@ -225,10 +293,11 @@ loop.onUpdate((dt, tick) => {
     }
   }
 
-  // ── Remove destroyed buildings ────────────────────────────────────────────────
+  // ── Remove destroyed buildings in place ────────────────────────────────────────
   let bi = buildings.length;
   while (bi--) {
-    if ((buildings[bi] as Building).hp <= 0) buildings.splice(bi, 1);
+    const b = buildings[bi];
+    if (b !== undefined && b.hp <= 0) buildings.splice(bi, 1);
   }
 
   // ── Evolution ─────────────────────────────────────────────────────────────────
@@ -237,9 +306,19 @@ loop.onUpdate((dt, tick) => {
     evolveGeneration(creatures, SEED, world);
   }
 
-  // ── Player regen / respawn ────────────────────────────────────────────────────
-  tickPlayer(p1, dt);
-  tickPlayer(p2, dt);
+  // ── Player regen & respawn ────────────────────────────────────────────────────
+  const p1Respawned = tickPlayer(p1, dt);
+  const p2Respawned = tickPlayer(p2, dt);
+  if (p1Respawned || p2Respawned) {
+    audio.play('respawn');
+  }
+
+  // ── Autosave every 10 seconds ─────────────────────────────────────────────────
+  autosaveTimer += dt;
+  if (autosaveTimer >= 10.0) {
+    autosaveTimer = 0;
+    store.save(extractSaveState(SEED, [p1, p2], buildings));
+  }
 });
 
 // ── DOM Controls Bar Helper ───────────────────────────────────────────────────
@@ -267,7 +346,7 @@ loop.onRender((_alpha, t, nowMs) => {
     camera2.zoomAt(camera1.zoom / camera2.zoom, camera2.viewW / 2, camera2.viewH / 2);
   }
 
-  // Lock camera center to each player's world position.
+  // Lock camera center to each player's world position
   lockCameraToPlayer(camera1, p1);
   lockCameraToPlayer(camera2, p2);
 
@@ -317,9 +396,18 @@ function dispose(): void {
   loop.stop();
   input.dispose();
   disposeKeys();
+  audio.dispose();
   window.removeEventListener('resize', fit);
 }
-if ((import.meta as any).hot) (import.meta as any).hot.dispose(dispose);
+
+interface HotModule {
+  dispose(cb: () => void): void;
+}
+
+const hotMeta = import.meta as unknown as { hot?: HotModule };
+if (hotMeta.hot) {
+  hotMeta.hot.dispose(dispose);
+}
 
 // ── Go! ────────────────────────────────────────────────────────────────────────
 

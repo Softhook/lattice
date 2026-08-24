@@ -1,11 +1,11 @@
 /**
  * World state: the terrain heightfield, surface materials, and all mutations to them.
  *
- * The world is a 160×160 grid of tiles. Height lives on vertices (TileGrid W+1 × H+1),
+ * The world is a 200×200 grid of tiles. Height lives on vertices (TileGrid W+1 × H+1),
  * so adjacent tiles share corners exactly and the terrain never has seams.
  *
- * **Dig and build mutate this module's state directly.** After any mutation that raises the
- * maximum height, call `world.maxHeightPx` to re-read it and pass the new value to
+ * **Dig and raise mutate this module's state directly.** After any mutation that raises the
+ * maximum height, `world.currentMaxHeightPx` is updated and passed to
  * `input.setTerrain({ field, maxHeightPx })`. Failing to do so makes taps resolve on the old
  * surface — ground the player raised this frame is ground the next event misses.
  */
@@ -54,7 +54,7 @@ export interface WorldTerrain {
 }
 
 /**
- * Generate the world from a seed. Same seed → identical terrain, creature spawns, etc.
+ * Generate the world from a seed. Same seed → identical terrain.
  *
  * Multi-frequency octave noise creates dramatic continental relief, alpine ridges,
  * mountain cliffs, river valleys, and rolling meadows.
@@ -102,7 +102,7 @@ export function createWorld(seed: number): WorldTerrain {
 }
 
 /** Map a height unit value to its default material. */
-function materialFromHeight(h: number): number {
+export function materialFromHeight(h: number): number {
   if (h <= 1) return MAT_WATER;
   if (h <= 2) return MAT_SAND;
   if (h >= 19) return MAT_SNOW;
@@ -168,18 +168,6 @@ export function raise(world: WorldTerrain, gx: number, gy: number): boolean {
     }
   }
   return changed;
-}
-
-/** Scan all vertices for the current tallest, in world pixels. Called after dig/raise. */
-function measureMaxHeightPx(heights: TileGrid): number {
-  let max = 0;
-  for (let gy = 0; gy <= H; gy++) {
-    for (let gx = 0; gx <= W; gx++) {
-      const h = heights.get(gx, gy);
-      if (h > max) max = h;
-    }
-  }
-  return max * STEP_PX;
 }
 
 /**

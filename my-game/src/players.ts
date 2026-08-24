@@ -1,5 +1,5 @@
 /**
- * Player state, inventory, and movement.
+ * Player state, inventory, movement, and actions.
  *
  * Two players, each with tile position, facing, action mode, HP, and Inventory.
  * Movement is continuous at fixed speed, blocked by water and solid buildings (walls, towers).
@@ -50,7 +50,7 @@ export interface Player {
   hurtFlash: number;
   /** Respawn timer in seconds. > 0 means knocked down. */
   respawnTimer: number;
-  /** Accumulated movement sub-tile distance for smooth stepping. */
+  /** Accumulated movement distance for footstep sound cadence. */
   moveAccum: number;
   /** Floating action notification string. */
   lastActionMsg: string;
@@ -135,11 +135,14 @@ export function canAffordBuilding(player: Player, kind: BuildingKind): boolean {
 
 // ── Movement ───────────────────────────────────────────────────────────────────
 
+export interface MoveResult {
+  stepped: boolean;
+  footstep: boolean;
+}
+
 /**
  * Move a player by (dx, dy) grid directions this tick.
- *
- * `dx` and `dy` are each −1, 0, or +1 from held-key polling.
- * The player can only step into walkable, non-blocked tiles.
+ * Returns true if footstep trigger fired.
  */
 export function movePlayer(
   player: Player,
@@ -148,11 +151,11 @@ export function movePlayer(
   world: WorldTerrain,
   buildings: readonly Building[],
   dt: number,
-): void {
-  if (player.respawnTimer > 0) return;
-  if (dx === 0 && dy === 0) return;
+): boolean {
+  if (player.respawnTimer > 0) return false;
+  if (dx === 0 && dy === 0) return false;
 
-  // Update facing from movement direction.
+  // Update facing from movement direction
   if      (dy < 0) player.facing = 'n';
   else if (dy > 0) player.facing = 's';
   else if (dx < 0) player.facing = 'w';
@@ -163,14 +166,22 @@ export function movePlayer(
   const nx     = player.gx + dx * speed * mag;
   const ny     = player.gy + dy * speed * mag;
 
-  // Check walkability and solid building obstacles for the destination tile.
+  // Check walkability and solid building obstacles for the destination tile
   const tileX  = clamp(Math.floor(nx), 0, W - 1);
   const tileY  = clamp(Math.floor(ny), 0, H - 1);
 
   if (isWalkable(world, tileX, tileY) && !isTileOccupiedBySolidBuilding(tileX, tileY, buildings)) {
     player.gx = clamp(nx, 0, W - 1);
     player.gy = clamp(ny, 0, H - 1);
+
+    player.moveAccum += speed * mag;
+    if (player.moveAccum >= 0.85) {
+      player.moveAccum = 0;
+      return true; // Footstep sound trigger
+    }
   }
+
+  return false;
 }
 
 // ── Actions ────────────────────────────────────────────────────────────────────
@@ -219,6 +230,13 @@ export function buildAtFacing(
   return placed;
 }
 
+export type InteractType = 'chop' | 'mine' | 'forage' | 'repair' | 'none';
+
+export interface InteractResult {
+  type: InteractType;
+  label: string;
+}
+
 /**
  * Interact / Harvest / Mine / Repair at the player's facing tile.
  *
@@ -232,8 +250,8 @@ export function interactAtFacing(
   world: WorldTerrain,
   flora: FloraItem[],
   buildings: Building[],
-): string | undefined {
-  if (player.respawnTimer > 0) return undefined;
+): InteractResult {
+  if (player.respawnTimer > 0) return { type: 'none', label: '' };
   const { gx, gy } = facingTile(player);
 
   // 1. Check for flora at the facing tile to harvest
@@ -246,7 +264,13 @@ export function interactAtFacing(
 
     player.lastActionMsg = harvest.label;
     player.msgTimer = 2.2;
-    return harvest.label;
+
+    const kind = harvest.item.kind;
+    const soundType: InteractType =
+      kind === 'pine' || kind === 'oak' ? 'chop' :
+      kind === 'rock' ? 'mine' : 'forage';
+
+    return { type: soundType, label: harvest.label };
   }
 
   // 2. Check if facing a building (can repair building if damaged)
@@ -266,17 +290,17 @@ export function interactAtFacing(
           const msg = `REPAIRED ${b.kind.replace('_', ' ').toUpperCase()} (+40 HP)`;
           player.lastActionMsg = msg;
           player.msgTimer = 2.0;
-          return msg;
+          return { type: 'repair', label: msg };
         }
       }
       const statusMsg = `${b.kind.replace('_', ' ').toUpperCase()} (HP: ${Math.round(b.hp)}/${b.maxHp})`;
       player.lastActionMsg = statusMsg;
       player.msgTimer = 1.5;
-      return statusMsg;
+      return { type: 'none', label: statusMsg };
     }
   }
 
-  return undefined;
+  return { type: 'none', label: '' };
 }
 
 /** Dig (lower ground) at the player's facing tile. */
@@ -306,8 +330,8 @@ export function cycleBuildKind(player: Player): PlayerMode {
 
 // ── HP and respawn ─────────────────────────────────────────────────────────────
 
-/** Update HP regen, damage flash, message timer, and respawn timer. */
-export function tickPlayer(player: Player, dt: number): void {
+/** Update HP regen, damage flash, message timer, and respawn timer. Returns true if player just respawned. */
+export function tickPlayer(player: Player, dt: number): boolean {
   if (player.msgTimer > 0) {
     player.msgTimer = Math.max(0, player.msgTimer - dt);
     if (player.msgTimer === 0) player.lastActionMsg = '';
@@ -322,14 +346,16 @@ export function tickPlayer(player: Player, dt: number): void {
       player.respawnTimer = 0;
       player.combatCooldown = 0;
       player.hurtFlash = 0;
+      return true; // Respawned!
     }
-    return;
+    return false;
   }
   if (player.combatCooldown > 0) {
     player.combatCooldown = Math.max(0, player.combatCooldown - dt);
   } else if (player.hp < MAX_HP) {
     player.hp = Math.min(MAX_HP, player.hp + REGEN_RATE * dt);
   }
+  return false;
 }
 
 /** Apply incoming damage. Triggers respawn if HP reaches 0. */

@@ -16,15 +16,13 @@
 
 import {
   defineSprite,
-  VARIANT_ZERO,
   type SpriteDef,
   type Variant,
   type Massing,
-  type Animator,
   type SolidWriter,
   type Ink,
 } from '@latticekit/draw';
-import { Rng, toUnit, hash2 } from '@latticekit/core';
+import { Rng, hash2 } from '@latticekit/core';
 import type { Creature } from './creatures.js';
 import type { Player } from './players.js';
 import { P1_COLOR, P2_COLOR, RABBIT, DEER, WOLF, TROLL, FOX } from './palette.js';
@@ -102,19 +100,6 @@ function makePlayerMassing(bodyColor: Ink): Massing {
   };
 }
 
-/** Bob animation: player floats up/down. */
-function makePlayerAnimator(bodyColor: string): Animator {
-  return (pen, gx, gy, v, rng, _zPx) => {
-    const fi  = rng.next();
-    const t   = pen.t;
-    // @tier-b — bob is visual only, pixels only.
-    const bob = Math.sin(t * 3.5 + fi * 6.28) * 3; // 3 world pixels
-    // Draw a tiny directional indicator (facing line) using a post.
-    // The bob is applied via animate so the massing stays frameless.
-    void gx; void gy; void bob; // used in the pen drawing above
-  };
-}
-
 export const PLAYER_SPRITES: [SpriteDef, SpriteDef] = [
   defineSprite({ id: 'player0', w: 1, d: 1, massing: makePlayerMassing(P1_COLOR) }),
   defineSprite({ id: 'player1', w: 1, d: 1, massing: makePlayerMassing(P2_COLOR) }),
@@ -125,7 +110,7 @@ const rabbitMassing: Massing = (w, _v, _rng) => {
   w.shadow(0.15, 0.15, 0.7, 0.7, 0.2);
   w.box(0.2, 0.2, 0.6, 0.6, { color: RABBIT, h: 0.6 });
   w.box(0.3, 0.3, 0.4, 0.4, { color: RABBIT, h: 0.45, z: 0.6, inset: 0.05 });
-  // Ears.
+  // Ears
   w.post(0.38, 0.35, 0.55, 1.0, RABBIT, 0.04);
   w.post(0.55, 0.35, 0.55, 1.0, RABBIT, 0.04);
 };
@@ -138,9 +123,9 @@ export const RABBIT_SPRITE: SpriteDef = defineSprite({
 const foxMassing: Massing = (w, _v, _rng) => {
   w.shadow(0.1, 0.1, 0.8, 0.8, 0.25);
   w.box(0.15, 0.2, 0.7, 0.6, { color: FOX, h: 0.7 });
-  // Narrow head.
+  // Narrow head
   w.box(0.2, 0.2, 0.45, 0.4, { color: FOX, h: 0.5, z: 0.7 });
-  // Tail.
+  // Tail
   w.post(0.75, 0.5, 0.4, 0.8, FOX, 0.09);
 };
 
@@ -154,7 +139,7 @@ const deerMassing: Massing = (w, _v, _rng) => {
   w.box(0.15, 0.2, 0.7, 0.6, { color: DEER, h: 0.8 });
   w.post(0.35, 0.3, 0.8, 1.1, DEER, 0.08);
   w.box(0.25, 0.25, 0.4, 0.35, { color: DEER, h: 0.4, z: 1.4 });
-  // Antler posts.
+  // Antler posts
   w.post(0.32, 0.27, 1.8, 0.5, DEER, 0.04);
   w.post(0.48, 0.27, 1.8, 0.5, DEER, 0.04);
 };
@@ -203,8 +188,7 @@ export function spriteForCreature(species: Creature['species']): SpriteDef {
 /**
  * Build a `Variant` for a creature.
  *
- * Keyed on creature id so it is stable across re-sorts. `progress` and `label` are not
- * meaningful here — use the defaults.
+ * Keyed on creature id so it is stable across re-sorts.
  */
 export function creatureVariant(c: Creature): Variant {
   return {
@@ -228,11 +212,35 @@ export function playerVariant(p: Player): Variant {
   };
 }
 
+export interface MutableVariant {
+  seed: number;
+  flags: number;
+  level: number;
+  progress: number;
+  label: string;
+}
+
 /** A scratch Variant — hoisted so the common case allocates nothing. Must be filled before use. */
-export const VARIANT_SCRATCH: Variant = {
+export const VARIANT_SCRATCH: MutableVariant = {
   seed:     0,
   flags:    0,
   level:    0,
   progress: 1,
   label:    '',
 };
+
+/** Fill scratch variant with values and return it typed as Variant. */
+export function setScratchVariant(
+  seed: number,
+  flags = 0,
+  level = 0,
+  progress = 1,
+  label = '',
+): Variant {
+  VARIANT_SCRATCH.seed = seed;
+  VARIANT_SCRATCH.flags = flags;
+  VARIANT_SCRATCH.level = level;
+  VARIANT_SCRATCH.progress = progress;
+  VARIANT_SCRATCH.label = label;
+  return VARIANT_SCRATCH;
+}

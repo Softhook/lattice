@@ -16,7 +16,7 @@ export default defineConfig({
     alias: [{ find: /^@latticekit\/([a-z0-9-]+)$/, replacement: `${root}packages/$1/src/index.ts` }],
   },
   test: {
-    include: ['packages/*/test/**/*.test.ts', 'examples/*/test/**/*.test.ts', 'test/**/*.test.ts'],
+    include: ['packages/*/test/**/*.test.ts', 'examples/*/test/**/*.test.ts', 'my-game/test/**/*.test.ts', 'test/**/*.test.ts'],
     benchmark: { include: ['packages/*/test/**/*.bench.ts', 'examples/*/test/**/*.bench.ts'] },
     environment: 'node',
     restoreMocks: true,

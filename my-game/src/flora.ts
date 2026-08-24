@@ -14,35 +14,33 @@
 
 import {
   defineSprite,
-  VARIANT_ZERO,
   type SpriteDef,
   type Massing,
   type SolidWriter,
   type Variant,
-  type Ink,
+  hex,
 } from '@latticekit/draw';
-import { Rng, createRng, fbm2, hash2, toUnit } from '@latticekit/core';
-import { hex } from '@latticekit/draw';
+import { Rng, createRng, fbm2 } from '@latticekit/core';
 import { W, H, MAT_WATER, MAT_SAND, MAT_SNOW, MAT_ROCK, MAT_GRASS, type WorldTerrain } from './world.js';
 
 // ── Colors for Flora ──────────────────────────────────────────────────────────
 
-export const PINE_NEEDLE  = hex('#1b3d22');
-export const PINE_NEEDLE2 = hex('#25522e');
-export const OAK_LEAF     = hex('#3c6b2e');
-export const OAK_LEAF2    = hex('#4d8239');
-export const WOOD_TRUNK   = hex('#4a2f1b');
-export const BIRCH_TRUNK  = hex('#d2c8b8');
-export const BUSH_GREEN   = hex('#357335');
-export const BERRY_RED    = hex('#d9383a');
-export const FLOWER_PETAL = hex('#f2d649');
-export const FLOWER_BLUE  = hex('#5689db');
-export const FLOWER_PURPLE= hex('#9b59b6');
-export const ROCK_GRAY    = hex('#6e7370');
-export const ROCK_DARK    = hex('#4f5451');
-export const MOSS_GREEN   = hex('#4f7832');
-export const SHROOM_CAP   = hex('#c0392b');
-export const SHROOM_STEM  = hex('#e8dfd8');
+export const PINE_NEEDLE   = hex('#1b3d22');
+export const PINE_NEEDLE2  = hex('#25522e');
+export const OAK_LEAF      = hex('#3c6b2e');
+export const OAK_LEAF2     = hex('#4d8239');
+export const WOOD_TRUNK    = hex('#4a2f1b');
+export const BIRCH_TRUNK   = hex('#d2c8b8');
+export const BUSH_GREEN    = hex('#357335');
+export const BERRY_RED     = hex('#d9383a');
+export const FLOWER_PETAL  = hex('#f2d649');
+export const FLOWER_BLUE   = hex('#5689db');
+export const FLOWER_PURPLE = hex('#9b59b6');
+export const ROCK_GRAY     = hex('#6e7370');
+export const ROCK_DARK     = hex('#4f5451');
+export const MOSS_GREEN    = hex('#4f7832');
+export const SHROOM_CAP    = hex('#c0392b');
+export const SHROOM_STEM   = hex('#e8dfd8');
 
 // ── Flora Kinds & Definitions ─────────────────────────────────────────────────
 
@@ -283,7 +281,7 @@ export function populateFlora(seed: number, world: WorldTerrain): FloraItem[] {
           gy: tgy,
           w: 1,
           d: 1,
-          basePx: 0, // calculated before render
+          basePx: 0,
           scale,
           subType,
         });
@@ -346,13 +344,15 @@ export function harvestFloraAt(flora: FloraItem[], gx: number, gy: number): Harv
   return { item, wood, stone, fiber, label };
 }
 
+const DEFAULT_EDIBLE_KINDS: readonly FloraKind[] = ['flowers', 'bush', 'mushroom'];
+
 /** Find the closest edible flora within radius for herbivores. */
 export function findClosestEdibleFlora(
-  flora: FloraItem[],
+  flora: readonly FloraItem[],
   fromX: number,
   fromY: number,
   radius: number,
-  edibleKinds: readonly FloraKind[] = ['flowers', 'bush', 'mushroom'],
+  edibleKinds: readonly FloraKind[] = DEFAULT_EDIBLE_KINDS,
 ): FloraItem | undefined {
   let closest: FloraItem | undefined = undefined;
   let minDistSq = radius * radius;

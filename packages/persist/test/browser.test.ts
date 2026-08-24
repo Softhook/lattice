@@ -203,24 +203,43 @@ describe('browserStorage', () => {
 
   it('reads globalThis when given no scope, and finds nothing under plain node', () => {
     const host = globalThis as { localStorage?: StorageLike };
-    const had = 'localStorage' in host;
+    let had = false;
+    try {
+      if (host.localStorage) {
+        host.localStorage.setItem('__test_probe__', '1');
+        host.localStorage.removeItem('__test_probe__');
+        had = true;
+      }
+    } catch {
+      had = false;
+    }
     expect(browserStorage().durable).toBe(had);
 
     if (!had) {
+      const origDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
       const cells = new Map<string, string>();
-      host.localStorage = {
-        getItem: (key) => cells.get(key) ?? null,
-        setItem: (key, value) => {
+      const fakeStorage = {
+        getItem: (key: string) => cells.get(key) ?? null,
+        setItem: (key: string, value: string) => {
           cells.set(key, value);
         },
-        removeItem: (key) => {
+        removeItem: (key: string) => {
           cells.delete(key);
         },
       };
+      Object.defineProperty(globalThis, 'localStorage', {
+        value: fakeStorage,
+        configurable: true,
+        writable: true,
+      });
       try {
         expect(browserStorage().durable).toBe(true);
       } finally {
-        delete host.localStorage;
+        if (origDescriptor) {
+          Object.defineProperty(globalThis, 'localStorage', origDescriptor);
+        } else {
+          delete (globalThis as { localStorage?: unknown }).localStorage;
+        }
       }
     }
   });

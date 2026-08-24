@@ -12,12 +12,14 @@
  * spawn. No `Math.random()` — determinism is the whole point.
  */
 
-import { Rng, createRng, hash2, toUnit, clamp } from '@latticekit/core';
+import { Rng, createRng, hash2, clamp } from '@latticekit/core';
 import type { WorldTerrain } from './world.js';
 import { isWalkable, W, H } from './world.js';
 import { damagePlayer, type Player } from './players.js';
 import type { FloraItem } from './flora.js';
 import { findClosestEdibleFlora } from './flora.js';
+import type { Building } from './buildings.js';
+import { isTileOccupiedBySolidBuilding } from './buildings.js';
 
 // ── Species ────────────────────────────────────────────────────────────────────
 
@@ -107,11 +109,13 @@ export function spawnCreature(
   gx: number,
   gy: number,
   worldSeed: number,
+  parentTraits?: Traits,
+  parentGen = 0,
 ): Creature {
   const id  = nextId++;
   const rng = createRng(hash2(worldSeed, id, 0));
-  const base = BASE_TRAITS[species];
-  const traits = mutateTrait(base, rng, MUTATION * 2);
+  const base = parentTraits ?? BASE_TRAITS[species];
+  const traits = mutateTrait(base, rng, parentTraits ? MUTATION : MUTATION * 2);
   const maxHp  = Math.round(BASE_HP[species] * traits.size * 4);
 
   return {
@@ -127,7 +131,7 @@ export function spawnCreature(
     hp: maxHp,
     maxHp,
     rng,
-    generation: 0,
+    generation: parentGen,
     eatTimer: 0,
   };
 }
@@ -162,10 +166,12 @@ export function populateWorld(worldSeed: number, world: WorldTerrain): Creature[
   return creatures;
 }
 
-import type { Building } from './buildings.js';
-import { isTileOccupiedBySolidBuilding } from './buildings.js';
-
 // ── Update ─────────────────────────────────────────────────────────────────────
+
+export interface CreatureEvents {
+  playerAttacked: boolean;
+  roarOccurred: boolean;
+}
 
 /**
  * Update all creatures for one simulation tick.
@@ -175,33 +181,38 @@ import { isTileOccupiedBySolidBuilding } from './buildings.js';
  * - Carnivores (fox, wolf) hunt prey.
  * - At night (darkness > 0), wolves and trolls become nocturnal apex hunters with
  *   expanded detection ranges and aggressive siege attacks.
- * - Solid buildings (walls and towers) physically block and keep out animals!
+ * - Solid buildings (walls and towers) physically block and keep out animals.
  */
 export function updateCreatures(
   creatures: Creature[],
   world: WorldTerrain,
-  players: Player[],
+  players: readonly [Player, Player],
   flora: FloraItem[],
   buildings: Building[],
   darkness: number,
   dt: number,
-): void {
+): CreatureEvents {
+  const events: CreatureEvents = { playerAttacked: false, roarOccurred: false };
+
   for (let i = 0; i < creatures.length; i++) {
     const c = creatures[i];
     if (c === undefined || c.hp <= 0) continue;
-    updateOne(c, creatures, world, players, flora, buildings, darkness, dt);
+    updateOne(c, creatures, world, players, flora, buildings, darkness, dt, events);
   }
+
+  return events;
 }
 
 function updateOne(
   c: Creature,
   allCreatures: Creature[],
   world: WorldTerrain,
-  players: Player[],
+  players: readonly [Player, Player],
   flora: FloraItem[],
   buildings: Building[],
   darkness: number,
   dt: number,
+  events: CreatureEvents,
 ): void {
   const speed = c.traits.speed;
   // Nighttime increases predator hunting speed and perception range
@@ -332,12 +343,14 @@ function updateOne(
     if (bestTarget !== undefined) {
       if (bestTarget.dist < ATTACK_RANGE + (bestTarget.buildingRef ? 1.0 : 0)) {
         c.state = 'attack';
+
         if (bestTarget.targetRef !== undefined) {
           if ('respawnTimer' in bestTarget.targetRef) {
             // Target is a player
             const baseDmg = c.species === 'troll' ? 36 : 22;
             const nightDmg = baseDmg * (1 + darkness * 0.4);
             damagePlayer(bestTarget.targetRef, dt * nightDmg * c.traits.size);
+            events.playerAttacked = true;
           } else {
             // Target is a prey animal
             bestTarget.targetRef.hp -= dt * 18 * c.traits.size;
@@ -456,7 +469,7 @@ function moveWithSeparation(
 
   const tileX = Math.floor(nx);
   const tileY = Math.floor(ny);
-  // Ensure solid buildings (walls, towers) physically keep out animals!
+  // Ensure solid buildings (walls, towers) physically keep out animals
   if (isWalkable(world, tileX, tileY) && !isTileOccupiedBySolidBuilding(tileX, tileY, buildings)) {
     c.gx = clamp(nx, 2, W - 3);
     c.gy = clamp(ny, 2, H - 3);
@@ -468,6 +481,14 @@ function moveWithSeparation(
 
 // ── Evolution ──────────────────────────────────────────────────────────────────
 
+const SPECIES_MINIMA: readonly { species: Species; min: number }[] = [
+  { species: 'rabbit', min: 10 },
+  { species: 'deer', min: 6 },
+  { species: 'fox', min: 4 },
+  { species: 'wolf', min: 3 },
+  { species: 'troll', min: 2 },
+];
+
 /**
  * Evolve the population. Called every GENERATION_TICKS ticks.
  *
@@ -478,31 +499,40 @@ export function evolveGeneration(
   worldSeed: number,
   world: WorldTerrain,
 ): void {
-  // Remove dead creatures.
+  // Remove dead creatures
   let i = creatures.length;
   while (i--) {
-    if ((creatures[i] as Creature).hp <= 0) {
+    const c = creatures[i];
+    if (c !== undefined && c.hp <= 0) {
       creatures.splice(i, 1);
     }
   }
 
-  // Survivors reproduce: each creature with fertility > 1.0 spawns a child (up to cap).
+  // Survivors reproduce: each creature with fertility > 1.0 spawns a child (up to cap)
   const toAdd: Creature[] = [];
-  for (const c of creatures) {
+  for (let ci = 0; ci < creatures.length; ci++) {
+    const c = creatures[ci];
+    if (c === undefined) continue;
     if (creatures.length + toAdd.length >= MAX_CREATURES) break;
     if (c.traits.fertility > 1.0 && c.rng.next() < (c.traits.fertility - 1.0) * 0.5) {
-      const child = spawnCreature(c.species, c.gx, c.gy, worldSeed);
-      (child as { traits: Traits }).traits = mutateTrait(c.traits, child.rng, MUTATION);
-      (child as { generation: number }).generation = c.generation + 1;
+      const child = spawnCreature(c.species, c.gx, c.gy, worldSeed, c.traits, c.generation + 1);
       toAdd.push(child);
     }
   }
 
   // Replenish extinct species with uniform spatial distribution across the world
   const counts: Partial<Record<Species, number>> = {};
-  for (const c of creatures) counts[c.species] = (counts[c.species] ?? 0) + 1;
-  const minima: Record<Species, number> = { rabbit: 10, deer: 6, fox: 4, wolf: 3, troll: 2 };
-  for (const [species, min] of Object.entries(minima) as [Species, number][]) {
+  for (let ci = 0; ci < creatures.length; ci++) {
+    const c = creatures[ci];
+    if (c !== undefined) {
+      counts[c.species] = (counts[c.species] ?? 0) + 1;
+    }
+  }
+
+  for (let mi = 0; mi < SPECIES_MINIMA.length; mi++) {
+    const item = SPECIES_MINIMA[mi];
+    if (item === undefined) continue;
+    const { species, min } = item;
     const current = counts[species] ?? 0;
     for (let n = current; n < min && creatures.length + toAdd.length < MAX_CREATURES; n++) {
       const rng = createRng(hash2(worldSeed, n + 1, current * 17 + 5));
@@ -514,7 +544,10 @@ export function evolveGeneration(
     }
   }
 
-  for (const c of toAdd) creatures.push(c);
+  for (let ai = 0; ai < toAdd.length; ai++) {
+    const item = toAdd[ai];
+    if (item !== undefined) creatures.push(item);
+  }
 }
 
 /** Apply a mutation to a trait vector using the creature's own RNG stream. */

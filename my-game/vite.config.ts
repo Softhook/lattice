@@ -1,20 +1,20 @@
 import { defineConfig } from 'vite';
-import { resolve } from 'path';
+import { fileURLToPath } from 'node:url';
 
 export default defineConfig({
   resolve: {
     alias: {
       // Resolve @latticekit/* to workspace source so edits to the kit
       // reflect immediately without a build step.
-      '@latticekit/core':    resolve(__dirname, '../packages/core/src/index.ts'),
-      '@latticekit/iso':     resolve(__dirname, '../packages/iso/src/index.ts'),
-      '@latticekit/draw':    resolve(__dirname, '../packages/draw/src/index.ts'),
-      '@latticekit/loop':    resolve(__dirname, '../packages/loop/src/index.ts'),
-      '@latticekit/input':   resolve(__dirname, '../packages/input/src/index.ts'),
-      '@latticekit/audio':   resolve(__dirname, '../packages/audio/src/index.ts'),
-      '@latticekit/persist': resolve(__dirname, '../packages/persist/src/index.ts'),
-      '@latticekit/sim':     resolve(__dirname, '../packages/sim/src/index.ts'),
-      '@latticekit/ui':      resolve(__dirname, '../packages/ui/src/index.ts'),
+      '@latticekit/core':    fileURLToPath(new URL('../packages/core/src/index.ts', import.meta.url)),
+      '@latticekit/iso':     fileURLToPath(new URL('../packages/iso/src/index.ts', import.meta.url)),
+      '@latticekit/draw':    fileURLToPath(new URL('../packages/draw/src/index.ts', import.meta.url)),
+      '@latticekit/loop':    fileURLToPath(new URL('../packages/loop/src/index.ts', import.meta.url)),
+      '@latticekit/input':   fileURLToPath(new URL('../packages/input/src/index.ts', import.meta.url)),
+      '@latticekit/audio':   fileURLToPath(new URL('../packages/audio/src/index.ts', import.meta.url)),
+      '@latticekit/persist': fileURLToPath(new URL('../packages/persist/src/index.ts', import.meta.url)),
+      '@latticekit/sim':     fileURLToPath(new URL('../packages/sim/src/index.ts', import.meta.url)),
+      '@latticekit/ui':      fileURLToPath(new URL('../packages/ui/src/index.ts', import.meta.url)),
     },
   },
   server: {

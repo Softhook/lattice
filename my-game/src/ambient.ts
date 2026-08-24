@@ -5,7 +5,7 @@
  * - Birds soaring overhead in skeins across the valley.
  * - Fireflies drifting over water/meadows after dark with gentle glowing pools.
  * - Pollen & dust motes floating in the sunlit breeze.
- * - Lantern / chimney smoke puffs rising from structures.
+ * - Lantern / chimney smoke puffs rising from watchtowers and fortresses.
  */
 
 import { clamp01, hash2, noise2, toUnit, type Vec2 } from '@latticekit/core';
@@ -32,7 +32,7 @@ export function drawAmbientEffects(
   world: WorldTerrain,
   daylight: number,
   light: LightField | undefined,
-  buildings: Building[],
+  buildings: readonly Building[],
 ): void {
   // 1. Birds in the sunlit sky
   birds(pen, seed, daylight);
@@ -43,11 +43,13 @@ export function drawAmbientEffects(
   // 3. Floating sun motes in the daylight
   motes(pen, seed, world, daylight);
 
-  // 4. Smoke from watchtowers
+  // 4. Smoke from watchtowers and fortress towers
   for (let i = 0; i < buildings.length; i++) {
     const b = buildings[i];
-    if (b === undefined || b.kind !== 'tower' || b.hp <= 0) continue;
-    towerSmoke(pen, b.gx + 1, b.gy + 1, b.basePx + 96, seed ^ b.id);
+    if (b === undefined || b.hp <= 0) continue;
+    if (b.kind === 'wood_tower' || b.kind === 'stone_tower') {
+      towerSmoke(pen, b.gx + 1, b.gy + 1, b.basePx + (b.kind === 'wood_tower' ? 52 : 68), seed ^ b.id);
+    }
   }
 }
 

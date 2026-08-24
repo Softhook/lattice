@@ -1,7 +1,7 @@
 # Verdant — A Two-Player Split-Screen Living World
 
 Verdant is a local cooperative, split-screen isometric game built on the Lattice kit.
-Players cooperate to shape the world (dig and build) and defend against hostile creatures.
+Players cooperate to shape the world (dig and build), gather procedural resources, and defend against hostile nocturnal creatures.
 
 ## How to Run
 
@@ -42,14 +42,20 @@ Players cooperate to shape the world (dig and build) and defend against hostile 
 
 The game is modularized inside the `my-game/` workspace:
 
-- **[main.ts](file:///Users/softhook/Documents/GitHub/lattice/my-game/src/main.ts)**: The bootstrapping and game loop wiring. Sets up cameras, input, world state, and day/night cycle.
-- **[world.ts](file:///Users/softhook/Documents/GitHub/lattice/my-game/src/world.ts)**: Heightfield grid math, seed-driven terrain generator (`core.fbm2`), and dig/raise vertex mutations.
-- **[creatures.ts](file:///Users/softhook/Documents/GitHub/lattice/my-game/src/creatures.ts)**: AI wander/flee/chase state machine, and the generational evolution loop.
-- **[buildings.ts](file:///Users/softhook/Documents/GitHub/lattice/my-game/src/buildings.ts)**: Definition and footprint validation of constructible elements.
-- **[players.ts](file:///Users/softhook/Documents/GitHub/lattice/my-game/src/players.ts)**: Player stats, movement physics, and action dispatch.
-- **[input.ts](file:///Users/softhook/Documents/GitHub/lattice/my-game/src/input.ts)**: Continuous key held polling and edge-trigger action checks.
-- **[sprites.ts](file:///Users/softhook/Documents/GitHub/lattice/my-game/src/sprites.ts)**: Procedural, zero-asset render definitions (`SpriteDef`) for all entities.
-- **[render.ts](file:///Users/softhook/Documents/GitHub/lattice/my-game/src/render.ts)**: Split-screen clip rendering, camera follow, and day/night light composition.
+- **[main.ts](file:///Users/softhook/Documents/GitHub/lattice/my-game/src/main.ts)**: Orchestration and lifecycle: loop, cameras, audio, input, persistent storage, and tick wiring.
+- **[world.ts](file:///Users/softhook/Documents/GitHub/lattice/my-game/src/world.ts)**: Heightfield grid math, seed-driven terrain generator (`core.fbm2`), and zero-allocation dig/raise vertex mutations.
+- **[creatures.ts](file:///Users/softhook/Documents/GitHub/lattice/my-game/src/creatures.ts)**: AI wander/flee/chase state machine, boid repulsions, and generational evolution loop.
+- **[buildings.ts](file:///Users/softhook/Documents/GitHub/lattice/my-game/src/buildings.ts)**: Definition, massings, costs, and footprint collision validation of constructible structures.
+- **[players.ts](file:///Users/softhook/Documents/GitHub/lattice/my-game/src/players.ts)**: Player stats, continuous movement physics, combat, and action dispatch.
+- **[flora.ts](file:///Users/softhook/Documents/GitHub/lattice/my-game/src/flora.ts)**: Procedural trees, shrubs, flowers, rocks, harvesting yields, and ecosystem regrowth.
+- **[audio.ts](file:///Users/softhook/Documents/GitHub/lattice/my-game/src/audio.ts)**: Zero-asset procedural WebAudio sound synthesizer and dynamic day/night ambient drone bed via `@latticekit/audio`.
+- **[storage.ts](file:///Users/softhook/Documents/GitHub/lattice/my-game/src/storage.ts)**: Versioned save/load schema and autosave integration via `@latticekit/persist`.
+- **[input.ts](file:///Users/softhook/Documents/GitHub/lattice/my-game/src/input.ts)**: Zero-allocation continuous key held polling and edge-trigger action checks.
+- **[hud.ts](file:///Users/softhook/Documents/GitHub/lattice/my-game/src/hud.ts)**: Zero-allocation in-canvas UI cards, health bars, inventory badges, and respawn banners.
+- **[sprites.ts](file:///Users/softhook/Documents/GitHub/lattice/my-game/src/sprites.ts)**: Procedural, zero-asset render definitions (`SpriteDef`) for all players and creatures.
+- **[render.ts](file:///Users/softhook/Documents/GitHub/lattice/my-game/src/render.ts)**: Split-screen multi-pass renderer & depth sorting pipeline without per-frame garbage.
+- **[ambient.ts](file:///Users/softhook/Documents/GitHub/lattice/my-game/src/ambient.ts)**: Atmospheric particles: soaring birds, night fireflies, floating motes, and watchtower beacon smoke.
+- **[sky.ts](file:///Users/softhook/Documents/GitHub/lattice/my-game/src/sky.ts)**: Celestial backdrop, sun/moon arcs, stars, and distant parallax mountain horizon ranges.
 - **[palette.ts](file:///Users/softhook/Documents/GitHub/lattice/my-game/src/palette.ts)**: Color constants for terrain biomes, species, and day/night transitions.
 
 ---
@@ -60,3 +66,7 @@ The game is modularized inside the `my-game/` workspace:
 - Core API: [`packages/core/src/index.ts`](file:///Users/softhook/Documents/GitHub/lattice/packages/core/src/index.ts)
 - Iso API: [`packages/iso/src/index.ts`](file:///Users/softhook/Documents/GitHub/lattice/packages/iso/src/index.ts)
 - Draw API: [`packages/draw/src/index.ts`](file:///Users/softhook/Documents/GitHub/lattice/packages/draw/src/index.ts)
+- Audio API: [`packages/audio/src/index.ts`](file:///Users/softhook/Documents/GitHub/lattice/packages/audio/src/index.ts)
+- Persist API: [`packages/persist/src/index.ts`](file:///Users/softhook/Documents/GitHub/lattice/packages/persist/src/index.ts)
+- Loop API: [`packages/loop/src/index.ts`](file:///Users/softhook/Documents/GitHub/lattice/packages/loop/src/index.ts)
+- Input API: [`packages/input/src/index.ts`](file:///Users/softhook/Documents/GitHub/lattice/packages/input/src/index.ts)
