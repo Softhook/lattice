@@ -14,13 +14,15 @@
 
 import { Rng, createRng, hash2, clamp } from '@latticekit/core';
 import type { WorldTerrain } from './world.js';
-import { isWalkable, W, H } from './world.js';
+import { isWalkable, W, H, getBiomeAt } from './world.js';
 import { damagePlayer, type Player } from './players.js';
 import type { FloraItem } from './flora.js';
-import { findClosestEdibleFlora } from './flora.js';
+import { findClosestEdibleFlora, rebuildFloraSpatial } from './flora.js';
+
 import type { Building } from './buildings.js';
 import { isTileOccupiedBySolidBuilding } from './buildings.js';
 import { SpatialGrid } from './spatial.js';
+
 
 // ── Species ────────────────────────────────────────────────────────────────────
 
@@ -73,8 +75,8 @@ export interface Creature {
 /** Ticks between generations. 600 ticks ≈ 10 seconds at 60 Hz. */
 export const GENERATION_TICKS = 600;
 
-/** Maximum creatures alive at once. */
-export const MAX_CREATURES = 180;
+/** Maximum creatures alive at once across the massive continent. */
+export const MAX_CREATURES = 600;
 
 /** HP formula: base × size. */
 const BASE_HP: Record<Species, number> = {
@@ -144,41 +146,51 @@ export function spawnCreature(
 }
 
 /**
- * Populate the world with creatures distributed across the map and elevation zones.
+ * Populate the massive 640x640 world with creatures distributed across biome ecosystems.
  */
 export function populateWorld(worldSeed: number, world: WorldTerrain): Creature[] {
   const creatures: Creature[] = [];
   const rng = createRng(worldSeed ^ 0xdeadbeef);
 
   const push = (species: Species, count: number, minH: number, maxH: number) => {
-    let attempts = count * 15;
+    let attempts = count * 25;
     let placed   = 0;
     while (placed < count && attempts-- > 0) {
-      const gx = Math.floor(10 + rng.next() * (W - 20));
-      const gy = Math.floor(10 + rng.next() * (H - 20));
+      const gx = Math.floor(16 + rng.next() * (W - 32));
+      const gy = Math.floor(16 + rng.next() * (H - 32));
       if (!isWalkable(world, gx, gy)) continue;
       const h = world.heights.get(gx, gy);
       if (h < minH || h > maxH) continue;
+      const biome = getBiomeAt(gx, gy, worldSeed, h);
+
+      // Biome affinity checks
+      if (species === 'troll' && biome.kind !== 'alpine' && h < 14) continue;
+      if (species === 'wolf' && biome.kind !== 'taiga' && biome.kind !== 'alpine') continue;
+      if (species === 'deer' && biome.kind !== 'meadow' && biome.kind !== 'wetlands') continue;
+      if (species === 'rabbit' && biome.kind !== 'meadow' && biome.kind !== 'wetlands' && biome.kind !== 'taiga') continue;
+      if (species === 'fox' && biome.kind === 'alpine') continue;
+
       creatures.push(spawnCreature(species, gx, gy, worldSeed));
       placed++;
     }
   };
 
-  push('rabbit', 50,  2, 14);
-  push('deer',   30,  3, 16);
-  push('fox',    25,  2, 18);
-  push('wolf',   18,  8, 22);
-  push('troll',   8, 14, 24);
+  push('rabbit', 180,  2, 16);
+  push('deer',   120,  3, 16);
+  push('fox',     90,  2, 18);
+  push('wolf',    60,  6, 22);
+  push('troll',   30, 14, 24);
 
   return creatures;
 }
 
+
 // ── Update ─────────────────────────────────────────────────────────────────────
 
-// ── Shared Spatial Grids for Simulation (Zero-Allocation) ─────────────────────
+// ── Shared Spatial Grids for Simulation & Viewport Culling (Zero-Allocation) ───
 
-const CREATURE_SPATIAL = new SpatialGrid();
-const FLORA_SPATIAL = new SpatialGrid();
+export const CREATURE_SPATIAL = new SpatialGrid();
+import { FLORA_SPATIAL } from './flora.js';
 
 export interface CreatureEvents {
   playerAttacked: boolean;
@@ -218,16 +230,7 @@ export function updateCreatures(
     }
   }
 
-  // 2. Build spatial index for edible flora
-  FLORA_SPATIAL.clear();
-  for (let i = 0; i < flora.length; i++) {
-    const f = flora[i];
-    if (f !== undefined) {
-      FLORA_SPATIAL.insert(i, f.gx, f.gy);
-    }
-  }
-
-  // 3. Update all live creatures
+  // 2. Update all live creatures
   for (let i = 0; i < creatures.length; i++) {
     const c = creatures[i];
     if (c === undefined || c.hp <= 0) continue;
@@ -236,6 +239,7 @@ export function updateCreatures(
 
   return events;
 }
+
 
 function updateOne(
   c: Creature,
@@ -434,12 +438,16 @@ function updateOne(
         c.eatTimer += dt;
         if (c.eatTimer >= 1.8) {
           const fIdx = flora.indexOf(edible);
-          if (fIdx !== -1) flora.splice(fIdx, 1);
+          if (fIdx !== -1) {
+            flora.splice(fIdx, 1);
+            rebuildFloraSpatial(flora);
+          }
           c.hp = Math.min(c.maxHp, c.hp + 5);
           c.eatTimer = 0;
           c.targetGx = NaN;
           c.targetGy = NaN;
         }
+
         return;
       } else {
         c.state = 'forage';
@@ -574,12 +582,13 @@ function moveWithSeparation(
 // ── Evolution ──────────────────────────────────────────────────────────────────
 
 const SPECIES_MINIMA: readonly { species: Species; min: number }[] = [
-  { species: 'rabbit', min: 10 },
-  { species: 'deer', min: 6 },
-  { species: 'fox', min: 4 },
-  { species: 'wolf', min: 3 },
-  { species: 'troll', min: 2 },
+  { species: 'rabbit', min: 40 },
+  { species: 'deer', min: 24 },
+  { species: 'fox', min: 16 },
+  { species: 'wolf', min: 12 },
+  { species: 'troll', min: 6 },
 ];
+
 
 /**
  * Evolve the population. Called every GENERATION_TICKS ticks.

@@ -42,13 +42,13 @@ import {
 } from '@latticekit/iso';
 import type { WorldTerrain } from './world.js';
 import { W, H } from './world.js';
-import type { Creature } from './creatures.js';
+
+import { CREATURE_SPATIAL, type Creature } from './creatures.js';
 import type { Player } from './players.js';
 import { facingTile, canAffordBuilding } from './players.js';
 import type { Building, BuildingKind } from './buildings.js';
 import { defFor, canPlaceBuilding, LANTERN_GLOW } from './buildings.js';
-import type { FloraItem } from './flora.js';
-import { defForFlora, floraVariant } from './flora.js';
+import { FLORA_SPATIAL, defForFlora, floraVariant, type FloraItem } from './flora.js';
 import {
   spriteForCreature,
   creatureVariant,
@@ -59,8 +59,10 @@ import {
 import {
   GRASS, ROCK, WATER, SAND, SNOW, NIGHT_COLOR, SKY_TOP,
   HEIGHT_WATER, HEIGHT_SAND, HEIGHT_ROCK, HEIGHT_SNOW,
-  TOOL_GOLD,
+  TOOL_GOLD, SWAMP_WATER, COASTAL_WATER,
 } from './palette.js';
+
+
 import { drawSky, farRanges } from './sky.js';
 import { drawAmbientEffects } from './ambient.js';
 import { drawPlayerHud, drawSplitDivider } from './hud.js';
@@ -86,7 +88,7 @@ export function createVerdantPalette() {
 
 // ── Shared DepthSorter ─────────────────────────────────────────────────────────
 
-const ORDER = new DepthSorter(2048);
+const ORDER = new DepthSorter(8192);
 
 // ── Footprint scratch ──────────────────────────────────────────────────────────
 
@@ -99,14 +101,14 @@ interface MutableFootprint {
 
 const FP_SCRATCH: MutableFootprint = { gx: 0, gy: 0, w: 1, d: 1 };
 
-// ── Zero-Allocation Pre-allocated Index Mapping Buffers ────────────────────────
-
 // ── Zero-Allocation Pre-allocated Index Mapping & Viewport Buffers ─────────────
 
-const BLD_INDEX_BUFFER = new Int32Array(1024);
-const FLORA_INDEX_BUFFER = new Int32Array(2048);
-const CRE_INDEX_BUFFER = new Int32Array(1024);
+const BLD_INDEX_BUFFER = new Int32Array(4096);
+const FLORA_INDEX_BUFFER = new Int32Array(8192);
+const CRE_INDEX_BUFFER = new Int32Array(4096);
 const TILE_RANGE_SCRATCH = { gx0: 0, gy0: 0, gx1: 0, gy1: 0 };
+
+
 
 // ── Reusable Pen2 for Viewport 2 ───────────────────────────────────────────────
 
@@ -252,6 +254,7 @@ function drawViewport(
     const b = buildings[i];
     if (b === undefined || b.hp <= 0) continue;
     if (b.gx + b.w < minGx || b.gx > maxGx || b.gy + b.d < minGy || b.gy > maxGy) continue;
+    if (liveBldCount >= BLD_INDEX_BUFFER.length) break;
 
     BLD_INDEX_BUFFER[liveBldCount] = i;
     liveBldCount++;
@@ -259,15 +262,17 @@ function drawViewport(
     ORDER.add(b.gx, b.gy, b.w, b.d, b.basePx + spriteHeightPx(def, VARIANT_ZERO));
   }
 
-  // 2. Add visible flora items (culled against viewport)
+  // 2. Add visible flora items (culled via spatial grid)
   let liveFloraCount = 0;
-  const numFlora = flora.length;
-  for (let i = 0; i < numFlora; i++) {
-    const f = flora[i];
+  const visibleFloraCount = FLORA_SPATIAL.queryRect(minGx, minGy, maxGx, maxGy);
+  for (let q = 0; q < visibleFloraCount; q++) {
+    if (liveFloraCount >= FLORA_INDEX_BUFFER.length) break;
+    const realIdx = FLORA_SPATIAL.queryBuffer[q];
+    if (realIdx === undefined) continue;
+    const f = flora[realIdx];
     if (f === undefined) continue;
-    if (f.gx < minGx || f.gx > maxGx || f.gy < minGy || f.gy > maxGy) continue;
 
-    FLORA_INDEX_BUFFER[liveFloraCount] = i;
+    FLORA_INDEX_BUFFER[liveFloraCount] = realIdx;
     liveFloraCount++;
     const def = defForFlora(f.kind);
     FP_SCRATCH.gx = f.gx; FP_SCRATCH.gy = f.gy; FP_SCRATCH.w = def.w; FP_SCRATCH.d = def.d;
@@ -275,19 +280,23 @@ function drawViewport(
     ORDER.add(f.gx, f.gy, def.w, def.d, f.basePx + spriteHeightPx(def, floraVariant(f)));
   }
 
-  // 3. Add active visible creatures (culled against viewport)
+  // 3. Add active visible creatures (culled via spatial grid)
   let liveCreCount = 0;
-  for (let i = 0; i < creatures.length; i++) {
-    const c = creatures[i];
+  const visibleCreCount = CREATURE_SPATIAL.queryRect(minGx, minGy, maxGx, maxGy);
+  for (let q = 0; q < visibleCreCount; q++) {
+    if (liveCreCount >= CRE_INDEX_BUFFER.length) break;
+    const realIdx = CREATURE_SPATIAL.queryBuffer[q];
+    if (realIdx === undefined) continue;
+    const c = creatures[realIdx];
     if (c === undefined || c.hp <= 0) continue;
-    if (c.gx < minGx || c.gx > maxGx || c.gy < minGy || c.gy > maxGy) continue;
 
-    CRE_INDEX_BUFFER[liveCreCount] = i;
+    CRE_INDEX_BUFFER[liveCreCount] = realIdx;
     liveCreCount++;
     const def    = spriteForCreature(c.species);
     const basePx = heightAt(world.field, c.gx, c.gy);
     ORDER.add(c.gx, c.gy, def.w, def.d, basePx + spriteHeightPx(def, creatureVariant(c)));
   }
+
 
   // 4. Add players
   const numPlayers = players.length;
@@ -331,37 +340,26 @@ function drawViewport(
     },
 
     terrain(pen, visible) {
+      const field = world.field;
+      const tileColors = world.tileColors;
+      const zoom = pen.camera.zoom;
+      const penXy = pen.xy;
+      const penSurface = pen.surface;
+
       for (let gy = visible.gy0; gy < visible.gy1; gy++) {
+        const rowOffset = gy * W;
         for (let gx = visible.gx0; gx < visible.gx1; gx++) {
           if (gx < 0 || gy < 0 || gx >= W || gy >= H) continue;
 
-          const minH = Math.min(
-            world.heights.get(gx,     gy),
-            world.heights.get(gx + 1, gy),
-            world.heights.get(gx,     gy + 1),
-            world.heights.get(gx + 1, gy + 1),
-          );
+          const baseColor = tileColors[rowOffset + gx];
 
-          if (minH <= HEIGHT_WATER) {
-            isoTile(pen, gx, gy, WATER);
-            // Animated wave swell and glints
-            const swell = noise2(seed ^ 0x33, gx * 0.38 + pen.t * 0.25, gy * 0.38) * 0.5 + 0.5;
-            if (swell > 0.6) {
-              const glint = mix(WATER, pen.palette.get('sky'), 0.65);
-              pen.surface.poly(pen.xy, 4, withAlpha(glint, (swell - 0.6) * (0.85 * daylight + 0.2)));
-            }
+          if (baseColor === WATER || baseColor === SWAMP_WATER || baseColor === COASTAL_WATER) {
+            isoTile(pen, gx, gy, baseColor);
           } else {
-            const baseColor = minH >= HEIGHT_SNOW ? SNOW :
-                              minH >= HEIGHT_ROCK ? ROCK :
-                              minH <= HEIGHT_SAND ? SAND : GRASS;
-            // Multi-frequency micro-grain texture
-            const field = noise2(seed ^ 0x9e1, gx * 0.12, gy * 0.12) * 0.08;
-            const grain = (toUnit(hash2(seed, gx, gy)) - 0.5) * 0.09;
-            isoTerrain(pen, world.field, gx, gy, baseColor, undefined, 1 + field + grain);
+            isoTerrain(pen, field, gx, gy, baseColor);
 
-            if (pen.camera.zoom > 0.65) {
-              // Elevation contour seam
-              pen.surface.stroke(pen.xy, 3, false, withAlpha(shade(baseColor, 0.88), 0.32), 1);
+            if (zoom > 0.75) {
+              penSurface.stroke(penXy, 3, false, withAlpha(shade(baseColor, 0.88), 0.28), 1);
             }
           }
         }
@@ -372,6 +370,8 @@ function drawViewport(
         drawFootprint(pen, ghostTile.gx, ghostTile.gy, ghostDef.w, ghostDef.d, isLegal ? 'ok' : 'bad', SELECT_LIFT, ghostBasePx);
       }
     },
+
+
 
     solids(pen, order) {
       for (let i = 0; i < order.count; i++) {
@@ -502,8 +502,9 @@ function drawViewport(
       if (isLeft) {
         drawSplitDivider(pen);
       }
-      drawPlayerHud(pen, activePlayer);
+      drawPlayerHud(pen, activePlayer, world, seed);
     },
+
   };
 
   renderFrame(pen, passes, ORDER);

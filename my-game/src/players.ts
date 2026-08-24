@@ -101,13 +101,14 @@ export const BUILD_KINDS: readonly BuildingKind[] = [
 
 // ── Factory ────────────────────────────────────────────────────────────────────
 
-/** Default spawn positions for 200x200 world: player 1 top-left, player 2 top-right. */
+/** Default spawn positions for 640x640 world: player 1 northwest, player 2 northeast. */
 export function createPlayers(): [Player, Player] {
   return [
-    makePlayer(0, 40, 40),
-    makePlayer(1, 160, 40),
+    makePlayer(0, 160, 160),
+    makePlayer(1, 480, 160),
   ];
 }
+
 
 function makePlayer(index: 0 | 1, gx: number, gy: number): Player {
   return {

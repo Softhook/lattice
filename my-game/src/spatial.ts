@@ -11,14 +11,15 @@
 import { clamp } from '@latticekit/core';
 import { W, H } from './world.js';
 
-/** Cell dimension in tiles. 10x10 tiles gives a 20x20 cell grid for the 200x200 world. */
-export const CELL_SIZE = 10;
+/** Cell dimension in tiles. 16x16 tiles gives a 40x40 cell grid for the 640x640 world. */
+export const CELL_SIZE = 16;
 export const GRID_COLS = Math.ceil(W / CELL_SIZE);
 export const GRID_ROWS = Math.ceil(H / CELL_SIZE);
 export const TOTAL_CELLS = GRID_COLS * GRID_ROWS;
 
-/** Maximum entities indexed in a spatial grid instance. */
-export const MAX_SPATIAL_ENTITIES = 2048;
+/** Maximum entities indexed in a spatial grid instance (supports up to 8,192 flora & creatures). */
+export const MAX_SPATIAL_ENTITIES = 8192;
+
 
 export class SpatialGrid {
   /** Head of linked-list for each cell: head[cellIndex] -> entity index (or -1 if empty). */
@@ -41,6 +42,7 @@ export class SpatialGrid {
   /** Reset all cell buckets without allocating. */
   clear(): void {
     this.head.fill(-1);
+    this.next.fill(-1);
     this.queryCount = 0;
   }
 
@@ -62,7 +64,7 @@ export class SpatialGrid {
   /**
    * Query all entity IDs within radius of (gx, gy).
    * Results are stored in `this.queryBuffer`, count in `this.queryCount`.
-   * Allocates ZERO heap objects.
+   * Allocates ZERO heap objects and guarantees finite execution.
    */
   queryRadius(gx: number, gy: number, radius: number): number {
     this.queryCount = 0;
@@ -77,7 +79,9 @@ export class SpatialGrid {
       const rowOffset = r * GRID_COLS;
       for (let c = minCol; c <= maxCol; c++) {
         let curr = this.head[rowOffset + c] ?? -1;
-        while (curr !== -1) {
+        let iters = 0;
+        while (curr !== -1 && iters++ < MAX_SPATIAL_ENTITIES) {
+          if (this.queryCount >= MAX_SPATIAL_ENTITIES) return this.queryCount;
           const ex = this.posX[curr] ?? 0;
           const ey = this.posY[curr] ?? 0;
           const dx = ex - gx;
@@ -96,6 +100,7 @@ export class SpatialGrid {
   /**
    * Query all entity IDs within an axis-aligned bounding box [minGx, minGy, maxGx, maxGy].
    * Results are stored in `this.queryBuffer`, count in `this.queryCount`.
+   * Allocates ZERO heap objects and guarantees finite execution.
    */
   queryRect(minGx: number, minGy: number, maxGx: number, maxGy: number): number {
     this.queryCount = 0;
@@ -109,7 +114,9 @@ export class SpatialGrid {
       const rowOffset = r * GRID_COLS;
       for (let c = minCol; c <= maxCol; c++) {
         let curr = this.head[rowOffset + c] ?? -1;
-        while (curr !== -1) {
+        let iters = 0;
+        while (curr !== -1 && iters++ < MAX_SPATIAL_ENTITIES) {
+          if (this.queryCount >= MAX_SPATIAL_ENTITIES) return this.queryCount;
           const ex = this.posX[curr] ?? 0;
           const ey = this.posY[curr] ?? 0;
           if (ex >= minGx && ex <= maxGx && ey >= minGy && ey <= maxGy) {
@@ -122,4 +129,5 @@ export class SpatialGrid {
 
     return this.queryCount;
   }
+
 }

@@ -131,4 +131,30 @@ describe('Verdant Gameplay Logic', () => {
     expect(p1.hp).toBe(100);
     expect(p1.respawnTimer).toBe(0);
   });
+
+  it('generates subtle continuous biome transitions and diverse flora species across biomes', () => {
+    const world = createWorld(42);
+    const flora = populateFlora(42, world);
+
+    // Verify all 12 flora kinds are present across the continent
+    const kindsPresent = new Set(flora.map((f) => f.kind));
+    expect(kindsPresent.has('cactus')).toBe(true);
+    expect(kindsPresent.has('swamp_tree')).toBe(true);
+    expect(kindsPresent.has('spruce')).toBe(true);
+    expect(kindsPresent.has('birch')).toBe(true);
+    expect(kindsPresent.has('rock_spire')).toBe(true);
+    expect(kindsPresent.has('dead_bush')).toBe(true);
+    expect(kindsPresent.has('pine')).toBe(true);
+    expect(kindsPresent.has('oak')).toBe(true);
+    expect(kindsPresent.has('bush')).toBe(true);
+    expect(kindsPresent.has('flowers')).toBe(true);
+    expect(kindsPresent.has('mushroom')).toBe(true);
+    expect(kindsPresent.has('rock')).toBe(true);
+
+    // Verify continuous tile color lookups and zero NaN values in color buffer
+    for (let i = 0; i < world.tileColors.length; i++) {
+      expect(world.tileColors[i]).toBeGreaterThan(0);
+    }
+  });
 });
+

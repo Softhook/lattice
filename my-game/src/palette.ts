@@ -9,7 +9,9 @@
  * base hex. The constants below are those base hues; never pick three hues for one object.
  */
 
-import { hex, type Rgba } from '@latticekit/draw';
+import { hex, mix, type Rgba } from '@latticekit/draw';
+import { toUnit, hash2 } from '@latticekit/core';
+
 
 // ── Terrain biome colors ───────────────────────────────────────────────────────
 
@@ -25,6 +27,46 @@ export const WATER  = hex('#2a4a8a');
 export const SNOW   = hex('#d8dce8');
 /** Sandy shore — just above water level. */
 export const SAND   = hex('#c8a870');
+
+// ── Biome-Specific Terrain Colors (Minecraft-Style Vibrancy) ──────────────────
+
+// 1. Badlands / Mesa Terracotta Strata & Sand
+export const MESA_RED       = hex('#b84828');
+export const MESA_ORANGE    = hex('#d97236');
+export const MESA_YELLOW    = hex('#e2a048');
+export const MESA_BROWN     = hex('#7c3d22');
+export const MESA_WHITE     = hex('#d5bba8');
+export const MESA_SAND      = hex('#c86b36');
+
+// 2. Deep Taiga Cold Conifer Loam & Dark Slate
+export const TAIGA_GRASS    = hex('#25462e');
+export const TAIGA_DIRT     = hex('#3c342a');
+export const TAIGA_ROCK     = hex('#4a555e');
+export const TAIGA_SNOW     = hex('#d8e2ea');
+
+// 3. Wetlands / Swamp Murky Peat & Dark Waters
+export const SWAMP_GRASS    = hex('#364e22');
+export const SWAMP_PEAT     = hex('#242918');
+export const SWAMP_WATER    = hex('#1b3e34');
+export const SWAMP_ALGAE    = hex('#4a6627');
+
+// 4. Alpine Jagged Granite & Glacial Ice
+export const ALPINE_ROCK    = hex('#56616b');
+export const ALPINE_CLIFF   = hex('#3f464e');
+export const ALPINE_ICE     = hex('#b0d5ea');
+export const ALPINE_SNOW    = hex('#edf4fa');
+
+// 5. Temperate Meadows Lush Turf & Chalk
+export const MEADOW_GRASS   = hex('#4ea632');
+export const MEADOW_LUSH    = hex('#5db83a');
+export const MEADOW_DIRT    = hex('#825a32');
+export const MEADOW_ROCK    = hex('#7a7268');
+
+// 6. Desert Dunes & Coastal Shallows
+export const DESERT_SAND    = hex('#e8be6b');
+export const DESERT_DUNE    = hex('#d6a851');
+export const SANDSTONE      = hex('#b88b4c');
+export const COASTAL_WATER  = hex('#1c6499');
 
 // ── Building colors ────────────────────────────────────────────────────────────
 
@@ -85,10 +127,6 @@ export const SKY_TOP  = hex('#1a2f10');
 export const SKY_MID  = hex('#2a4520');
 
 // ── Palette slot names ─────────────────────────────────────────────────────────
-//
-// Named slots for the `Palette` the renderer uses. Each slot maps to a hex in the current
-// lighting state. We use the BASE_SLOTS from draw, which provides: sky, ground, brand, etc.
-// We extend with our own terrain and creature slots below.
 
 /** Slot name for the active ground color (derived per biome in the terrain pass). */
 export const SLOT_GROUND = 'ground';
@@ -108,7 +146,96 @@ export const HEIGHT_ROCK  = 14;
 /** Above this → snow cap. */
 export const HEIGHT_SNOW  = 19;
 
-/** Pick the terrain ink slot name based on a height unit value. */
+/**
+ * Return the exact ink color for any terrain tile driven by its biome, height stratum,
+
+ * and natural geological banding (e.g. Minecraft-style terracotta layers in mesas).
+ * Supports subtle smooth transitions between biomes via linear color interpolation.
+ */
+export function getTileColor(
+  biomeKind: string,
+  h: number,
+  seed: number,
+  gx: number,
+  gy: number,
+  secondaryBiome?: string,
+  blend = 0,
+): Rgba {
+  const c1 = getPureBiomeColor(biomeKind, h, seed, gx, gy);
+  if (secondaryBiome !== undefined && secondaryBiome !== biomeKind && blend > 0.05) {
+    const c2 = getPureBiomeColor(secondaryBiome, h, seed, gx, gy);
+    return mix(c1, c2, Math.min(0.5, blend * 0.6));
+  }
+  return c1;
+}
+
+function getPureBiomeColor(
+  biomeKind: string,
+  h: number,
+  seed: number,
+  gx: number,
+  gy: number,
+): Rgba {
+  if (h <= HEIGHT_WATER) {
+    if (biomeKind === 'wetlands') return SWAMP_WATER;
+    if (biomeKind === 'coastal') return COASTAL_WATER;
+    return WATER;
+  }
+
+  // 1. Badlands / Mesa: Layered Terracotta Strata
+  if (biomeKind === 'badlands') {
+    if (h <= HEIGHT_SAND) return MESA_SAND;
+    // Stratified banding based on elevation layer
+    const band = (Math.floor(h) + Math.floor(toUnit(hash2(seed, gx, gy)) * 2)) % 5;
+    switch (band) {
+      case 0: return MESA_RED;
+      case 1: return MESA_ORANGE;
+      case 2: return MESA_YELLOW;
+      case 3: return MESA_BROWN;
+      default: return MESA_WHITE;
+    }
+  }
+
+  // 2. Alpine: Glacial Granite, Ice, and Summit Snow
+  if (biomeKind === 'alpine') {
+    if (h >= 18) return ALPINE_SNOW;
+    if (h >= 14) return ALPINE_ROCK;
+    if (h >= 11) return ALPINE_CLIFF;
+    if (h >= 8) return ALPINE_ICE;
+    return ROCK;
+  }
+
+  // 3. Deep Taiga: Cold Conifer Loam, Slate & Snow
+  if (biomeKind === 'taiga') {
+    if (h >= 17) return TAIGA_SNOW;
+    if (h >= 13) return TAIGA_ROCK;
+    if (h <= HEIGHT_SAND) return TAIGA_DIRT;
+    return TAIGA_GRASS;
+  }
+
+  // 4. Wetlands: Dark Swamp Peat, Algae Green
+  if (biomeKind === 'wetlands') {
+    if (h <= HEIGHT_SAND) return SWAMP_PEAT;
+    const algaeRoll = toUnit(hash2(seed ^ 0x33, gx, gy));
+    return algaeRoll > 0.6 ? SWAMP_ALGAE : SWAMP_GRASS;
+  }
+
+  // 5. Coastal / Dunes
+  if (biomeKind === 'coastal') {
+    if (h <= HEIGHT_SAND + 1) return DESERT_SAND;
+    if (h >= 12) return SANDSTONE;
+    return DESERT_DUNE;
+  }
+
+  // 6. Temperate Meadows (Default)
+  if (h >= HEIGHT_SNOW) return SNOW;
+  if (h >= HEIGHT_ROCK) return MEADOW_ROCK;
+  if (h <= HEIGHT_SAND) return SAND;
+  const lushRoll = toUnit(hash2(seed ^ 0x55, gx, gy));
+  return lushRoll > 0.5 ? MEADOW_LUSH : MEADOW_GRASS;
+}
+
+/** Legacy terrain color helper. */
 export function terrainColor(heightUnits: number): Rgba {
   if (heightUnits <= HEIGHT_WATER) return WATER;
   if (heightUnits <= HEIGHT_SAND)  return SAND;
@@ -116,3 +243,5 @@ export function terrainColor(heightUnits: number): Rgba {
   if (heightUnits >= HEIGHT_ROCK)  return ROCK;
   return GRASS;
 }
+
+

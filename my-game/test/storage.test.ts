@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { createPlayers } from '../src/players.js';
-import { createWorld, applyTerrainDeltas } from '../src/world.js';
+import { createWorld, applyTerrainDeltas, W } from '../src/world.js';
+
 import { placeBuilding, restoreBuilding, type Building } from '../src/buildings.js';
 import { populateFlora, restoreFlora, harvestFloraAt, type FloraItem } from '../src/flora.js';
 import {
@@ -130,9 +131,9 @@ describe('Verdant Storage', () => {
     const initialH = world.heights.get(10, 10);
     // Terraforming: raise terrain at (10, 10)
     world.heights.set(10, 10, initialH + 3);
-    world.heightDeltas.set(10 * 201 + 10, initialH + 3);
+    world.heightDeltas.set(10 * (W + 1) + 10, initialH + 3);
     world.surface.set(10, 10, 1); // MAT_DIRT
-    world.surfaceDeltas.set(10 * 200 + 10, 1);
+    world.surfaceDeltas.set(10 * W + 10, 1);
 
     const [p1, p2] = createPlayers();
     const saveState = extractSaveState(77, [p1, p2], [], world);
@@ -140,6 +141,7 @@ describe('Verdant Storage', () => {
     expect(saveState.terrainHeights?.[0]).toEqual({ x: 10, y: 10, h: initialH + 3 });
     expect(saveState.terrainSurfaces?.length).toBe(1);
     expect(saveState.terrainSurfaces?.[0]).toEqual({ x: 10, y: 10, mat: 1 });
+
 
     // Fresh seeded world
     const freshWorld = createWorld(77);

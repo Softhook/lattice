@@ -434,13 +434,14 @@ loop.onUpdate((dt, tick) => {
     audio.play('respawn');
   }
 
-  // ── Autosave every 10 seconds ─────────────────────────────────────────────────
+  // ── Autosave every 30 seconds ─────────────────────────────────────────────────
   autosaveTimer += dt;
-  if (autosaveTimer >= 10.0) {
+  if (autosaveTimer >= 30.0) {
     autosaveTimer = 0;
     store.save(extractSaveState(SEED, [p1, p2], buildings, world, flora));
   }
 });
+
 
 // ── DOM Controls Bar Helper ───────────────────────────────────────────────────
 

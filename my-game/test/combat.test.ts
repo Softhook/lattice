@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import { heightAt } from '@latticekit/iso';
 import { createWorld } from '../src/world.js';
+
 import { createPlayers, canAffordWeapon, craftWeapon, cycleWeapon, craftNextAvailable } from '../src/players.js';
 import {
   WEAPONS,
@@ -95,7 +97,7 @@ describe('Combat & Weapon Crafting System', () => {
     p1.weapon = 'bow';
 
     const pool = createProjectilePool();
-    const baseH = 50;
+    const baseH = heightAt(world.field, p1.gx, p1.gy);
     const launched = launchArrow(pool, p1, baseH);
     expect(launched).toBe(true);
 
@@ -104,6 +106,7 @@ describe('Combat & Weapon Crafting System', () => {
     expect(activeArrow?.vx).toBe(0);
     expect(activeArrow?.vy).toBeGreaterThan(0); // moving south
     expect(activeArrow?.z).toBe(baseH + 16);
+
 
     const targetCreature = spawnCreature('troll', 20.0, 21.0, 42);
     targetCreature.hp = 100;

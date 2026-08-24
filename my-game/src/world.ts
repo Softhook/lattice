@@ -15,9 +15,9 @@ import { TileGrid, type HeightField, type MutableTileSource } from '@latticekit/
 
 // ── map dimensions ─────────────────────────────────────────────────────────────
 
-/** Tile count along each axis. 200 tiles provides an expansive, vast landscape to explore. */
-export const W = 200;
-export const H = 200;
+/** Tile count along each axis. 640x640 tiles provides a massive 409,600-tile continent. */
+export const W = 640;
+export const H = 640;
 
 /** Height units per level — the art proportion. 10 px per unit gives 240 px maximum height. */
 export const STEP_PX = 10;
@@ -27,6 +27,113 @@ export const MAX_HEIGHT_UNITS = 24;
 
 /** Maximum terrain height in world pixels — what cameras and input.setTerrain need. */
 export const MAX_HEIGHT_PX = MAX_HEIGHT_UNITS * STEP_PX;
+
+// ── Biome Definitions ──────────────────────────────────────────────────────────
+
+export type BiomeKind = 'alpine' | 'taiga' | 'meadow' | 'badlands' | 'wetlands' | 'coastal';
+
+export interface BiomeInfo {
+  readonly kind: BiomeKind;
+  readonly name: string;
+  readonly icon: string;
+  readonly temperature: number;
+  readonly moisture: number;
+}
+
+export interface BiomeBlendInfo {
+  readonly primary: BiomeKind;
+  readonly secondary: BiomeKind;
+  readonly blend: number;
+  readonly info: BiomeInfo;
+}
+
+/**
+ * Determine the biome, transition blend, and environmental climate at (gx, gy).
+ * Driven deterministically by world seed, elevation, temperature, and moisture noise fields.
+ */
+export function getBiomeBlendAt(gx: number, gy: number, seed: number, elevation: number): BiomeBlendInfo {
+  // @tier-b — biome distribution uses noise fields (pixels and classification only)
+  const ny = gy / H;
+
+  // Temperature gradient: cooler north (low Y) and alpine heights, warmer south (high Y)
+  const tempNoise = fbm2(seed ^ 0x7777, gx * 0.0035, gy * 0.0035, 3);
+  const temp = clamp(0.5 + tempNoise * 0.35 + (ny - 0.5) * 0.4 - (elevation / MAX_HEIGHT_UNITS) * 0.45, 0, 1);
+
+  // Moisture noise: rain shadows vs verdant basins
+  const moistNoise = fbm2(seed ^ 0x3333, gx * 0.004, gy * 0.004, 3);
+  const moist = clamp(0.5 + moistNoise * 0.45, 0, 1);
+
+  const nameMap: Record<BiomeKind, { name: string; icon: string }> = {
+    alpine: { name: 'Alpine Peaks', icon: '🏔️' },
+    taiga: { name: 'Deep Taiga', icon: '🌲' },
+    meadow: { name: 'Temperate Meadows', icon: '🌳' },
+    badlands: { name: 'Arid Badlands', icon: '🏜️' },
+    wetlands: { name: 'Lush Wetlands', icon: '🌿' },
+    coastal: { name: 'Coastal Archipelago', icon: '🏖️' },
+  };
+
+  if (elevation <= 1) {
+    const info = { kind: 'coastal' as BiomeKind, name: 'Coastal Archipelago', icon: '🏖️', temperature: temp, moisture: moist };
+    return { primary: 'coastal', secondary: 'meadow', blend: 0, info };
+  }
+  if (elevation >= 15) {
+    const info = { kind: 'alpine' as BiomeKind, name: 'Alpine Peaks', icon: '🏔️', temperature: temp, moisture: moist };
+    return { primary: 'alpine', secondary: 'taiga', blend: clamp((18 - elevation) / 4, 0, 1), info };
+  }
+
+  // Continuous biome affinity weights
+  const badlandsAffinity = clamp((temp - 0.48) / 0.16, 0, 1) * clamp((0.52 - moist) / 0.16, 0, 1);
+  const wetlandsAffinity = clamp((moist - 0.50) / 0.16, 0, 1) * clamp((10 - elevation) / 6, 0, 1);
+  const taigaAffinity = clamp((0.48 - temp) / 0.16, 0, 1);
+
+  // Determine primary and secondary biomes
+  let primary: BiomeKind = 'meadow';
+  let secondary: BiomeKind = 'meadow';
+  let secondaryWeight = 0;
+
+  if (badlandsAffinity > 0.5) {
+    primary = 'badlands';
+    secondary = 'meadow';
+    secondaryWeight = 1 - badlandsAffinity;
+  } else if (taigaAffinity > 0.5) {
+    primary = 'taiga';
+    secondary = 'meadow';
+    secondaryWeight = 1 - taigaAffinity;
+  } else if (wetlandsAffinity > 0.5) {
+    primary = 'wetlands';
+    secondary = 'meadow';
+    secondaryWeight = 1 - wetlandsAffinity;
+  } else {
+    primary = 'meadow';
+    if (badlandsAffinity > taigaAffinity && badlandsAffinity > wetlandsAffinity) {
+      secondary = 'badlands';
+      secondaryWeight = badlandsAffinity;
+    } else if (taigaAffinity > wetlandsAffinity) {
+      secondary = 'taiga';
+      secondaryWeight = taigaAffinity;
+    } else {
+      secondary = 'wetlands';
+      secondaryWeight = wetlandsAffinity;
+    }
+  }
+
+  const info: BiomeInfo = {
+    kind: primary,
+    name: nameMap[primary].name,
+    icon: nameMap[primary].icon,
+    temperature: temp,
+    moisture: moist,
+  };
+
+  return { primary, secondary, blend: secondaryWeight, info };
+}
+
+/**
+ * Determine the primary biome and environmental climate at (gx, gy).
+ */
+export function getBiomeAt(gx: number, gy: number, seed: number, elevation: number): BiomeInfo {
+  return getBiomeBlendAt(gx, gy, seed, elevation).info;
+}
 
 // ── surface material IDs ───────────────────────────────────────────────────────
 
@@ -53,12 +160,16 @@ export interface SavedSurfaceDelta {
   readonly mat: number;
 }
 
+import { DIRT, getTileColor } from './palette.js';
+
 /** The live height field handed to `input` and `draw`. */
 export interface WorldTerrain {
   /** W+1 × H+1 vertex heights, in height units (not world px). */
   readonly heights: TileGrid;
   /** Per-tile material id. W × H. */
   readonly surface: TileGrid;
+  /** Precalculated 32-bit RGBA tile colors for instant zero-allocation render lookup. W × H. */
+  readonly tileColors: Uint32Array;
   /** The `HeightField` shape `iso` and `input` consume. Derived from `heights`. */
   readonly field: HeightField;
   /** Highest vertex on the current map, in world pixels. Updated by dig/raise. */
@@ -70,29 +181,87 @@ export interface WorldTerrain {
 }
 
 /**
- * Generate the world from a seed. Same seed → identical terrain.
+ * Generate the massive 640x640 world from a seed. Same seed → identical terrain.
  *
- * Multi-frequency octave noise creates dramatic continental relief, alpine ridges,
- * mountain cliffs, river valleys, and rolling meadows.
+ * Implements continuous multi-biome topographical layer blending:
+ * - Alpine: Razor-sharp spires and jagged needle crags.
+ * - Badlands: Stepped flat-top mesa plateaus and canyon gullies.
+ * - Taiga: Rugged coniferous hills and deep valleys.
+ * - Wetlands: Flat waterlogged marshes with winding bayous.
+ * - Meadows: Soft rolling pastoral hills.
  */
 export function createWorld(seed: number): WorldTerrain {
   // Vertices: one more than tile count on each axis.
   const heights = new TileGrid(W + 1, H + 1);
   const surface = new TileGrid(W, H);
+  const tileColors = new Uint32Array(W * H);
 
   heights.fillFrom((gx, gy) => {
     // @tier-b — terrain shape uses fbm2 (transcendental). Pixels only, never hashed.
-    const continental = fbm2(seed, gx * 0.012, gy * 0.012, 4);
-    const ridges = Math.abs(fbm2(seed ^ 0x9999, gx * 0.022, gy * 0.022, 3)) * 2 - 1;
-    const hills = fbm2(seed ^ 0x5555, gx * 0.045, gy * 0.045, 2) * 0.35;
+    const ny = gy / H;
 
-    const combined = continental * 0.6 + ridges * 0.4 + hills;
-    // Scaled to [0, MAX_HEIGHT_UNITS] with rich height variation
-    const raw = (combined + 0.85) * 0.55 * MAX_HEIGHT_UNITS - 1.2;
-    return clamp(Math.round(raw), 0, MAX_HEIGHT_UNITS);
+    // Macro climate fields
+    const tempNoise = fbm2(seed ^ 0x7777, gx * 0.0035, gy * 0.0035, 3);
+    const temp = clamp(0.5 + tempNoise * 0.35 + (ny - 0.5) * 0.4, 0, 1);
+    const moistNoise = fbm2(seed ^ 0x3333, gx * 0.004, gy * 0.004, 3);
+    const moist = clamp(0.5 + moistNoise * 0.45, 0, 1);
+    const continental = fbm2(seed, gx * 0.0028, gy * 0.0028, 4);
+
+    // Continuous topographical layer weights
+    const alpineW = clamp((continental - 0.12) / 0.18, 0, 1);
+    const coastalW = clamp((-0.22 - continental) / 0.15, 0, 1);
+    const badlandsW = (1 - alpineW) * (1 - coastalW) * clamp((temp - 0.48) / 0.16, 0, 1) * clamp((0.52 - moist) / 0.16, 0, 1);
+    const wetlandsW = (1 - alpineW) * (1 - coastalW) * clamp((moist - 0.50) / 0.16, 0, 1) * clamp((0.15 - continental) / 0.15, 0, 1);
+    const taigaW = (1 - alpineW) * (1 - coastalW) * (1 - badlandsW) * clamp((0.48 - temp) / 0.16, 0, 1);
+    const meadowW = Math.max(0, 1 - alpineW - coastalW - badlandsW - wetlandsW - taigaW);
+
+    let blendedH = 0;
+
+    if (alpineW > 0.01) {
+      const sharpRidge = 1 - Math.abs(fbm2(seed ^ 0x9999, gx * 0.008, gy * 0.008, 4));
+      const needleSpires = Math.max(0, fbm2(seed ^ 0x8888, gx * 0.025, gy * 0.025, 3));
+      const alpineH = Math.pow(sharpRidge, 2.2) * 19 + needleSpires * 5 + 4; // @tier-b
+      blendedH += alpineH * alpineW;
+    }
+
+    if (badlandsW > 0.01) {
+      const mesaBase = fbm2(seed ^ 0x4444, gx * 0.006, gy * 0.006, 3);
+      const canyonCut = Math.abs(fbm2(seed ^ 0x2222, gx * 0.015, gy * 0.015, 2));
+      const mesaContinuous = (mesaBase * 0.7 + (1 - canyonCut) * 0.5 + 0.4) * 16;
+      const mesaH = Math.floor(mesaContinuous / 3.2) * 3.2 + 2;
+      blendedH += mesaH * badlandsW;
+    }
+
+    if (wetlandsW > 0.01) {
+      const marsh = fbm2(seed ^ 0x1111, gx * 0.012, gy * 0.012, 3);
+      const slough = Math.abs(fbm2(seed ^ 0x6666, gx * 0.02, gy * 0.02, 2));
+      const wetlandsH = slough < 0.12 ? 0 : marsh > 0.15 ? 3 : marsh > -0.1 ? 2 : 1;
+      blendedH += wetlandsH * wetlandsW;
+    }
+
+    if (taigaW > 0.01) {
+      const taigaNoise = fbm2(seed ^ 0xaaaa, gx * 0.008, gy * 0.008, 3) * 0.7 + fbm2(seed ^ 0xbbbb, gx * 0.02, gy * 0.02, 2) * 0.3;
+      const taigaH = (taigaNoise + 0.5) * 13 + 3;
+      blendedH += taigaH * taigaW;
+    }
+
+    if (coastalW > 0.01) {
+      const dune = fbm2(seed ^ 0xcccc, gx * 0.008, gy * 0.008, 2);
+      const coastalH = (dune + 0.3) * 4;
+      blendedH += coastalH * coastalW;
+    }
+
+    if (meadowW > 0.01) {
+      const meadow = fbm2(seed ^ 0x5555, gx * 0.006, gy * 0.006, 3) * 0.75 + fbm2(seed ^ 0x1234, gx * 0.016, gy * 0.016, 2) * 0.25;
+      const meadowH = (meadow + 0.5) * 9 + 2;
+      blendedH += meadowH * meadowW;
+    }
+
+    return clamp(Math.round(blendedH), 0, MAX_HEIGHT_UNITS);
   });
 
-  // Surface material from height — derived at load, player can override later.
+
+  // Surface material & Precalculated tile colors with smooth biome color blending
   surface.fillFrom((gx, gy) => {
     // Sample the four vertices of this tile and take the minimum (the "floor" of the tile).
     const minH = Math.min(
@@ -101,7 +270,15 @@ export function createWorld(seed: number): WorldTerrain {
       heights.get(gx,   gy+1),
       heights.get(gx+1, gy+1),
     );
-    return materialFromHeight(minH);
+    const blend = getBiomeBlendAt(gx, gy, seed, minH);
+    tileColors[gy * W + gx] = getTileColor(blend.primary, minH, seed, gx, gy, blend.secondary, blend.blend);
+
+    if (minH <= 1) return MAT_WATER;
+    if (minH <= 2 || blend.primary === 'coastal') return MAT_SAND;
+    if (blend.primary === 'badlands') return minH > 6 ? MAT_ROCK : MAT_SAND;
+    if (minH >= 19 || (blend.primary === 'alpine' && minH >= 17)) return MAT_SNOW;
+    if (minH >= 14 || blend.primary === 'alpine') return MAT_ROCK;
+    return MAT_GRASS;
   });
 
   const field: HeightField = {
@@ -112,12 +289,17 @@ export function createWorld(seed: number): WorldTerrain {
   return {
     heights,
     surface,
+    tileColors,
     field,
     currentMaxHeightPx: MAX_HEIGHT_PX,
     heightDeltas: new Map<number, number>(),
     surfaceDeltas: new Map<number, number>(),
   };
 }
+
+
+
+
 
 /** Apply saved terrain height and surface material deltas onto a freshly seeded world. */
 export function applyTerrainDeltas(
@@ -205,6 +387,7 @@ export function dig(world: WorldTerrain, gx: number, gy: number): boolean {
   if (changed) {
     world.surface.set(gx, gy, MAT_DIRT);
     world.surfaceDeltas.set(gy * W + gx, MAT_DIRT);
+    world.tileColors[gy * W + gx] = DIRT;
   }
   return changed;
 }
@@ -235,6 +418,7 @@ export function raise(world: WorldTerrain, gx: number, gy: number): boolean {
   if (changed) {
     world.surface.set(gx, gy, MAT_DIRT);
     world.surfaceDeltas.set(gy * W + gx, MAT_DIRT);
+    world.tileColors[gy * W + gx] = DIRT;
     const newMaxPx = maxNewH * STEP_PX;
     if (newMaxPx > world.currentMaxHeightPx) {
       world.currentMaxHeightPx = newMaxPx;
@@ -242,6 +426,7 @@ export function raise(world: WorldTerrain, gx: number, gy: number): boolean {
   }
   return changed;
 }
+
 
 /**
  * A bounded `TileSource` adapter over `TileGrid`.

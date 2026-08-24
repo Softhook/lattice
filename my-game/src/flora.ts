@@ -21,10 +21,12 @@ import {
   hex,
 } from '@latticekit/draw';
 import { Rng, createRng, fbm2 } from '@latticekit/core';
-import { W, H, MAT_WATER, MAT_SAND, MAT_SNOW, MAT_ROCK, MAT_GRASS, type WorldTerrain } from './world.js';
-import type { SpatialGrid } from './spatial.js';
+import { W, H, MAT_WATER, MAT_SAND, MAT_SNOW, MAT_ROCK, MAT_GRASS, getBiomeAt, getBiomeBlendAt, type WorldTerrain } from './world.js';
+
+
 
 // ── Colors for Flora ──────────────────────────────────────────────────────────
+
 
 export const PINE_NEEDLE   = hex('#1b3d22');
 export const PINE_NEEDLE2  = hex('#25522e');
@@ -43,9 +45,38 @@ export const MOSS_GREEN    = hex('#4f7832');
 export const SHROOM_CAP    = hex('#c0392b');
 export const SHROOM_STEM   = hex('#e8dfd8');
 
+// Additional Biome Vegetation & Rock Colors
+export const CACTUS_GREEN   = hex('#488236');
+export const CACTUS_THORN   = hex('#8ac46e');
+export const SWAMP_WOOD     = hex('#2d2015');
+export const SWAMP_CANOPY   = hex('#2d421e');
+export const SWAMP_VINE     = hex('#3d5926');
+export const SPRUCE_WOOD    = hex('#362010');
+export const SPRUCE_NEEDLE  = hex('#142e1b');
+export const SPRUCE_NEEDLE2 = hex('#1c3d25');
+export const BIRCH_BARK     = hex('#e5e1d8');
+export const BIRCH_KNOT     = hex('#2b2926');
+export const BIRCH_LEAF     = hex('#60b035');
+export const BIRCH_LEAF2    = hex('#76c746');
+export const SPIRE_RED      = hex('#a84428');
+export const SPIRE_ORANGE   = hex('#c96538');
+export const DEAD_WOOD      = hex('#7a6147');
+
 // ── Flora Kinds & Definitions ─────────────────────────────────────────────────
 
-export type FloraKind = 'pine' | 'oak' | 'bush' | 'flowers' | 'rock' | 'mushroom';
+export type FloraKind =
+  | 'pine'
+  | 'oak'
+  | 'bush'
+  | 'flowers'
+  | 'rock'
+  | 'mushroom'
+  | 'cactus'
+  | 'swamp_tree'
+  | 'spruce'
+  | 'birch'
+  | 'rock_spire'
+  | 'dead_bush';
 
 export interface FloraItem {
   readonly id: number;
@@ -67,6 +98,22 @@ export interface SavedFlora {
   readonly subType: number;
 }
 
+import { SpatialGrid, MAX_SPATIAL_ENTITIES } from './spatial.js';
+
+
+export const FLORA_SPATIAL = new SpatialGrid();
+
+/** Rebuild the spatial grid index across all flora items. */
+export function rebuildFloraSpatial(flora: readonly FloraItem[]): void {
+  FLORA_SPATIAL.clear();
+  for (let i = 0; i < flora.length; i++) {
+    const f = flora[i];
+    if (f !== undefined) {
+      FLORA_SPATIAL.insert(i, f.gx, f.gy);
+    }
+  }
+}
+
 /** Extract current living flora items for persistence. */
 export function extractSavedFlora(flora: readonly FloraItem[]): SavedFlora[] {
   return flora.map((f) => ({
@@ -81,7 +128,7 @@ export function extractSavedFlora(flora: readonly FloraItem[]): SavedFlora[] {
 /** Reconstruct flora items from saved state. */
 export function restoreFlora(saved: readonly SavedFlora[]): FloraItem[] {
   let seq = 1;
-  return saved.map((s) => ({
+  const items = saved.map((s) => ({
     id: seq++,
     kind: s.kind,
     gx: s.gx,
@@ -92,7 +139,10 @@ export function restoreFlora(saved: readonly SavedFlora[]): FloraItem[] {
     scale: s.scale,
     subType: s.subType,
   }));
+  rebuildFloraSpatial(items);
+  return items;
 }
+
 
 // ── Pine Tree Massing ─────────────────────────────────────────────────────────
 
@@ -111,6 +161,22 @@ const pineMassing: Massing = (w: SolidWriter, v: Variant, _rng: Rng) => {
 
 export const PINE_DEF: SpriteDef = defineSprite({ id: 'flora_pine', w: 1, d: 1, massing: pineMassing });
 
+// ── Towering Spruce Massing (Deep Taiga) ──────────────────────────────────────
+
+const spruceMassing: Massing = (w: SolidWriter, v: Variant, _rng: Rng) => {
+  const s = v.progress > 0 ? v.progress : 1.0;
+  w.shadow(0.1, 0.1, 0.9 * s, 0.9 * s, 0.4);
+  // Tall dark trunk
+  w.box(0.38, 0.38, 0.24 * s, 0.24 * s, { color: SPRUCE_WOOD, h: 2.6 * s });
+  // 4 Tight conical tiers
+  w.box(0.12, 0.12, 0.76 * s, 0.76 * s, { color: SPRUCE_NEEDLE, h: 0.7 * s, z: 1.0 * s });
+  w.box(0.2, 0.2, 0.6 * s, 0.6 * s, { color: SPRUCE_NEEDLE2, h: 0.7 * s, z: 1.6 * s });
+  w.box(0.26, 0.26, 0.48 * s, 0.48 * s, { color: SPRUCE_NEEDLE, h: 0.7 * s, z: 2.2 * s });
+  w.box(0.34, 0.34, 0.32 * s, 0.32 * s, { color: SPRUCE_NEEDLE2, h: 0.8 * s, z: 2.8 * s });
+};
+
+export const SPRUCE_DEF: SpriteDef = defineSprite({ id: 'flora_spruce', w: 1, d: 1, massing: spruceMassing });
+
 // ── Oak Tree Massing ──────────────────────────────────────────────────────────
 
 const oakMassing: Massing = (w: SolidWriter, v: Variant, _rng: Rng) => {
@@ -125,6 +191,83 @@ const oakMassing: Massing = (w: SolidWriter, v: Variant, _rng: Rng) => {
 };
 
 export const OAK_DEF: SpriteDef = defineSprite({ id: 'flora_oak', w: 1, d: 1, massing: oakMassing });
+
+// ── Birch Tree Massing (Meadows & Groves) ──────────────────────────────────────
+
+const birchMassing: Massing = (w: SolidWriter, v: Variant, _rng: Rng) => {
+  const s = v.progress > 0 ? v.progress : 1.0;
+  w.shadow(0.05, 0.05, 1.0 * s, 1.0 * s, 0.35);
+  // White bark trunk with dark knots
+  w.box(0.38, 0.38, 0.24 * s, 0.24 * s, { color: BIRCH_BARK, h: 1.8 * s });
+  w.box(0.37, 0.37, 0.26 * s, 0.08 * s, { color: BIRCH_KNOT, h: 0.08 * s, z: 0.6 * s });
+  w.box(0.37, 0.37, 0.08 * s, 0.26 * s, { color: BIRCH_KNOT, h: 0.08 * s, z: 1.1 * s });
+  // Airy golden-emerald foliage
+  w.box(0.15, 0.15, 0.7 * s, 0.7 * s, { color: BIRCH_LEAF, h: 1.2 * s, z: 1.4 * s });
+  w.box(0.25, 0.25, 0.5 * s, 0.5 * s, { color: BIRCH_LEAF2, h: 0.8 * s, z: 2.2 * s });
+};
+
+export const BIRCH_DEF: SpriteDef = defineSprite({ id: 'flora_birch', w: 1, d: 1, massing: birchMassing });
+
+// ── Giant Swamp Willow Massing (Wetlands) ──────────────────────────────────────
+
+const swampTreeMassing: Massing = (w: SolidWriter, v: Variant, _rng: Rng) => {
+  const s = v.progress > 0 ? v.progress : 1.0;
+  w.shadow(0, 0, 1.4 * s, 1.4 * s, 0.5);
+  // Gnarled root cluster and dark wet trunk
+  w.box(0.25, 0.25, 0.5 * s, 0.5 * s, { color: SWAMP_WOOD, h: 0.5 * s });
+  w.box(0.35, 0.35, 0.3 * s, 0.3 * s, { color: SWAMP_WOOD, h: 1.6 * s, z: 0.4 * s });
+  // Wide spreading canopy
+  w.box(0.05, 0.05, 0.9 * s, 0.9 * s, { color: SWAMP_CANOPY, h: 1.1 * s, z: 1.3 * s });
+  // Hanging vines
+  w.box(0.1, 0.1, 0.15 * s, 0.15 * s, { color: SWAMP_VINE, h: 0.8 * s, z: 0.6 * s });
+  w.box(0.75, 0.15, 0.15 * s, 0.15 * s, { color: SWAMP_VINE, h: 0.9 * s, z: 0.5 * s });
+  w.box(0.15, 0.75, 0.15 * s, 0.15 * s, { color: SWAMP_VINE, h: 0.7 * s, z: 0.7 * s });
+  w.box(0.75, 0.75, 0.15 * s, 0.15 * s, { color: SWAMP_VINE, h: 0.85 * s, z: 0.55 * s });
+};
+
+export const SWAMP_TREE_DEF: SpriteDef = defineSprite({ id: 'flora_swamp_tree', w: 1, d: 1, massing: swampTreeMassing });
+
+// ── Saguaro Cactus Massing (Badlands & Deserts) ────────────────────────────────
+
+const cactusMassing: Massing = (w: SolidWriter, v: Variant, _rng: Rng) => {
+  const s = v.progress > 0 ? v.progress : 1.0;
+  w.shadow(0.15, 0.15, 0.7 * s, 0.7 * s, 0.25);
+  // Main columnar stem
+  w.box(0.38, 0.38, 0.24 * s, 0.24 * s, { color: CACTUS_GREEN, h: 1.9 * s });
+  // Right arm branching out and up
+  w.box(0.62, 0.42, 0.22 * s, 0.16 * s, { color: CACTUS_GREEN, h: 0.16 * s, z: 0.7 * s });
+  w.box(0.68, 0.42, 0.16 * s, 0.16 * s, { color: CACTUS_GREEN, h: 0.75 * s, z: 0.86 * s });
+  // Left arm branching out and up
+  w.box(0.16, 0.42, 0.22 * s, 0.16 * s, { color: CACTUS_GREEN, h: 0.16 * s, z: 1.0 * s });
+  w.box(0.16, 0.42, 0.16 * s, 0.16 * s, { color: CACTUS_GREEN, h: 0.65 * s, z: 1.16 * s });
+};
+
+export const CACTUS_DEF: SpriteDef = defineSprite({ id: 'flora_cactus', w: 1, d: 1, massing: cactusMassing });
+
+// ── Sandstone / Granite Rock Spire Massing (Badlands & Alpine) ─────────────────
+
+const rockSpireMassing: Massing = (w: SolidWriter, v: Variant, _rng: Rng) => {
+  const s = v.progress > 0 ? v.progress : 1.0;
+  w.shadow(0.05, 0.05, 0.9 * s, 0.9 * s, 0.4);
+  // Massive stepped monolith
+  w.box(0.2, 0.2, 0.6 * s, 0.6 * s, { color: SPIRE_RED, h: 0.9 * s });
+  w.box(0.26, 0.26, 0.48 * s, 0.48 * s, { color: SPIRE_ORANGE, h: 1.0 * s, z: 0.85 * s });
+  w.box(0.33, 0.33, 0.34 * s, 0.34 * s, { color: SPIRE_RED, h: 1.1 * s, z: 1.8 * s });
+};
+
+export const ROCK_SPIRE_DEF: SpriteDef = defineSprite({ id: 'flora_rock_spire', w: 1, d: 1, massing: rockSpireMassing });
+
+// ── Arid Dead Bush Massing ─────────────────────────────────────────────────────
+
+const deadBushMassing: Massing = (w: SolidWriter, v: Variant, _rng: Rng) => {
+  const s = v.progress > 0 ? v.progress : 1.0;
+  w.shadow(0.2, 0.2, 0.6 * s, 0.6 * s, 0.15);
+  w.box(0.35, 0.35, 0.3 * s, 0.3 * s, { color: DEAD_WOOD, h: 0.25 * s });
+  w.box(0.2, 0.25, 0.25 * s, 0.25 * s, { color: DEAD_WOOD, h: 0.35 * s, z: 0.15 * s });
+  w.box(0.55, 0.45, 0.25 * s, 0.25 * s, { color: DEAD_WOOD, h: 0.4 * s, z: 0.15 * s });
+};
+
+export const DEAD_BUSH_DEF: SpriteDef = defineSprite({ id: 'flora_dead_bush', w: 1, d: 1, massing: deadBushMassing });
 
 // ── Bush Massing ──────────────────────────────────────────────────────────────
 
@@ -194,14 +337,21 @@ export const MUSHROOM_DEF: SpriteDef = defineSprite({ id: 'flora_mushroom', w: 1
 
 export function defForFlora(kind: FloraKind): SpriteDef {
   switch (kind) {
-    case 'pine':     return PINE_DEF;
-    case 'oak':      return OAK_DEF;
-    case 'bush':     return BUSH_DEF;
-    case 'flowers':  return FLOWER_DEF;
-    case 'rock':     return ROCK_DEF;
-    case 'mushroom': return MUSHROOM_DEF;
+    case 'pine':       return PINE_DEF;
+    case 'spruce':     return SPRUCE_DEF;
+    case 'oak':        return OAK_DEF;
+    case 'birch':      return BIRCH_DEF;
+    case 'swamp_tree': return SWAMP_TREE_DEF;
+    case 'cactus':     return CACTUS_DEF;
+    case 'rock_spire': return ROCK_SPIRE_DEF;
+    case 'dead_bush':  return DEAD_BUSH_DEF;
+    case 'bush':       return BUSH_DEF;
+    case 'flowers':    return FLOWER_DEF;
+    case 'rock':       return ROCK_DEF;
+    case 'mushroom':   return MUSHROOM_DEF;
   }
 }
+
 
 const FLORA_VARIANT_SCRATCH: {
   seed: number;
@@ -235,95 +385,128 @@ export function floraVariant(f: FloraItem): Variant {
 
 let floraIdSeq = 1;
 
-/** Populate the world with lush procedural trees, bushes, flowers, and stones. */
+/** Populate the massive 640x640 world with lush procedural trees, bushes, flowers, and stones. */
 export function populateFlora(seed: number, world: WorldTerrain): FloraItem[] {
   const rng = createRng(seed ^ 0x5a5a5a5a);
   const items: FloraItem[] = [];
 
-  for (let gy = 4; gy < H - 4; gy += 2) {
-    for (let gx = 4; gx < W - 4; gx += 2) {
-      // Don't spawn on spawn zones for players
-      if ((gx >= 36 && gx <= 44 && gy >= 36 && gy <= 44) ||
-          (gx >= 156 && gx <= 164 && gy >= 36 && gy <= 44)) {
+  for (let gy = 6; gy < H - 6; gy += 4) {
+    for (let gx = 6; gx < W - 6; gx += 4) {
+      // Small 3-tile exclusion directly around player spawn centers
+      if ((Math.abs(gx - 160) <= 3 && Math.abs(gy - 160) <= 3) ||
+          (Math.abs(gx - 480) <= 3 && Math.abs(gy - 160) <= 3)) {
         continue;
       }
+
 
       const mat = world.surface.get(gx, gy);
       if (mat === MAT_WATER) continue;
 
-      const jitterX = gx + (rng.next() * 1.6 - 0.8);
-      const jitterY = gy + (rng.next() * 1.6 - 0.8);
+      const jitterX = gx + (rng.next() * 1.8 - 0.9);
+      const jitterY = gy + (rng.next() * 1.8 - 0.9);
       const tgx = Math.floor(jitterX);
       const tgy = Math.floor(jitterY);
-      if (tgx < 0 || tgy < 0 || tgx >= W || tgy >= H) continue;
+      if (tgx < 4 || tgy < 4 || tgx >= W - 4 || tgy >= H - 4) continue;
 
       const tMat = world.surface.get(tgx, tgy);
       if (tMat === MAT_WATER) continue;
 
-      // Use noise density to create organic clusters / forest groves
-      const density = fbm2(seed ^ 0x3333, tgx * 0.04, tgy * 0.04, 3);
+      const elevation = world.heights.get(tgx, tgy);
+      const blend = getBiomeBlendAt(tgx, tgy, seed, elevation);
+
+      // Noise density creates natural clusters and clearings
+      const density = fbm2(seed ^ 0x3333, tgx * 0.03, tgy * 0.03, 3);
+      const spawnThreshold = blend.primary === 'badlands' ? -0.15 : -0.25;
+      if (density < spawnThreshold) continue;
+
       const roll = rng.next();
+      // In transition ecotones, seamlessly intermingle species from secondary biome
+      const activeKind = (blend.blend > 0.25 && roll < blend.blend * 0.7) ? blend.secondary : blend.primary;
 
       let kind: FloraKind | undefined = undefined;
       let scale = 0.85 + rng.next() * 0.35;
       let subType = 0;
 
-      if (tMat === MAT_SNOW) {
-        // High altitude: pine trees and rugged rocks
-        if (density > 0.1 && roll < 0.45) {
+      if (activeKind === 'badlands') {
+        // Arid badlands & mesas: Saguaro cacti, stepped rock spires, and tumbleweed dead bushes
+        if (roll < 0.42) {
+          kind = 'cactus';
+          scale = 0.9 + rng.next() * 0.45;
+        } else if (roll < 0.70) {
+          kind = 'rock_spire';
+          scale = 1.0 + rng.next() * 0.55;
+        } else if (roll < 0.90) {
+          kind = 'dead_bush';
+          scale = 0.75 + rng.next() * 0.4;
+        }
+      } else if (activeKind === 'wetlands') {
+        // Lush wetlands & bayous: giant weeping swamp willows, flower carpets, and mushrooms
+        if (roll < 0.38) {
+          kind = 'swamp_tree';
+          scale = 1.05 + rng.next() * 0.45;
+        } else if (roll < 0.65) {
+          kind = 'flowers';
+          subType = Math.floor(rng.next() * 3);
+        } else if (roll < 0.82) {
+          kind = 'mushroom';
+        } else if (roll < 0.94) {
+          kind = 'bush';
+          subType = 1; // berry
+        }
+      } else if (activeKind === 'taiga') {
+        // Deep northern taiga: towering spruce, evergreen pines, mushrooms, and mossy granite boulders
+        if (roll < 0.42) {
+          kind = 'spruce';
+          scale = 1.0 + rng.next() * 0.45;
+        } else if (roll < 0.68) {
+          kind = 'pine';
+          scale = 0.9 + rng.next() * 0.35;
+        } else if (roll < 0.80) {
+          kind = 'mushroom';
+        } else if (roll < 0.92) {
+          kind = 'rock';
+          subType = 1; // mossy
+        } else {
+          kind = 'bush';
+        }
+      } else if (activeKind === 'alpine') {
+        // Alpine high peaks: hardy mountain pines, sharp rock spires, and granite boulders
+        if (roll < 0.40) {
           kind = 'pine';
           scale = 0.9 + rng.next() * 0.4;
-        } else if (roll < 0.25) {
+        } else if (roll < 0.70) {
+          kind = 'rock_spire';
+          scale = 1.0 + rng.next() * 0.5;
+        } else if (roll < 0.90) {
           kind = 'rock';
-          subType = roll < 0.1 ? 1 : 0;
+          subType = roll < 0.3 ? 1 : 0;
         }
-      } else if (tMat === MAT_ROCK) {
-        // Mountain slopes
+      } else if (activeKind === 'coastal') {
+        // Coastal dunes & shallows
+        if (roll < 0.30) {
+          kind = 'rock_spire';
+          scale = 0.8 + rng.next() * 0.4;
+        } else if (roll < 0.60) {
+          kind = 'rock';
+        } else if (roll < 0.80) {
+          kind = 'bush';
+        }
+      } else {
+        // Temperate Meadows: white-barked birch trees, broadleaf oaks, wildflower carpets, and bushes
         if (roll < 0.35) {
-          kind = 'rock';
-          subType = roll < 0.15 ? 1 : 0;
-        } else if (density > 0.2 && roll < 0.6) {
-          kind = 'pine';
-        }
-      } else if (tMat === MAT_SAND) {
-        // Coastal sands: occasional driftwood / rock
-        if (roll < 0.1) {
-          kind = 'rock';
-        }
-      } else if (tMat === MAT_GRASS) {
-        // Meadows and lush forests
-        if (density > 0.25) {
-          // Dense forest zone
-          if (roll < 0.5) {
-            kind = 'oak';
-            scale = 0.9 + rng.next() * 0.35;
-          } else if (roll < 0.75) {
-            kind = 'pine';
-          } else if (roll < 0.88) {
-            kind = 'mushroom';
-          } else {
-            kind = 'bush';
-            subType = roll > 0.94 ? 1 : 0;
-          }
-        } else if (density > -0.15) {
-          // Pleasant meadow
-          if (roll < 0.3) {
-            kind = 'flowers';
-            subType = Math.floor(rng.next() * 3);
-          } else if (roll < 0.45) {
-            kind = 'bush';
-            subType = roll > 0.35 ? 1 : 0;
-          } else if (roll < 0.55) {
-            kind = 'oak';
-          }
+          kind = 'birch';
+          scale = 0.95 + rng.next() * 0.35;
+        } else if (roll < 0.62) {
+          kind = 'oak';
+          scale = 0.95 + rng.next() * 0.35;
+        } else if (roll < 0.78) {
+          kind = 'flowers';
+          subType = Math.floor(rng.next() * 3);
+        } else if (roll < 0.90) {
+          kind = 'bush';
+          subType = roll > 0.8 ? 1 : 0;
         } else {
-          // Open plains / clearing
-          if (roll < 0.25) {
-            kind = 'flowers';
-            subType = Math.floor(rng.next() * 3);
-          } else if (roll < 0.35) {
-            kind = 'rock';
-          }
+          kind = 'mushroom';
         }
       }
 
@@ -343,8 +526,10 @@ export function populateFlora(seed: number, world: WorldTerrain): FloraItem[] {
     }
   }
 
+  rebuildFloraSpatial(items);
   return items;
 }
+
 
 export interface HarvestYield {
   readonly item: FloraItem;
@@ -361,6 +546,7 @@ export function harvestFloraAt(flora: FloraItem[], gx: number, gy: number): Harv
   const item = flora[index];
   if (item === undefined) return undefined;
   flora.splice(index, 1);
+  rebuildFloraSpatial(flora);
 
   let wood = 0;
   let stone = 0;
@@ -372,9 +558,36 @@ export function harvestFloraAt(flora: FloraItem[], gx: number, gy: number): Harv
       wood = 4;
       label = '+4 WOOD (PINE CHOPPED)';
       break;
+    case 'spruce':
+      wood = 7;
+      label = '+7 WOOD (TALL SPRUCE CHOPPED)';
+      break;
     case 'oak':
       wood = 6;
       label = '+6 WOOD (OAK CHOPPED)';
+      break;
+    case 'birch':
+      wood = 5;
+      label = '+5 WOOD (BIRCH CHOPPED)';
+      break;
+    case 'swamp_tree':
+      wood = 8;
+      fiber = 3;
+      label = '+8 WOOD, +3 FIBER (SWAMP WILLOW CHOPPED)';
+      break;
+    case 'cactus':
+      wood = 3;
+      fiber = 2;
+      label = '+3 WOOD, +2 FIBER (CACTUS HARVESTED)';
+      break;
+    case 'dead_bush':
+      wood = 1;
+      fiber = 2;
+      label = '+1 WOOD, +2 FIBER (DEAD BUSH CLEARED)';
+      break;
+    case 'rock_spire':
+      stone = 8;
+      label = '+8 STONE (ROCK SPIRE MINED)';
       break;
     case 'rock':
       stone = 5;
@@ -397,6 +610,7 @@ export function harvestFloraAt(flora: FloraItem[], gx: number, gy: number): Harv
 
   return { item, wood, stone, fiber, label };
 }
+
 
 const DEFAULT_EDIBLE_KINDS: readonly FloraKind[] = ['flowers', 'bush', 'mushroom'];
 
@@ -447,7 +661,6 @@ export function findClosestEdibleFlora(
   return closest;
 }
 
-
 let regrowthTimer = 0;
 
 /** Slowly regrow small flora (flowers, mushrooms, bushes) in the ecosystem. */
@@ -461,7 +674,7 @@ export function tickFloraRegrowth(
   if (regrowthTimer < 5.0) return;
   regrowthTimer = 0;
 
-  if (flora.length >= 1200) return; // Ecosystem capacity
+  if (flora.length >= 6000 || flora.length >= MAX_SPATIAL_ENTITIES) return; // Ecosystem capacity for 640x640 continent
 
   const rng = createRng((seed + flora.length * 31) ^ 0xabcdef);
   const gx = Math.floor(4 + rng.next() * (W - 8));
@@ -470,13 +683,13 @@ export function tickFloraRegrowth(
   const mat = world.surface.get(gx, gy);
   if (mat !== MAT_GRASS) return;
 
-  // Check if tile already has flora
-  const existing = flora.some((f) => f.gx === gx && f.gy === gy);
-  if (existing) return;
+  // Check if tile already has flora using O(1) spatial query
+  if (FLORA_SPATIAL.queryRadius(gx, gy, 0.8) > 0) return;
 
   const roll = rng.next();
   const kind: FloraKind = roll < 0.5 ? 'flowers' : roll < 0.8 ? 'bush' : 'mushroom';
 
+  const newIdx = flora.length;
   flora.push({
     id: floraIdSeq++,
     kind,
@@ -488,4 +701,7 @@ export function tickFloraRegrowth(
     scale: 0.8 + rng.next() * 0.3,
     subType: Math.floor(rng.next() * 3),
   });
+  FLORA_SPATIAL.insert(newIdx, gx, gy);
 }
+
+

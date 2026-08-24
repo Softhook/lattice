@@ -18,12 +18,14 @@ import { clamp } from '@latticekit/core';
 import type { Player } from './players.js';
 import { MAX_HP, canAffordBuilding } from './players.js';
 import { BUILDING_COSTS } from './buildings.js';
+import { getBiomeAt, type WorldTerrain } from './world.js';
 import {
   P1_COLOR,
   P1_ACCENT,
   P2_COLOR,
   P2_ACCENT,
 } from './palette.js';
+
 
 // ── Colors for UI ─────────────────────────────────────────────────────────────
 
@@ -73,7 +75,12 @@ export function drawSplitDivider(pen: Pen): void {
 }
 
 /** Draw the in-canvas player status HUD card. */
-export function drawPlayerHud(pen: Pen, player: Player): void {
+export function drawPlayerHud(
+  pen: Pen,
+  player: Player,
+  world?: WorldTerrain,
+  seed = 42,
+): void {
   const viewW = pen.camera.viewW;
   const viewH = pen.camera.viewH;
 
@@ -85,7 +92,7 @@ export function drawPlayerHud(pen: Pen, player: Player): void {
   const padX = 14;
   const padY = 14;
   const hudW = 280;
-  const hudH = 132;
+  const hudH = 152;
 
   const isHurt = player.hurtFlash > 0;
   const cardBorder = isHurt ? hex('#e74c3c') : pColor;
@@ -165,7 +172,7 @@ export function drawPlayerHud(pen: Pen, player: Player): void {
   const toolX = padX + 10;
   const toolY = padY + 56;
   const toolW = hudW - 20;
-  const toolH = 30;
+  const toolH = 28;
 
   pen.surface.poly(setBox(toolX, toolY, toolW, toolH), 4, hex('#132110'));
 
@@ -196,7 +203,7 @@ export function drawPlayerHud(pen: Pen, player: Player): void {
   screenText(
     pen,
     toolX + 8,
-    toolY + 15,
+    toolY + 14,
     modeText,
     modeColor,
     { ...DEFAULT_TEXT, size: 10, weight: 700, align: -1, baseline: 0 },
@@ -205,7 +212,7 @@ export function drawPlayerHud(pen: Pen, player: Player): void {
   screenText(
     pen,
     toolX + toolW - 8,
-    toolY + 15,
+    toolY + 14,
     cycleKey,
     hex('#8da882'),
     { ...DEFAULT_TEXT, size: 10, weight: 600, align: 1, baseline: 0 },
@@ -213,9 +220,9 @@ export function drawPlayerHud(pen: Pen, player: Player): void {
 
   // 6. Weapon & Combat Bar
   const wepX = padX + 10;
-  const wepY = padY + 92;
+  const wepY = padY + 88;
   const wepW = hudW - 20;
-  const wepH = 30;
+  const wepH = 28;
 
   pen.surface.poly(setBox(wepX, wepY, wepW, wepH), 4, hex('#181a24'));
   pen.surface.stroke(setBox(wepX, wepY, wepW, wepH), 4, true, hex('#3d5a80'), 1);
@@ -228,7 +235,7 @@ export function drawPlayerHud(pen: Pen, player: Player): void {
   screenText(
     pen,
     wepX + 8,
-    wepY + 15,
+    wepY + 14,
     `${atkKey} ${wName}`,
     hex('#90caf9'),
     { ...DEFAULT_TEXT, size: 10, weight: 800, align: -1, baseline: 0 },
@@ -237,7 +244,7 @@ export function drawPlayerHud(pen: Pen, player: Player): void {
   screenText(
     pen,
     wepX + wepW - 75,
-    wepY + 15,
+    wepY + 14,
     wepCycleKey,
     hex('#b0bec5'),
     { ...DEFAULT_TEXT, size: 9, weight: 600, align: -1, baseline: 0 },
@@ -246,13 +253,28 @@ export function drawPlayerHud(pen: Pen, player: Player): void {
   screenText(
     pen,
     wepX + wepW - 6,
-    wepY + 15,
+    wepY + 14,
     wepCraftKey,
     hex('#ffe082'),
     { ...DEFAULT_TEXT, size: 9, weight: 700, align: 1, baseline: 0 },
   );
 
-  // 7. Floating action notification if present
+  // 7. Location & Biome Radar Strip
+  const gx = Math.floor(player.gx);
+  const gy = Math.floor(player.gy);
+  const elevation = world !== undefined ? world.heights.get(gx, gy) : 4;
+  const biome = getBiomeAt(gx, gy, seed, elevation);
+
+  screenText(
+    pen,
+    padX + 10,
+    padY + 124,
+    `${biome.icon} ${biome.name.toUpperCase()} (X:${gx}, Y:${gy})`,
+    hex('#80cbc4'),
+    { ...DEFAULT_TEXT, size: 9, weight: 700, align: -1, baseline: 0 },
+  );
+
+  // 8. Floating action notification if present
   if (player.lastActionMsg.length > 0 && player.msgTimer > 0) {
     const msgY = padY + hudH + 16;
     const alpha = Math.min(1, player.msgTimer * 2);
@@ -269,6 +291,7 @@ export function drawPlayerHud(pen: Pen, player: Player): void {
       { ...DEFAULT_TEXT, size: 12, weight: 800, align: -1, baseline: 0 },
     );
   }
+
 
   // 7. Respawn banner if knocked down
   if (player.respawnTimer > 0) {
