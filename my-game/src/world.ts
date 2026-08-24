@@ -133,12 +133,7 @@ export function dig(world: WorldTerrain, gx: number, gy: number): boolean {
     }
   }
   if (changed) {
-    // Update surface material for the tile.
     world.surface.set(gx, gy, MAT_DIRT);
-    // Recompute currentMaxHeightPx (dig can only lower, so this only needs updating
-    // if the dug vertex was the current maximum — conservative: just scan all vertices).
-    // In practice this is rarely called so the scan is acceptable.
-    world.currentMaxHeightPx = measureMaxHeightPx(world.heights);
   }
   return changed;
 }
@@ -151,23 +146,25 @@ export function dig(world: WorldTerrain, gx: number, gy: number): boolean {
 export function raise(world: WorldTerrain, gx: number, gy: number): boolean {
   if (gx < 0 || gy < 0 || gx >= W || gy >= H) return false;
   let changed = false;
+  let maxNewH = 0;
   for (let dx = 0; dx <= 1; dx++) {
     for (let dy = 0; dy <= 1; dy++) {
       const x = gx + dx;
       const y = gy + dy;
       const cur = world.heights.get(x, y);
       if (cur < MAX_HEIGHT_UNITS) {
-        world.heights.set(x, y, cur + 1);
+        const next = cur + 1;
+        world.heights.set(x, y, next);
+        if (next > maxNewH) maxNewH = next;
         changed = true;
       }
     }
   }
   if (changed) {
     world.surface.set(gx, gy, MAT_DIRT);
-    // Raising can increase the max — update it.
-    const newMax = measureMaxHeightPx(world.heights);
-    if (newMax > world.currentMaxHeightPx) {
-      world.currentMaxHeightPx = newMax;
+    const newMaxPx = maxNewH * STEP_PX;
+    if (newMaxPx > world.currentMaxHeightPx) {
+      world.currentMaxHeightPx = newMaxPx;
     }
   }
   return changed;

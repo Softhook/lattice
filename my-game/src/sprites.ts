@@ -31,18 +31,68 @@ import { P1_COLOR, P2_COLOR, RABBIT, DEER, WOLF, TROLL, FOX } from './palette.js
 
 // ── Sprite definitions ─────────────────────────────────────────────────────────
 
-/** Player capsule — index determines color accent. */
+/** Player capsule — index determines color accent; facing renders visor & gear in strict back-to-front depth order. */
 function makePlayerMassing(bodyColor: Ink): Massing {
-  return (w: SolidWriter, _v: Variant, _rng: Rng) => {
-    // Legs.
-    w.box(0.2, 0.2, 0.3, 0.6, { color: bodyColor, h: 0.5, outline: false });
-    w.box(0.5, 0.2, 0.3, 0.6, { color: bodyColor, h: 0.5, outline: false });
-    // Body.
-    w.box(0.15, 0.15, 0.7, 0.7, { color: bodyColor, h: 1.0, z: 0.5 });
-    // Head.
-    w.box(0.25, 0.25, 0.5, 0.5, { color: bodyColor, h: 0.6, z: 1.5, inset: 0.05 });
-    // Contact shadow.
-    w.shadow(0.1, 0.1, 0.8, 0.8, 0.3);
+  const visorColor = 0xffe066ff; // Bright gold visor
+  const packColor  = 0x243342ff; // Adventurer backpack
+
+  return (w: SolidWriter, v: Variant, _rng: Rng) => {
+    // 1. Contact shadow at base
+    w.shadow(0.15, 0.15, 0.7, 0.7, 0.25);
+
+    const facing = v.flags; // 0: 'n', 1: 's', 2: 'e', 3: 'w'
+
+    // Strict isometric painter's order (draw back/north elements first, front/south elements last)
+    if (facing === 1) {
+      // ── Facing South (faces camera) ──
+      // Backpack is on the back (North), draw FIRST
+      w.box(0.32, 0.16, 0.36, 0.14, { color: packColor, h: 0.55, z: 0.55 });
+      // Legs
+      w.box(0.26, 0.28, 0.2, 0.44, { color: bodyColor, h: 0.45, outline: false });
+      w.box(0.54, 0.28, 0.2, 0.44, { color: bodyColor, h: 0.45, outline: false });
+      // Torso & Head
+      w.box(0.22, 0.24, 0.56, 0.52, { color: bodyColor, h: 0.85, z: 0.45 });
+      w.box(0.28, 0.28, 0.44, 0.44, { color: bodyColor, h: 0.5, z: 1.3 });
+      // Visor is on the front (South), draw LAST
+      w.box(0.32, 0.62, 0.36, 0.1, { color: visorColor, h: 0.16, z: 1.44 });
+
+    } else if (facing === 0) {
+      // ── Facing North (faces away from camera) ──
+      // Visor is on the front (North), draw FIRST
+      w.box(0.32, 0.24, 0.36, 0.08, { color: visorColor, h: 0.16, z: 1.44 });
+      // Legs
+      w.box(0.26, 0.28, 0.2, 0.44, { color: bodyColor, h: 0.45, outline: false });
+      w.box(0.54, 0.28, 0.2, 0.44, { color: bodyColor, h: 0.45, outline: false });
+      // Torso & Head
+      w.box(0.22, 0.24, 0.56, 0.52, { color: bodyColor, h: 0.85, z: 0.45 });
+      w.box(0.28, 0.28, 0.44, 0.44, { color: bodyColor, h: 0.5, z: 1.3 });
+      // Backpack is on the back (South, facing camera), draw LAST
+      w.box(0.32, 0.64, 0.36, 0.15, { color: packColor, h: 0.58, z: 0.55 });
+
+    } else if (facing === 2) {
+      // ── Facing East (+gx) ──
+      // Backpack is on West (-gx), draw FIRST
+      w.box(0.14, 0.3, 0.14, 0.4, { color: packColor, h: 0.55, z: 0.55 });
+      // Legs
+      w.box(0.28, 0.28, 0.44, 0.44, { color: bodyColor, h: 0.45, outline: false });
+      // Torso & Head
+      w.box(0.24, 0.24, 0.52, 0.52, { color: bodyColor, h: 0.85, z: 0.45 });
+      w.box(0.28, 0.28, 0.44, 0.44, { color: bodyColor, h: 0.5, z: 1.3 });
+      // Visor is on East (+gx), draw LAST
+      w.box(0.64, 0.32, 0.08, 0.36, { color: visorColor, h: 0.16, z: 1.44 });
+
+    } else {
+      // ── Facing West (-gx) ──
+      // Visor is on West (-gx), draw FIRST
+      w.box(0.22, 0.32, 0.08, 0.36, { color: visorColor, h: 0.16, z: 1.44 });
+      // Legs
+      w.box(0.28, 0.28, 0.44, 0.44, { color: bodyColor, h: 0.45, outline: false });
+      // Torso & Head
+      w.box(0.24, 0.24, 0.52, 0.52, { color: bodyColor, h: 0.85, z: 0.45 });
+      w.box(0.28, 0.28, 0.44, 0.44, { color: bodyColor, h: 0.5, z: 1.3 });
+      // Backpack is on East (+gx), draw LAST
+      w.box(0.64, 0.3, 0.15, 0.4, { color: packColor, h: 0.58, z: 0.55 });
+    }
   };
 }
 
@@ -160,11 +210,12 @@ export function creatureVariant(c: Creature): Variant {
   };
 }
 
-/** Build a `Variant` for a player. */
+/** Build a `Variant` for a player — encodes facing orientation in flags. */
 export function playerVariant(p: Player): Variant {
+  const facingCode = p.facing === 's' ? 1 : p.facing === 'e' ? 2 : p.facing === 'w' ? 3 : 0;
   return {
     seed:     hash2(p.index, 42, 0),
-    flags:    0,
+    flags:    facingCode,
     level:    0,
     progress: 1,
     label:    '',

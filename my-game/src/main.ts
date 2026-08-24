@@ -5,11 +5,13 @@
  * No game logic lives here. This file is the ordering that cannot be wrong.
  */
 
-import { hashString } from '@latticekit/core';
+import { hashString, clamp } from '@latticekit/core';
 import {
   createCamera,
   tileBounds,
-  footprintBase,
+  gridToWorldX,
+  gridToWorldY,
+  heightAt,
   type Camera,
   type Rect,
 } from '@latticekit/iso';
@@ -66,7 +68,8 @@ const SEED = urlSeed !== null ? parseInt(urlSeed, 10) : hashString('verdant-v1')
 const canvas  = document.getElementById('viewport') as HTMLCanvasElement;
 const surface = createCanvas2dSurface(canvas);
 const palette = createVerdantPalette();
-const light   = createLightField(surface, { scale: 0.5, falloff: 1.8, bloom: 0.3 });
+const light1  = createLightField(surface, { scale: 0.5, falloff: 1.8, bloom: 0.3 });
+const light2  = createLightField(surface, { scale: 0.5, falloff: 1.8, bloom: 0.3 });
 
 // ── World & Nature ─────────────────────────────────────────────────────────────
 
@@ -83,13 +86,13 @@ tileBounds(0, 0, W, H, MAX_HEIGHT_PX, worldRect);
 const [p1, p2] = createPlayers();
 const creatures = populateWorld(SEED, world);
 
-// Helper to lock camera center on a player's coordinates
+// Helper to lock camera center on a player's coordinates with smooth continuous elevation
 function lockCameraToPlayer(camera: Camera, player: typeof p1): void {
   const pgx = player.gx;
   const pgy = player.gy;
-  const pzPx = footprintBase(world.field, { gx: Math.floor(pgx), gy: Math.floor(pgy), w: 1, d: 1 });
-  const wx = (pgx - pgy) * 32; // HALF_W = 32
-  const wy = (pgx + pgy) * 16 - pzPx; // HALF_H = 16
+  const pzPx = heightAt(world.field, pgx, pgy);
+  const wx = gridToWorldX(pgx, pgy);
+  const wy = gridToWorldY(pgx, pgy) - pzPx;
   camera.centerOn(wx, wy);
 }
 
@@ -260,13 +263,15 @@ loop.onRender((_alpha, t, nowMs) => {
 
   // Day/night cycle: `t` is seconds since loop start. One cycle = 120 s.
   // @tier-b — sin for day/night, visual only, never hashed.
-  const phase    = (t % 120) / 120;
-  const darkness = Math.max(0, Math.sin(phase * Math.PI * 2) * -1) * 0.7;
+  const cycle    = (t % 120) / 120;
+  const daylight = Math.sin(cycle * Math.PI) * 0.5 + 0.5;
+  const darkness = clamp((0.55 - daylight) * 1.8, 0, 0.85);
 
   // Render split-screen frame
   renderVerdant(
     surface,
-    light,
+    light1,
+    light2,
     palette,
     camera1,
     camera2,
@@ -277,6 +282,9 @@ loop.onRender((_alpha, t, nowMs) => {
     buildings,
     t,
     darkness,
+    daylight,
+    cycle,
+    SEED,
   );
 });
 

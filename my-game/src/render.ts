@@ -22,6 +22,7 @@ import {
   createLightField,
   hex,
   shade,
+  mix,
   withAlpha,
   spriteHeightPx,
   screenText,
@@ -32,10 +33,11 @@ import {
   type Surface,
   type LightField,
 } from '@latticekit/draw';
-import { clamp } from '@latticekit/core';
+import { clamp, noise2, hash2, toUnit } from '@latticekit/core';
 import {
   DepthSorter,
   footprintBase,
+  heightAt,
   type Camera,
   type Rect,
   type TileRange,
@@ -47,7 +49,7 @@ import type { Creature } from './creatures.js';
 import type { Player } from './players.js';
 import { facingTile, MAX_HP } from './players.js';
 import type { Building, BuildingKind } from './buildings.js';
-import { defFor, canPlaceBuilding } from './buildings.js';
+import { defFor, canPlaceBuilding, LANTERN_GLOW } from './buildings.js';
 import type { FloraItem } from './flora.js';
 import { defForFlora, floraVariant } from './flora.js';
 import {
@@ -60,8 +62,10 @@ import {
 import {
   GRASS, ROCK, WATER, SAND, SNOW, NIGHT_COLOR, SKY_TOP, SKY_MID,
   HEIGHT_WATER, HEIGHT_SAND, HEIGHT_ROCK, HEIGHT_SNOW,
-  P1_COLOR, P1_ACCENT, P2_COLOR, P2_ACCENT,
+  P1_COLOR, P1_ACCENT, P2_COLOR, P2_ACCENT, TOOL_GOLD,
 } from './palette.js';
+import { drawSky, farRanges } from './sky.js';
+import { drawAmbientEffects } from './ambient.js';
 
 // ── Palette ────────────────────────────────────────────────────────────────────
 
@@ -102,11 +106,57 @@ const UI_HP_BAD     = hex('#e74c3c');
 const UI_TEXT_WHITE = hex('#ecf0f1');
 const UI_TOOL_GOLD  = hex('#f1c40f');
 
+// ── Zoom-scaling 2:1 Isometric Ground Light Pool ───────────────────────────────
+
+/**
+ * Render an illuminated light pool lying flat in the ground plane.
+ *
+ * In a 2:1 isometric projection, a circular light pool on the ground projects to a
+ * horizontal ellipse of width (2 * radiusTiles * HALF_W * zoom) and height
+ * (radiusTiles * HALF_W * zoom). It scales seamlessly with camera zoom and stays locked
+ * to ground tiles.
+ */
+export function drawLightPool(
+  pen: Pen,
+  gx: number,
+  gy: number,
+  zPx: number,
+  radiusTiles: number,
+  intensity: number,
+  color: number,
+): void {
+  const cam = pen.camera;
+  const sx = cam.toScreenX((gx - gy) * 32) + pen.snapX;
+  const sy = cam.toScreenY((gx + gy) * 16 - zPx) + pen.snapY;
+  const rx = radiusTiles * 32 * cam.zoom;
+  const ry = rx * 0.5; // 2:1 isometric ground projection
+
+  // Soft atmospheric radial falloff
+  pen.surface.softEllipse(
+    sx,
+    sy,
+    rx,
+    ry,
+    withAlpha(color, intensity * 0.6),
+    withAlpha(color, 0),
+  );
+  // Bright inner hot spot
+  pen.surface.softEllipse(
+    sx,
+    sy,
+    rx * 0.35,
+    ry * 0.35,
+    withAlpha(mix(color, 0xffffffff, 0.45), intensity * 0.75),
+    withAlpha(color, 0),
+  );
+}
+
 // ── Main render ────────────────────────────────────────────────────────────────
 
 export function renderVerdant(
   surface: Surface,
-  light: LightField,
+  light1: LightField,
+  light2: LightField,
   palette: ReturnType<typeof createVerdantPalette>,
   camera1: Camera,
   camera2: Camera,
@@ -117,12 +167,16 @@ export function renderVerdant(
   buildings: Building[],
   t: number,
   darkness: number,
+  daylight: number,
+  cycle: number,
+  seed: number,
 ): void {
-  // Open the frame — clears the canvas and builds the pen with camera1.
+  // Open the frame — clears the canvas and builds the pen with camera1 and light1.
   const pen = beginFrame({
     surface,
     camera: camera1,
     palette,
+    light: light1,
     t,
     clear: 'sky',
   });
@@ -140,17 +194,18 @@ export function renderVerdant(
   ctx.beginPath();
   ctx.rect(0, 0, halfW, surface.height);
   ctx.clip();
-  drawViewport(pen, camera1, world, flora, liveCreatures, players, liveBuildings, players[0], t, darkness, true);
+  drawViewport(pen, camera1, world, flora, liveCreatures, players, liveBuildings, players[0], t, darkness, daylight, cycle, seed, light1, true);
   ctx.restore();
 
   // ── Right viewport (Camera 2 / Player 2) ───────────────────────────────────────
   const pen2 = subPen(pen, surface, camera2);
+  (pen2 as { light?: LightField }).light = light2;
   ctx.save();
   ctx.beginPath();
   ctx.rect(halfW, 0, halfW, surface.height);
   ctx.clip();
   ctx.translate(halfW, 0);
-  drawViewport(pen2, camera2, world, flora, liveCreatures, players, liveBuildings, players[1], t, darkness, false);
+  drawViewport(pen2, camera2, world, flora, liveCreatures, players, liveBuildings, players[1], t, darkness, daylight, cycle, seed, light2, false);
   ctx.restore();
 
   endFrame(pen);
@@ -168,6 +223,10 @@ function drawViewport(
   activePlayer: Player,
   t: number,
   darkness: number,
+  daylight: number,
+  cycle: number,
+  seed: number,
+  light: LightField,
   isLeft: boolean,
 ): void {
   ORDER.clear();
@@ -191,8 +250,7 @@ function drawViewport(
     const def    = spriteForCreature(c.species);
     const cgx    = Math.floor(c.gx);
     const cgy    = Math.floor(c.gy);
-    FP_SCRATCH.gx = cgx; FP_SCRATCH.gy = cgy; FP_SCRATCH.w = def.w; FP_SCRATCH.d = def.d;
-    const basePx = footprintBase(world.field, FP_SCRATCH as unknown as Footprint);
+    const basePx = heightAt(world.field, c.gx, c.gy);
     ORDER.add(cgx, cgy, def.w, def.d, basePx + spriteHeightPx(def, creatureVariant(c)));
   }
 
@@ -201,8 +259,7 @@ function drawViewport(
     if (p.respawnTimer > 0) continue;
     const pgx = Math.floor(p.gx);
     const pgy = Math.floor(p.gy);
-    FP_SCRATCH.gx = pgx; FP_SCRATCH.gy = pgy; FP_SCRATCH.w = 1; FP_SCRATCH.d = 1;
-    const basePx = footprintBase(world.field, FP_SCRATCH as unknown as Footprint);
+    const basePx = heightAt(world.field, p.gx, p.gy);
     ORDER.add(pgx, pgy, 1, 1, basePx + spriteHeightPx(PLAYER_SPRITES[p.index], playerVariant(p)));
   }
 
@@ -231,22 +288,11 @@ function drawViewport(
   const passes: Passes = {
     maxHeightPx: world.currentMaxHeightPx,
 
-    backdrop(pen, visible) {
-      const topColor = pen.palette.ink('sky');
-      const midColor = SKY_MID;
-      pen.surface.polyRamp(
-        Float64Array.of(
-          visible.minX, visible.minY,
-          visible.maxX, visible.minY,
-          visible.maxX, visible.maxY,
-          visible.minX, visible.maxY,
-        ),
-        4,
-        0, visible.minY,
-        0, visible.maxY,
-        topColor,
-        midColor,
-      );
+    backdrop(pen) {
+      // Celestial sky backdrop with sun/moon arc and stars
+      drawSky(pen, daylight, cycle);
+      // Distant horizon mountain ranges
+      farRanges(pen, seed, daylight);
     },
 
     terrain(pen, visible) {
@@ -263,18 +309,30 @@ function drawViewport(
 
           if (minH <= HEIGHT_WATER) {
             isoTile(pen, gx, gy, WATER);
+            // Animated wave swell and glints
+            const swell = noise2(seed ^ 0x33, gx * 0.38 + pen.t * 0.25, gy * 0.38) * 0.5 + 0.5;
+            if (swell > 0.6) {
+              const glint = mix(WATER, pen.palette.get('sky'), 0.65);
+              pen.surface.poly(pen.xy, 4, withAlpha(glint, (swell - 0.6) * (0.85 * daylight + 0.2)));
+            }
           } else {
-            const fill = minH >= HEIGHT_SNOW ? SNOW :
-                         minH >= HEIGHT_ROCK ? ROCK :
-                         minH <= HEIGHT_SAND ? SAND : GRASS;
-            isoTerrain(pen, world.field, gx, gy, fill);
+            const baseColor = minH >= HEIGHT_SNOW ? SNOW :
+                              minH >= HEIGHT_ROCK ? ROCK :
+                              minH <= HEIGHT_SAND ? SAND : GRASS;
+            // Multi-frequency micro-grain texture
+            const field = noise2(seed ^ 0x9e1, gx * 0.12, gy * 0.12) * 0.08;
+            const grain = (toUnit(hash2(seed, gx, gy)) - 0.5) * 0.09;
+            isoTerrain(pen, world.field, gx, gy, baseColor, undefined, 1 + field + grain);
+
+            if (pen.camera.zoom > 0.65) {
+              // Subtle elevation contour seam
+              pen.surface.stroke(pen.xy, 3, false, withAlpha(shade(baseColor, 0.88), 0.32), 1);
+            }
           }
         }
       }
 
       // Draw ground footprint boundary (marching-ant lines) directly on the ground plane
-      // BEFORE solids are sorted and drawn, so all foreground players, trees, and structures
-      // correctly occlude and sort over the ground lines.
       if (ghostDef !== undefined) {
         drawFootprint(pen, ghostTile.gx, ghostTile.gy, ghostDef.w, ghostDef.d, isLegal ? 'ok' : 'bad', SELECT_LIFT, ghostBasePx);
       }
@@ -293,6 +351,11 @@ function drawViewport(
           (VARIANT_SCRATCH as any).progress = 1;
           drawSprite(pen, def, b.gx, b.gy, VARIANT_SCRATCH, b.basePx);
 
+          // Watchtower beacon lantern emits warm pool of light at night
+          if (b.kind === 'tower' && darkness > 0) {
+            drawLightPool(pen, b.gx + 1, b.gy + 1, b.basePx, 5.5, darkness * 0.95, LANTERN_GLOW);
+          }
+
         } else if (idx < numBuildings + numFlora) {
           // Flora
           const f = flora[idx - numBuildings];
@@ -307,11 +370,13 @@ function drawViewport(
           if (c === undefined) continue;
           const def    = spriteForCreature(c.species);
           const v      = creatureVariant(c);
-          const cgx    = Math.floor(c.gx);
-          const cgy    = Math.floor(c.gy);
-          FP_SCRATCH.gx = cgx; FP_SCRATCH.gy = cgy; FP_SCRATCH.w = def.w; FP_SCRATCH.d = def.d;
-          const basePx = footprintBase(world.field, FP_SCRATCH as unknown as Footprint);
+          const basePx = heightAt(world.field, c.gx, c.gy);
           drawSprite(pen, def, c.gx, c.gy, v, basePx);
+
+          // Hostile trolls emit a menacing subtle red ambient aura at night
+          if (c.species === 'troll' && darkness > 0) {
+            drawLightPool(pen, c.gx, c.gy, basePx, 3.2, darkness * 0.45, hex('#e74c3c'));
+          }
 
         } else if (idx < numBuildings + numFlora + numCreatures + numPlayers) {
           // Players
@@ -319,11 +384,13 @@ function drawViewport(
           if (p === undefined || p.respawnTimer > 0) continue;
           const def    = PLAYER_SPRITES[p.index];
           const v      = playerVariant(p);
-          const pgx    = Math.floor(p.gx);
-          const pgy    = Math.floor(p.gy);
-          FP_SCRATCH.gx = pgx; FP_SCRATCH.gy = pgy; FP_SCRATCH.w = 1; FP_SCRATCH.d = 1;
-          const basePx = footprintBase(world.field, FP_SCRATCH as unknown as Footprint);
+          const basePx = heightAt(world.field, p.gx, p.gy);
           drawSprite(pen, def, p.gx, p.gy, v, basePx);
+
+          // Player torchlight at night
+          if (darkness > 0) {
+            drawLightPool(pen, p.gx, p.gy, basePx, 4.0, darkness * 0.85, TOOL_GOLD);
+          }
 
         } else if (idx === ghostIndex && ghostDef !== undefined) {
           // Ghost preview — correctly depth-sorted against players, trees and structures!
@@ -332,17 +399,22 @@ function drawViewport(
       }
     },
 
+    effects(pen) {
+      // Ambient atmospheric particles: birds, fireflies, pollen motes, smoke
+      drawAmbientEffects(pen, seed, world, daylight, light, liveBuildings);
+    },
+
     overlay(pen) {
       // In-Canvas HUD for each player's viewport
       const viewW = pen.camera.viewW;
       const viewH = pen.camera.viewH;
 
-      // 1. Synchronized darkness wash across the viewport
+      // 1. Ambient darkness wash across the viewport
       if (darkness > 0) {
         pen.surface.poly(
           Float64Array.of(0, 0, viewW, 0, viewW, viewH, 0, viewH),
           4,
-          withAlpha(NIGHT_COLOR, darkness),
+          withAlpha(NIGHT_COLOR, darkness * 0.52),
         );
       }
 
