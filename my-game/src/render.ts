@@ -219,10 +219,8 @@ function drawViewport(
     CRE_INDEX_BUFFER[liveCreCount] = i;
     liveCreCount++;
     const def    = spriteForCreature(c.species);
-    const cgx    = Math.floor(c.gx);
-    const cgy    = Math.floor(c.gy);
     const basePx = heightAt(world.field, c.gx, c.gy);
-    ORDER.add(cgx, cgy, def.w, def.d, basePx + spriteHeightPx(def, creatureVariant(c)));
+    ORDER.add(c.gx, c.gy, def.w, def.d, basePx + spriteHeightPx(def, creatureVariant(c)));
   }
 
   // 4. Add players
@@ -230,10 +228,8 @@ function drawViewport(
   for (let i = 0; i < numPlayers; i++) {
     const p = players[i];
     if (p === undefined || p.respawnTimer > 0) continue;
-    const pgx = Math.floor(p.gx);
-    const pgy = Math.floor(p.gy);
     const basePx = heightAt(world.field, p.gx, p.gy);
-    ORDER.add(pgx, pgy, 1, 1, basePx + spriteHeightPx(PLAYER_SPRITES[p.index], playerVariant(p)));
+    ORDER.add(p.gx, p.gy, 1, 1, basePx + spriteHeightPx(PLAYER_SPRITES[p.index], playerVariant(p)));
   }
 
   // 5. Add placement ghost building into DepthSorter for correct Z-ordering
