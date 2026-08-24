@@ -708,39 +708,6 @@ export function spriteForCreature(species: Creature['species']): SpriteDef {
   }
 }
 
-/**
- * Build a `Variant` for a creature.
- *
- * Encodes facing orientation, state, and walk animation phase.
- */
-export function creatureVariant(c: Creature): Variant {
-  const facingCode = c.facing === 's' ? 1 : c.facing === 'e' ? 2 : c.facing === 'w' ? 3 : 0;
-  const stateCode = c.state === 'idle' ? 0 : c.state === 'wander' ? 1 : c.state === 'flee' ? 2 : c.state === 'chase' ? 3 : c.state === 'eat' ? 4 : 5;
-
-  return {
-    seed:     hash2(c.id, 0, 0),
-    flags:    facingCode | (stateCode << 3),
-    level:    Math.floor((c.walkCycle % 1) * 1000),
-    progress: c.traits.size,
-    label:    '',
-  };
-}
-
-/** Build a `Variant` for a player — encodes facing orientation, movement, weapon, and leg stride phase. */
-export function playerVariant(p: Player): Variant {
-  const facingCode = p.facing === 's' ? 1 : p.facing === 'e' ? 2 : p.facing === 'w' ? 3 : 0;
-  const isMovingFlag = p.isMoving ? 4 : 0;
-  const weaponCode = p.weapon === 'hands' ? 0 : p.weapon === 'axe' ? 1 : p.weapon === 'sword' ? 2 : 3;
-
-  return {
-    seed:     hash2(p.index, 42, 0),
-    flags:    facingCode | isMovingFlag | (weaponCode << 4),
-    level:    p.attackCooldown > 0 ? 1 : 0,
-    progress: p.walkCycle % 1,
-    label:    '',
-  };
-}
-
 export interface MutableVariant {
   seed: number;
   flags: number;
@@ -749,7 +716,58 @@ export interface MutableVariant {
   label: string;
 }
 
-/** A scratch Variant — hoisted so the common case allocates nothing. Must be filled before use. */
+const CREATURE_VARIANT_SCRATCH: MutableVariant = {
+  seed:     0,
+  flags:    0,
+  level:    0,
+  progress: 1,
+  label:    '',
+};
+
+const PLAYER_VARIANT_SCRATCH: MutableVariant = {
+  seed:     0,
+  flags:    0,
+  level:    0,
+  progress: 1,
+  label:    '',
+};
+
+/**
+ * Build a `Variant` for a creature.
+ *
+ * Encodes facing orientation, state, and walk animation phase.
+ * Reuses an internal scratch variant to guarantee zero allocations on the hot path.
+ */
+export function creatureVariant(c: Creature): Variant {
+  const facingCode = c.facing === 's' ? 1 : c.facing === 'e' ? 2 : c.facing === 'w' ? 3 : 0;
+  const stateCode = c.state === 'idle' ? 0 : c.state === 'wander' ? 1 : c.state === 'flee' ? 2 : c.state === 'chase' ? 3 : c.state === 'eat' ? 4 : 5;
+
+  CREATURE_VARIANT_SCRATCH.seed = hash2(c.id, 0, 0);
+  CREATURE_VARIANT_SCRATCH.flags = facingCode | (stateCode << 3);
+  CREATURE_VARIANT_SCRATCH.level = Math.floor((c.walkCycle % 1) * 1000);
+  CREATURE_VARIANT_SCRATCH.progress = c.traits.size;
+  CREATURE_VARIANT_SCRATCH.label = '';
+  return CREATURE_VARIANT_SCRATCH;
+}
+
+/**
+ * Build a `Variant` for a player — encodes facing orientation, movement, weapon, and leg stride phase.
+ * Reuses an internal scratch variant to guarantee zero allocations on the hot path.
+ */
+export function playerVariant(p: Player): Variant {
+  const facingCode = p.facing === 's' ? 1 : p.facing === 'e' ? 2 : p.facing === 'w' ? 3 : 0;
+  const isMovingFlag = p.isMoving ? 4 : 0;
+  const weaponCode = p.weapon === 'hands' ? 0 : p.weapon === 'axe' ? 1 : p.weapon === 'sword' ? 2 : 3;
+
+  PLAYER_VARIANT_SCRATCH.seed = hash2(p.index, 42, 0);
+  PLAYER_VARIANT_SCRATCH.flags = facingCode | isMovingFlag | (weaponCode << 4);
+  PLAYER_VARIANT_SCRATCH.level = p.attackCooldown > 0 ? 1 : 0;
+  PLAYER_VARIANT_SCRATCH.progress = p.walkCycle % 1;
+  PLAYER_VARIANT_SCRATCH.label = '';
+  return PLAYER_VARIANT_SCRATCH;
+}
+
+/** A generic scratch Variant — hoisted so the common case allocates nothing. Must be filled before use. */
 export const VARIANT_SCRATCH: MutableVariant = {
   seed:     0,
   flags:    0,
@@ -773,4 +791,5 @@ export function setScratchVariant(
   VARIANT_SCRATCH.label = label;
   return VARIANT_SCRATCH;
 }
+
 

@@ -20,6 +20,7 @@ import type { FloraItem } from './flora.js';
 import { findClosestEdibleFlora } from './flora.js';
 import type { Building } from './buildings.js';
 import { isTileOccupiedBySolidBuilding } from './buildings.js';
+import { SpatialGrid } from './spatial.js';
 
 // ── Species ────────────────────────────────────────────────────────────────────
 
@@ -174,6 +175,11 @@ export function populateWorld(worldSeed: number, world: WorldTerrain): Creature[
 
 // ── Update ─────────────────────────────────────────────────────────────────────
 
+// ── Shared Spatial Grids for Simulation (Zero-Allocation) ─────────────────────
+
+const CREATURE_SPATIAL = new SpatialGrid();
+const FLORA_SPATIAL = new SpatialGrid();
+
 export interface CreatureEvents {
   playerAttacked: boolean;
   roarOccurred: boolean;
@@ -189,6 +195,8 @@ export interface CreatureEvents {
  * - At night (darkness > 0), wolves and trolls become nocturnal apex hunters with
  *   expanded detection ranges and aggressive siege attacks.
  * - Solid buildings (walls and towers) physically block and keep out animals.
+ *
+ * Accelerated via SpatialGrid to eliminate $O(N^2)$ brute-force distance checks.
  */
 export function updateCreatures(
   creatures: Creature[],
@@ -201,6 +209,25 @@ export function updateCreatures(
 ): CreatureEvents {
   const events: CreatureEvents = { playerAttacked: false, roarOccurred: false, howlOccurred: false };
 
+  // 1. Build spatial index for live creatures
+  CREATURE_SPATIAL.clear();
+  for (let i = 0; i < creatures.length; i++) {
+    const c = creatures[i];
+    if (c !== undefined && c.hp > 0) {
+      CREATURE_SPATIAL.insert(i, c.gx, c.gy);
+    }
+  }
+
+  // 2. Build spatial index for edible flora
+  FLORA_SPATIAL.clear();
+  for (let i = 0; i < flora.length; i++) {
+    const f = flora[i];
+    if (f !== undefined) {
+      FLORA_SPATIAL.insert(i, f.gx, f.gy);
+    }
+  }
+
+  // 3. Update all live creatures
   for (let i = 0; i < creatures.length; i++) {
     const c = creatures[i];
     if (c === undefined || c.hp <= 0) continue;
@@ -254,10 +281,13 @@ function updateOne(
     }
   }
 
-  // Check predator creatures (e.g. wolves hunt deer/rabbits/foxes; foxes hunt rabbits)
+  // Check predator creatures via spatial query
   if (c.species === 'rabbit' || c.species === 'deer' || c.species === 'fox') {
-    for (let i = 0; i < allCreatures.length; i++) {
-      const other = allCreatures[i];
+    const nearbyCount = CREATURE_SPATIAL.queryRadius(c.gx, c.gy, noticeRange);
+    for (let q = 0; q < nearbyCount; q++) {
+      const otherIdx = CREATURE_SPATIAL.queryBuffer[q];
+      if (otherIdx === undefined) continue;
+      const other = allCreatures[otherIdx];
       if (other === undefined || other.hp <= 0 || other.id === c.id) continue;
       const isPredator =
         (c.species === 'rabbit' && (other.species === 'fox' || other.species === 'wolf' || other.species === 'troll')) ||
@@ -267,12 +297,9 @@ function updateOne(
       if (isPredator) {
         const dx = other.gx - c.gx;
         const dy = other.gy - c.gy;
-        const dSq = dx * dx + dy * dy;
-        if (dSq < noticeRange * noticeRange) {
-          threatDx += dx;
-          threatDy += dy;
-          threatCount++;
-        }
+        threatDx += dx;
+        threatDy += dy;
+        threatCount++;
       }
     }
   }
@@ -281,7 +308,7 @@ function updateOne(
   if (threatCount > 0) {
     c.state = 'flee';
     c.eatTimer = 0;
-    // Flee smoothly away from the threat center of mass without per-frame random angle jitter
+    // Flee smoothly away from the threat center of mass
     const avgThreatDx = threatDx / threatCount;
     const avgThreatDy = threatDy / threatCount;
     const threatDist = Math.sqrt(avgThreatDx * avgThreatDx + avgThreatDy * avgThreatDy); // @tier-b
@@ -295,18 +322,20 @@ function updateOne(
 
   // 2. Carnivore Hunting (Foxes hunt rabbits; Wolves hunt deer/rabbits/players; Trolls siege buildings/players)
   if (c.species === 'fox' || c.species === 'wolf' || c.species === 'troll') {
-    let bestTarget: {
-      gx: number;
-      gy: number;
-      dist: number;
-      targetRef?: Creature | Player;
-      buildingRef?: Building;
-    } | undefined;
-    let minDist = 12 + (darkness > 0 ? darkness * 10 : 0);
+    let bestTargetGx = 0;
+    let bestTargetGy = 0;
+    let bestDist = 12 + (darkness > 0 ? darkness * 10 : 0);
+    let targetType: 'none' | 'creature' | 'player' | 'building' = 'none';
+    let targetCreature: Creature | undefined = undefined;
+    let targetPlayer: Player | undefined = undefined;
+    let targetBuilding: Building | undefined = undefined;
 
-    // Check prey creatures
-    for (let i = 0; i < allCreatures.length; i++) {
-      const other = allCreatures[i];
+    // Check prey creatures via spatial neighborhood query
+    const nearbyCount = CREATURE_SPATIAL.queryRadius(c.gx, c.gy, bestDist);
+    for (let q = 0; q < nearbyCount; q++) {
+      const otherIdx = CREATURE_SPATIAL.queryBuffer[q];
+      if (otherIdx === undefined) continue;
+      const other = allCreatures[otherIdx];
       if (other === undefined || other.hp <= 0 || other.id === c.id) continue;
       const isPrey =
         (c.species === 'fox' && other.species === 'rabbit') ||
@@ -316,9 +345,12 @@ function updateOne(
         const dx = other.gx - c.gx;
         const dy = other.gy - c.gy;
         const d = Math.sqrt(dx * dx + dy * dy); // @tier-b — hunt distance check, pixels only
-        if (d < minDist) {
-          minDist = d;
-          bestTarget = { gx: other.gx, gy: other.gy, dist: d, targetRef: other };
+        if (d < bestDist) {
+          bestDist = d;
+          bestTargetGx = other.gx;
+          bestTargetGy = other.gy;
+          targetType = 'creature';
+          targetCreature = other;
         }
       }
     }
@@ -331,9 +363,12 @@ function updateOne(
         const dx = p.gx - c.gx;
         const dy = p.gy - c.gy;
         const d = Math.sqrt(dx * dx + dy * dy); // @tier-b — player chase distance, pixels only
-        if (d < minDist) {
-          minDist = d;
-          bestTarget = { gx: p.gx, gy: p.gy, dist: d, targetRef: p };
+        if (d < bestDist) {
+          bestDist = d;
+          bestTargetGx = p.gx;
+          bestTargetGy = p.gy;
+          targetType = 'player';
+          targetPlayer = p;
         }
       }
 
@@ -347,60 +382,57 @@ function updateOne(
           const dx = bx - c.gx;
           const dy = by - c.gy;
           const d = Math.sqrt(dx * dx + dy * dy); // @tier-b
-          if (d < minDist) {
-            minDist = d;
-            bestTarget = { gx: bx, gy: by, dist: d, buildingRef: b };
+          if (d < bestDist) {
+            bestDist = d;
+            bestTargetGx = bx;
+            bestTargetGy = by;
+            targetType = 'building';
+            targetBuilding = b;
           }
         }
       }
     }
 
-    if (bestTarget !== undefined) {
-      if (bestTarget.dist < ATTACK_RANGE + (bestTarget.buildingRef ? 1.0 : 0)) {
+    if (targetType !== 'none') {
+      const attackRangeThreshold = ATTACK_RANGE + (targetType === 'building' ? 1.0 : 0);
+      if (bestDist < attackRangeThreshold) {
         c.state = 'attack';
 
-        if (bestTarget.targetRef !== undefined) {
-          if ('respawnTimer' in bestTarget.targetRef) {
-            // Target is a player
-            const baseDmg = c.species === 'troll' ? 36 : 22;
-            const nightDmg = baseDmg * (1 + darkness * 0.4);
-            damagePlayer(bestTarget.targetRef, dt * nightDmg * c.traits.size);
-            events.playerAttacked = true;
-            if (c.species === 'troll') events.roarOccurred = true;
-            if (c.species === 'wolf' && darkness > 0.3) events.howlOccurred = true;
-          } else {
-            // Target is a prey animal
-            bestTarget.targetRef.hp -= dt * 18 * c.traits.size;
-            if (bestTarget.targetRef.hp <= 0) {
-              c.hp = Math.min(c.maxHp, c.hp + 6); // Carnivore heals from kill
-            }
+        if (targetType === 'player' && targetPlayer !== undefined) {
+          const baseDmg = c.species === 'troll' ? 36 : 22;
+          const nightDmg = baseDmg * (1 + darkness * 0.4);
+          damagePlayer(targetPlayer, dt * nightDmg * c.traits.size);
+          events.playerAttacked = true;
+          if (c.species === 'troll') events.roarOccurred = true;
+          if (c.species === 'wolf' && darkness > 0.3) events.howlOccurred = true;
+        } else if (targetType === 'creature' && targetCreature !== undefined) {
+          targetCreature.hp -= dt * 18 * c.traits.size;
+          if (targetCreature.hp <= 0) {
+            c.hp = Math.min(c.maxHp, c.hp + 6); // Carnivore heals from kill
           }
-        } else if (bestTarget.buildingRef !== undefined) {
-          // Attacking building / wall
-          bestTarget.buildingRef.hp -= dt * 32 * c.traits.size;
+        } else if (targetType === 'building' && targetBuilding !== undefined) {
+          targetBuilding.hp -= dt * 32 * c.traits.size;
         }
       } else {
         c.state = 'chase';
-        moveWithSeparation(c, bestTarget.gx, bestTarget.gy, huntSpeed, dt, world, allCreatures, buildings);
+        moveWithSeparation(c, bestTargetGx, bestTargetGy, huntSpeed, dt, world, allCreatures, buildings);
       }
       return;
     }
   }
 
-  // 3. Herbivore Plant Foraging (Rabbits & Deer seek out and eat flora)
+  // 3. Herbivore Plant Foraging (Rabbits & Deer seek out and eat flora via spatial index)
   if (c.species === 'rabbit' || c.species === 'deer') {
-    const edible = findClosestEdibleFlora(flora, c.gx, c.gy, 8);
+    const edible = findClosestEdibleFlora(flora, c.gx, c.gy, 8, undefined, FLORA_SPATIAL);
     if (edible !== undefined) {
       const dx = edible.gx - c.gx;
       const dy = edible.gy - c.gy;
       const dist = Math.sqrt(dx * dx + dy * dy); // @tier-b — flora forage distance, pixels only
 
       if (dist < 0.9) {
-        // In range to nibble / eat plant
         c.state = 'eat';
         c.eatTimer += dt;
         if (c.eatTimer >= 1.8) {
-          // Finished eating plant — remove consumed flora item and heal
           const fIdx = flora.indexOf(edible);
           if (fIdx !== -1) flora.splice(fIdx, 1);
           c.hp = Math.min(c.maxHp, c.hp + 5);
@@ -420,7 +452,6 @@ function updateOne(
   // 4. Default Peaceful Wander with Waypoint Rest
   c.idleTimer -= dt;
   if (c.idleTimer <= 0 || isNaN(c.targetGx)) {
-    // Pick a new random wander target nearby
     const angle = c.rng.next() * 6.28318; // @tier-b — wander angle, pixels only
     const dist  = 3 + c.rng.next() * 5;
     c.targetGx  = clamp(Math.round(c.gx + Math.cos(angle) * dist), 8, W - 9); // @tier-b
@@ -433,7 +464,6 @@ function updateOne(
     c.state = 'wander';
     moveWithSeparation(c, c.targetGx, c.targetGy, speed * 0.55, dt, world, allCreatures, buildings);
   } else {
-    // Arrived at destination waypoint — rest peacefully without jitter
     c.state = 'idle';
   }
 }
@@ -457,11 +487,14 @@ function moveWithSeparation(
     dy /= d;
   }
 
-  // 1. Soft Boid Separation force to prevent stacking
+  // 1. Soft Boid Separation force (accelerated via local spatial query)
   let sepX = 0;
   let sepY = 0;
-  for (let i = 0; i < allCreatures.length; i++) {
-    const other = allCreatures[i];
+  const nearbyBoids = CREATURE_SPATIAL.queryRadius(c.gx, c.gy, 1.2);
+  for (let q = 0; q < nearbyBoids; q++) {
+    const otherIdx = CREATURE_SPATIAL.queryBuffer[q];
+    if (otherIdx === undefined) continue;
+    const other = allCreatures[otherIdx];
     if (other === undefined || other.id === c.id || other.hp <= 0) continue;
     const ox = c.gx - other.gx;
     const oy = c.gy - other.gy;
@@ -536,6 +569,7 @@ function moveWithSeparation(
     }
   }
 }
+
 
 // ── Evolution ──────────────────────────────────────────────────────────────────
 

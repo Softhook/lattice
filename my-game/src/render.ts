@@ -101,8 +101,59 @@ const FP_SCRATCH: MutableFootprint = { gx: 0, gy: 0, w: 1, d: 1 };
 
 // ── Zero-Allocation Pre-allocated Index Mapping Buffers ────────────────────────
 
+// ── Zero-Allocation Pre-allocated Index Mapping & Viewport Buffers ─────────────
+
 const BLD_INDEX_BUFFER = new Int32Array(1024);
+const FLORA_INDEX_BUFFER = new Int32Array(2048);
 const CRE_INDEX_BUFFER = new Int32Array(1024);
+const TILE_RANGE_SCRATCH = { gx0: 0, gy0: 0, gx1: 0, gy1: 0 };
+
+// ── Reusable Pen2 for Viewport 2 ───────────────────────────────────────────────
+
+interface MutablePen extends Pen {
+  surface: OffscreenSurface;
+  camera: Camera;
+  palette: ReturnType<typeof createVerdantPalette>;
+  t: number;
+  light: LightField | undefined;
+  snapX: number;
+  snapY: number;
+}
+
+const PEN2_XY = new Float64Array(256);
+const PEN2_SCRATCH: MutablePen = {
+  surface: null as unknown as OffscreenSurface,
+  camera: null as unknown as Camera,
+  palette: null as unknown as ReturnType<typeof createVerdantPalette>,
+  t: 0,
+  xy: PEN2_XY,
+  light: undefined,
+  snapX: 0,
+  snapY: 0,
+  snap: true,
+};
+
+function getSubPenWithLight(
+  pen: Pen,
+  surface: OffscreenSurface,
+  camera: Camera,
+  light: LightField,
+): Pen {
+  const ratio = surface.pixelRatio;
+  const devX = camera.toScreenX(0) * ratio;
+  const devY = camera.toScreenY(0) * ratio;
+  const snapX = (Math.round(devX) - devX) / ratio;
+  const snapY = (Math.round(devY) - devY) / ratio;
+
+  PEN2_SCRATCH.surface = surface;
+  PEN2_SCRATCH.camera = camera;
+  PEN2_SCRATCH.palette = pen.palette as ReturnType<typeof createVerdantPalette>;
+  PEN2_SCRATCH.t = pen.t;
+  PEN2_SCRATCH.light = light;
+  PEN2_SCRATCH.snapX = snapX;
+  PEN2_SCRATCH.snapY = snapY;
+  return PEN2_SCRATCH;
+}
 
 // ── Main render ────────────────────────────────────────────────────────────────
 
@@ -152,14 +203,13 @@ export function renderVerdant(
   ctx.restore();
 
   // ── Right viewport (Camera 2 / Player 2) ───────────────────────────────────────
-  const pen2 = subPen(pen, surface, camera2);
-  const pen2WithLight = { ...pen2, light: light2 };
+  const pen2 = getSubPenWithLight(pen, surface, camera2, light2);
   ctx.save();
   ctx.beginPath();
   ctx.rect(halfW, 0, halfW, surface.height);
   ctx.clip();
   ctx.translate(halfW, 0);
-  drawViewport(pen2WithLight, camera2, world, flora, creatures, players, buildings, projectiles, players[1], t, darkness, daylight, cycle, seed, light2, false);
+  drawViewport(pen2, camera2, world, flora, creatures, players, buildings, projectiles, players[1], t, darkness, daylight, cycle, seed, light2, false);
   ctx.restore();
 
   endFrame(pen);
@@ -189,33 +239,49 @@ function drawViewport(
   // Initialize light accumulator for this viewport's camera and pen
   light.begin(pen, darkness, NIGHT_COLOR);
 
-  // 1. Add active buildings (using preallocated index buffer)
+  // Compute visible tile bounding box with safety margin for spatial frustum culling
+  camera.visibleTileBounds(TILE_RANGE_SCRATCH, Math.ceil(world.currentMaxHeightPx / 16) + 4);
+  const minGx = Math.max(0, TILE_RANGE_SCRATCH.gx0 - 3);
+  const maxGx = Math.min(W - 1, TILE_RANGE_SCRATCH.gx1 + 3);
+  const minGy = Math.max(0, TILE_RANGE_SCRATCH.gy0 - 3);
+  const maxGy = Math.min(H - 1, TILE_RANGE_SCRATCH.gy1 + 3);
+
+  // 1. Add active visible buildings (using preallocated index buffer)
   let liveBldCount = 0;
   for (let i = 0; i < buildings.length; i++) {
     const b = buildings[i];
     if (b === undefined || b.hp <= 0) continue;
+    if (b.gx + b.w < minGx || b.gx > maxGx || b.gy + b.d < minGy || b.gy > maxGy) continue;
+
     BLD_INDEX_BUFFER[liveBldCount] = i;
     liveBldCount++;
     const def = defFor(b.kind);
     ORDER.add(b.gx, b.gy, b.w, b.d, b.basePx + spriteHeightPx(def, VARIANT_ZERO));
   }
 
-  // 2. Add flora items
+  // 2. Add visible flora items (culled against viewport)
+  let liveFloraCount = 0;
   const numFlora = flora.length;
   for (let i = 0; i < numFlora; i++) {
     const f = flora[i];
     if (f === undefined) continue;
+    if (f.gx < minGx || f.gx > maxGx || f.gy < minGy || f.gy > maxGy) continue;
+
+    FLORA_INDEX_BUFFER[liveFloraCount] = i;
+    liveFloraCount++;
     const def = defForFlora(f.kind);
     FP_SCRATCH.gx = f.gx; FP_SCRATCH.gy = f.gy; FP_SCRATCH.w = def.w; FP_SCRATCH.d = def.d;
     f.basePx = footprintBase(world.field, FP_SCRATCH as unknown as Footprint);
     ORDER.add(f.gx, f.gy, def.w, def.d, f.basePx + spriteHeightPx(def, floraVariant(f)));
   }
 
-  // 3. Add active creatures (using preallocated index buffer)
+  // 3. Add active visible creatures (culled against viewport)
   let liveCreCount = 0;
   for (let i = 0; i < creatures.length; i++) {
     const c = creatures[i];
     if (c === undefined || c.hp <= 0) continue;
+    if (c.gx < minGx || c.gx > maxGx || c.gy < minGy || c.gy > maxGy) continue;
+
     CRE_INDEX_BUFFER[liveCreCount] = i;
     liveCreCount++;
     const def    = spriteForCreature(c.species);
@@ -251,7 +317,8 @@ function drawViewport(
     ORDER.add(ghostTile.gx, ghostTile.gy, ghostDef.w, ghostDef.d, ghostBasePx + spriteHeightPx(ghostDef, VARIANT_ZERO));
   }
 
-  const ghostIndex = ghostDef !== undefined ? liveBldCount + numFlora + liveCreCount + numPlayers : -1;
+  const ghostIndex = ghostDef !== undefined ? liveBldCount + liveFloraCount + liveCreCount + numPlayers : -1;
+
 
   const passes: Passes = {
     maxHeightPx: world.currentMaxHeightPx,
@@ -328,17 +395,18 @@ function drawViewport(
             }
           }
 
-        } else if (idx < liveBldCount + numFlora) {
+        } else if (idx < liveBldCount + liveFloraCount) {
           // Flora
-          const f = flora[idx - liveBldCount];
+          const realFloraIdx = FLORA_INDEX_BUFFER[idx - liveBldCount] ?? -1;
+          const f = realFloraIdx >= 0 ? flora[realFloraIdx] : undefined;
           if (f === undefined) continue;
           const def = defForFlora(f.kind);
           const v = floraVariant(f);
           drawSprite(pen, def, f.gx, f.gy, v, f.basePx);
 
-        } else if (idx < liveBldCount + numFlora + liveCreCount) {
+        } else if (idx < liveBldCount + liveFloraCount + liveCreCount) {
           // Creatures
-          const creIdx = CRE_INDEX_BUFFER[idx - liveBldCount - numFlora] ?? -1;
+          const creIdx = CRE_INDEX_BUFFER[idx - liveBldCount - liveFloraCount] ?? -1;
           const c = creIdx >= 0 ? creatures[creIdx] : undefined;
           if (c === undefined) continue;
           const def    = spriteForCreature(c.species);
@@ -355,9 +423,9 @@ function drawViewport(
             }
           }
 
-        } else if (idx < liveBldCount + numFlora + liveCreCount + numPlayers) {
+        } else if (idx < liveBldCount + liveFloraCount + liveCreCount + numPlayers) {
           // Players
-          const p = players[idx - liveBldCount - numFlora - liveCreCount];
+          const p = players[idx - liveBldCount - liveFloraCount - liveCreCount];
           if (p === undefined || p.respawnTimer > 0) continue;
           const def    = PLAYER_SPRITES[p.index];
           const v      = playerVariant(p);
@@ -391,10 +459,11 @@ function drawViewport(
         const sx = (wx - camera.x) * camera.zoom + camera.viewW * 0.5;
         const sy = (wy - camera.y) * camera.zoom + camera.viewH * 0.5;
 
-        // Ground shadow
-        const groundH = world.heights.get(Math.floor(p.x), Math.floor(p.y)) * 8;
+        // Ground shadow with true elevation interpolation
+        const groundH = heightAt(world.field, p.x, p.y);
         const gwy = (p.x + p.y) * 16 - groundH;
         const gsy = (gwy - camera.y) * camera.zoom + camera.viewH * 0.5;
+
 
         // Shadow dot
         SHADOW_BOX_SCRATCH[0] = sx - 3; SHADOW_BOX_SCRATCH[1] = gsy - 1.5;

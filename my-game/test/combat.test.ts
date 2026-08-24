@@ -8,7 +8,7 @@ import {
   executeAttack,
   stepProjectiles,
 } from '../src/combat.js';
-import type { Creature } from '../src/creatures.js';
+import { spawnCreature, type Creature } from '../src/creatures.js';
 
 describe('Combat & Weapon Crafting System', () => {
   it('defines all core weapons with valid stats and non-zero costs for craftables', () => {
@@ -64,30 +64,15 @@ describe('Combat & Weapon Crafting System', () => {
   });
 
   it('executes melee strikes against creatures in facing cone with knockback and loot drops', () => {
-    const [p1, p2] = createPlayers();
+    const [p1] = createPlayers();
     p1.gx = 10;
     p1.gy = 10;
     p1.facing = 'e';
     p1.weapon = 'sword';
 
-    const creatures: Creature[] = [
-      {
-        species: 'wolf',
-        gx: 11.2,
-        gy: 10.0,
-        hp: 30,
-        maxHp: 60,
-        vx: 0,
-        vy: 0,
-        facing: 'w',
-        state: 'wander',
-        idleTimer: 0,
-        genome: { speed: 1, aggroRadius: 5, fleeHpThreshold: 0.2, diet: 'carnivore' },
-        hunger: 0,
-        age: 10,
-        generation: 1,
-      },
-    ];
+    const wolf = spawnCreature('wolf', 11.2, 10.0, 42);
+    wolf.hp = 30;
+    const creatures: Creature[] = [wolf];
 
     const pool = createProjectilePool();
     const initialStone = p1.inventory.stone;
@@ -110,37 +95,26 @@ describe('Combat & Weapon Crafting System', () => {
     p1.weapon = 'bow';
 
     const pool = createProjectilePool();
-    const launched = launchArrow(pool, p1, 40);
+    const baseH = 50;
+    const launched = launchArrow(pool, p1, baseH);
     expect(launched).toBe(true);
 
     const activeArrow = pool.find((p) => p.live);
     expect(activeArrow).toBeDefined();
     expect(activeArrow?.vx).toBe(0);
     expect(activeArrow?.vy).toBeGreaterThan(0); // moving south
-    expect(activeArrow?.z).toBe(56);
+    expect(activeArrow?.z).toBe(baseH + 16);
 
-    const targetCreature: Creature = {
-      species: 'troll',
-      gx: 20.0,
-      gy: 21.2,
-      hp: 100,
-      maxHp: 200,
-      vx: 0,
-      vy: 0,
-      facing: 'n',
-      state: 'wander',
-      idleTimer: 0,
-      genome: { speed: 0.8, aggroRadius: 8, fleeHpThreshold: 0.1, diet: 'carnivore' },
-      hunger: 0,
-      age: 20,
-      generation: 1,
-    };
+    const targetCreature = spawnCreature('troll', 20.0, 21.0, 42);
+    targetCreature.hp = 100;
 
-    // Step projectiles
-    const hits = stepProjectiles(pool, [targetCreature], [p1, p2], world, 0.1);
+    // Step projectiles with dt=0.04s so arrow travels to y = 20.4 + 15*0.04 = 21.0
+    const hits = stepProjectiles(pool, [targetCreature], [p1, p2], world, 0.04);
     expect(hits.length).toBe(1);
     expect(hits[0]?.hit).toBe(true);
     expect(targetCreature.hp).toBe(100 - WEAPONS.bow.damage);
     expect(activeArrow?.live).toBe(false); // Fused on impact
   });
+
 });
+

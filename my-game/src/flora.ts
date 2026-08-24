@@ -22,6 +22,7 @@ import {
 } from '@latticekit/draw';
 import { Rng, createRng, fbm2 } from '@latticekit/core';
 import { W, H, MAT_WATER, MAT_SAND, MAT_SNOW, MAT_ROCK, MAT_GRASS, type WorldTerrain } from './world.js';
+import type { SpatialGrid } from './spatial.js';
 
 // ── Colors for Flora ──────────────────────────────────────────────────────────
 
@@ -202,15 +203,33 @@ export function defForFlora(kind: FloraKind): SpriteDef {
   }
 }
 
+const FLORA_VARIANT_SCRATCH: {
+  seed: number;
+  flags: number;
+  level: number;
+  progress: number;
+  label: string;
+} = {
+  seed:     0,
+  flags:    0,
+  level:    0,
+  progress: 1,
+  label:    '',
+};
+
+/**
+ * Return the visual Variant for a flora item.
+ * Reuses an internal scratch variant to guarantee zero heap allocation.
+ */
 export function floraVariant(f: FloraItem): Variant {
-  return {
-    seed:     f.id,
-    flags:    0,
-    level:    f.subType,
-    progress: f.scale,
-    label:    '',
-  };
+  FLORA_VARIANT_SCRATCH.seed = f.id;
+  FLORA_VARIANT_SCRATCH.flags = 0;
+  FLORA_VARIANT_SCRATCH.level = f.subType;
+  FLORA_VARIANT_SCRATCH.progress = f.scale;
+  FLORA_VARIANT_SCRATCH.label = '';
+  return FLORA_VARIANT_SCRATCH;
 }
+
 
 // ── Populate World with Flora ─────────────────────────────────────────────────
 
@@ -388,9 +407,29 @@ export function findClosestEdibleFlora(
   fromY: number,
   radius: number,
   edibleKinds: readonly FloraKind[] = DEFAULT_EDIBLE_KINDS,
+  spatialGrid?: SpatialGrid,
 ): FloraItem | undefined {
   let closest: FloraItem | undefined = undefined;
   let minDistSq = radius * radius;
+
+  if (spatialGrid !== undefined) {
+    const count = spatialGrid.queryRadius(fromX, fromY, radius);
+    for (let i = 0; i < count; i++) {
+      const idx = spatialGrid.queryBuffer[i];
+      if (idx === undefined) continue;
+      const f = flora[idx];
+      if (f === undefined) continue;
+      if (!edibleKinds.includes(f.kind)) continue;
+      const dx = f.gx - fromX;
+      const dy = f.gy - fromY;
+      const distSq = dx * dx + dy * dy;
+      if (distSq < minDistSq) {
+        minDistSq = distSq;
+        closest = f;
+      }
+    }
+    return closest;
+  }
 
   for (let i = 0; i < flora.length; i++) {
     const f = flora[i];
@@ -407,6 +446,7 @@ export function findClosestEdibleFlora(
   }
   return closest;
 }
+
 
 let regrowthTimer = 0;
 

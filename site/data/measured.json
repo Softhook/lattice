@@ -20,14 +20,14 @@
       "source": "find packages -type f -not -path '*/node_modules/*' -not -path '*/dist/*' -not -path '*/coverage/*' — 207 .ts, 19 .json, 9 .md, nothing else"
     },
     "tests": {
-      "value": 2688,
+      "value": 2691,
       "unit": "",
-      "source": "npx vitest run — 2688 passed (2688)"
+      "source": "npx vitest run — 2691 passed (2691)"
     },
     "testFiles": {
-      "value": 105,
+      "value": 106,
       "unit": "",
-      "source": "npx vitest run — 105 passed (105)"
+      "source": "npx vitest run — 106 passed (106)"
     },
     "publicSymbols": {
       "value": 527,

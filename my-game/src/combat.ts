@@ -11,6 +11,7 @@
  */
 
 import { clamp } from '@latticekit/core';
+import { heightAt } from '@latticekit/iso';
 import type { WorldTerrain } from './world.js';
 import { W, H } from './world.js';
 import type { Creature } from './creatures.js';
@@ -270,6 +271,8 @@ export function executeAttack(
   };
 }
 
+const HIT_EVENTS_SCRATCH: AttackResult[] = [];
+
 /** Step active projectiles, checking collision against creatures and world boundaries. */
 export function stepProjectiles(
   projectiles: Projectile[],
@@ -277,8 +280,8 @@ export function stepProjectiles(
   players: readonly [Player, Player],
   world: WorldTerrain,
   dt: number,
-): AttackResult[] {
-  const events: AttackResult[] = [];
+): readonly AttackResult[] {
+  HIT_EVENTS_SCRATCH.length = 0;
 
   for (let i = 0; i < projectiles.length; i++) {
     const p = projectiles[i];
@@ -301,7 +304,7 @@ export function stepProjectiles(
       continue;
     }
 
-    const groundH = world.heights.get(Math.floor(p.x), Math.floor(p.y)) * 8;
+    const groundH = heightAt(world.field, p.x, p.y);
     if (p.z <= groundH) {
       // Landed on ground
       p.live = false;
@@ -320,7 +323,7 @@ export function stepProjectiles(
       if (distSq < 0.75 * 0.75) {
         c.hp -= p.damage;
         // Knockback along projectile vector
-        const mag = Math.sqrt(p.vx * p.vx + p.vy * p.vy) || 1;
+        const mag = Math.sqrt(p.vx * p.vx + p.vy * p.vy) || 1; // @tier-b
         c.gx = clamp(c.gx + (p.vx / mag) * 0.6, 2, W - 3);
         c.gy = clamp(c.gy + (p.vy / mag) * 0.6, 2, H - 3);
         c.idleTimer = 0.3;
@@ -332,7 +335,7 @@ export function stepProjectiles(
           dropCreatureLoot(shooter, c.species);
         }
 
-        events.push({
+        HIT_EVENTS_SCRATCH.push({
           hit: true,
           damageDealt: p.damage,
           creatureDefeated: killed,
@@ -347,8 +350,9 @@ export function stepProjectiles(
     }
   }
 
-  return events;
+  return HIT_EVENTS_SCRATCH;
 }
+
 
 /** Drop material rewards directly into player inventory upon creature defeat. */
 function dropCreatureLoot(player: Player, species: string): void {
