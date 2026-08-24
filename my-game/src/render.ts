@@ -14,19 +14,25 @@ import {
   isoTile,
   drawSprite,
   drawGhost,
+  drawFootprint,
+  SELECT_LIFT,
   renderFrame,
   BASE_SLOTS,
   createPalette,
   createLightField,
   hex,
   shade,
+  withAlpha,
   spriteHeightPx,
+  screenText,
+  DEFAULT_TEXT,
   VARIANT_ZERO,
   type Pen,
   type Passes,
   type Surface,
   type LightField,
 } from '@latticekit/draw';
+import { clamp } from '@latticekit/core';
 import {
   DepthSorter,
   footprintBase,
@@ -40,7 +46,7 @@ import { W, H, MAT_WATER } from './world.js';
 import type { Creature } from './creatures.js';
 import type { Player } from './players.js';
 import { facingTile, MAX_HP } from './players.js';
-import type { Building } from './buildings.js';
+import type { Building, BuildingKind } from './buildings.js';
 import { defFor, canPlaceBuilding } from './buildings.js';
 import type { FloraItem } from './flora.js';
 import { defForFlora, floraVariant } from './flora.js';
@@ -54,7 +60,7 @@ import {
 import {
   GRASS, ROCK, WATER, SAND, SNOW, NIGHT_COLOR, SKY_TOP, SKY_MID,
   HEIGHT_WATER, HEIGHT_SAND, HEIGHT_ROCK, HEIGHT_SNOW,
-  P1_COLOR, P2_COLOR,
+  P1_COLOR, P1_ACCENT, P2_COLOR, P2_ACCENT,
 } from './palette.js';
 
 // ── Palette ────────────────────────────────────────────────────────────────────
@@ -119,11 +125,7 @@ export function renderVerdant(
     palette,
     t,
     clear: 'sky',
-    light,
   });
-
-  // Start the light field.
-  light.begin(pen, darkness, NIGHT_COLOR);
 
   // Live items
   const liveBuildings = buildings.filter(b => b.hp > 0);
@@ -138,7 +140,7 @@ export function renderVerdant(
   ctx.beginPath();
   ctx.rect(0, 0, halfW, surface.height);
   ctx.clip();
-  drawViewport(pen, camera1, world, flora, liveCreatures, players, liveBuildings, players[0], t, true);
+  drawViewport(pen, camera1, world, flora, liveCreatures, players, liveBuildings, players[0], t, darkness, true);
   ctx.restore();
 
   // ── Right viewport (Camera 2 / Player 2) ───────────────────────────────────────
@@ -148,7 +150,7 @@ export function renderVerdant(
   ctx.rect(halfW, 0, halfW, surface.height);
   ctx.clip();
   ctx.translate(halfW, 0);
-  drawViewport(pen2, camera2, world, flora, liveCreatures, players, liveBuildings, players[1], t, false);
+  drawViewport(pen2, camera2, world, flora, liveCreatures, players, liveBuildings, players[1], t, darkness, false);
   ctx.restore();
 
   endFrame(pen);
@@ -165,6 +167,7 @@ function drawViewport(
   liveBuildings: Building[],
   activePlayer: Player,
   t: number,
+  darkness: number,
   isLeft: boolean,
 ): void {
   ORDER.clear();
@@ -203,9 +206,27 @@ function drawViewport(
     ORDER.add(pgx, pgy, 1, 1, basePx + spriteHeightPx(PLAYER_SPRITES[p.index], playerVariant(p)));
   }
 
+  // 5. Add placement ghost building into DepthSorter for correct Z-ordering
+  const hasGhost = activePlayer.respawnTimer <= 0 && activePlayer.mode !== 'move';
+  const ghostTile = hasGhost ? facingTile(activePlayer) : { gx: -1, gy: -1 };
+  const ghostValidTile = hasGhost && ghostTile.gx >= 0 && ghostTile.gy >= 0 && ghostTile.gx < W && ghostTile.gy < H;
+  const buildKind = hasGhost ? (activePlayer.mode as BuildingKind) : undefined;
+  const ghostDef = (buildKind !== undefined && ghostValidTile) ? defFor(buildKind) : undefined;
+  let ghostBasePx = 0;
+  let isLegal = false;
+
+  if (ghostDef !== undefined && buildKind !== undefined) {
+    isLegal = canPlaceBuilding(buildKind, ghostTile.gx, ghostTile.gy, world, liveBuildings);
+    FP_SCRATCH.gx = ghostTile.gx; FP_SCRATCH.gy = ghostTile.gy; FP_SCRATCH.w = ghostDef.w; FP_SCRATCH.d = ghostDef.d;
+    ghostBasePx = footprintBase(world.field, FP_SCRATCH as unknown as Footprint);
+    ORDER.add(ghostTile.gx, ghostTile.gy, ghostDef.w, ghostDef.d, ghostBasePx + spriteHeightPx(ghostDef, VARIANT_ZERO));
+  }
+
   const numBuildings = liveBuildings.length;
   const numFlora     = flora.length;
   const numCreatures = liveCreatures.length;
+  const numPlayers   = players.length;
+  const ghostIndex   = ghostDef !== undefined ? numBuildings + numFlora + numCreatures + numPlayers : -1;
 
   const passes: Passes = {
     maxHeightPx: world.currentMaxHeightPx,
@@ -250,6 +271,13 @@ function drawViewport(
           }
         }
       }
+
+      // Draw ground footprint boundary (marching-ant lines) directly on the ground plane
+      // BEFORE solids are sorted and drawn, so all foreground players, trees, and structures
+      // correctly occlude and sort over the ground lines.
+      if (ghostDef !== undefined) {
+        drawFootprint(pen, ghostTile.gx, ghostTile.gy, ghostDef.w, ghostDef.d, isLegal ? 'ok' : 'bad', SELECT_LIFT, ghostBasePx);
+      }
     },
 
     solids(pen, order) {
@@ -285,7 +313,7 @@ function drawViewport(
           const basePx = footprintBase(world.field, FP_SCRATCH as unknown as Footprint);
           drawSprite(pen, def, c.gx, c.gy, v, basePx);
 
-        } else {
+        } else if (idx < numBuildings + numFlora + numCreatures + numPlayers) {
           // Players
           const p = players[idx - numBuildings - numFlora - numCreatures];
           if (p === undefined || p.respawnTimer > 0) continue;
@@ -296,53 +324,51 @@ function drawViewport(
           FP_SCRATCH.gx = pgx; FP_SCRATCH.gy = pgy; FP_SCRATCH.w = 1; FP_SCRATCH.d = 1;
           const basePx = footprintBase(world.field, FP_SCRATCH as unknown as Footprint);
           drawSprite(pen, def, p.gx, p.gy, v, basePx);
+
+        } else if (idx === ghostIndex && ghostDef !== undefined) {
+          // Ghost preview — correctly depth-sorted against players, trees and structures!
+          drawGhost(pen, ghostDef, ghostTile.gx, ghostTile.gy, VARIANT_ZERO, isLegal, ghostBasePx);
         }
       }
     },
 
-    placement(pen) {
-      // Draw target reticle and placement ghost for the active player
-      if (activePlayer.respawnTimer > 0) return;
-      const { gx, gy } = facingTile(activePlayer);
-      if (gx < 0 || gy < 0 || gx >= W || gy >= H) return;
-
-      const buildDef = defFor(activePlayer.buildKind);
-      const isLegal  = canPlaceBuilding(activePlayer.buildKind, gx, gy, world, liveBuildings);
-
-      FP_SCRATCH.gx = gx; FP_SCRATCH.gy = gy; FP_SCRATCH.w = buildDef.w; FP_SCRATCH.d = buildDef.d;
-      const basePx = footprintBase(world.field, FP_SCRATCH as unknown as Footprint);
-
-      // 1. Target reticle on ground
-      isoTile(pen, gx, gy, isLegal ? hex('#27ae60') : hex('#c0392b'), isLegal ? GHOST_VALID : GHOST_INVALID, 0.08, basePx / 8);
-
-      // 2. Ghost preview of structure
-      drawGhost(pen, buildDef, gx, gy, VARIANT_ZERO, isLegal, basePx);
-    },
-
     overlay(pen) {
       // In-Canvas HUD for each player's viewport
-      const halfW = pen.camera.viewW;
+      const viewW = pen.camera.viewW;
       const viewH = pen.camera.viewH;
 
-      // 1. Divider line (drawn once on left viewport)
+      // 1. Synchronized darkness wash across the viewport
+      if (darkness > 0) {
+        pen.surface.poly(
+          Float64Array.of(0, 0, viewW, 0, viewW, viewH, 0, viewH),
+          4,
+          withAlpha(NIGHT_COLOR, darkness),
+        );
+      }
+
+      // 2. Divider line (drawn once on left viewport)
       if (isLeft) {
         const fullW = pen.surface.width;
         const cx    = fullW * 0.5;
         pen.surface.stroke(Float64Array.of(cx, 0, cx, viewH), 2, false, hex('#2d4020'), 2);
       }
 
-      // 2. Player HUD Card
+      // 3. Player HUD Card
       const pIdx = activePlayer.index;
       const pColor = pIdx === 0 ? P1_COLOR : P2_COLOR;
-      const pLabel = pIdx === 0 ? 'PLAYER 1 (BLUE)' : 'PLAYER 2 (ORANGE)';
-      const pControls = pIdx === 0 ? '[E] Build  [F] Cycle  [Q] Dig  [R] Raise' : '[O] Build  [H] Cycle  [U] Dig  [Y] Raise';
+      const pAccent = pIdx === 0 ? P1_ACCENT : P2_ACCENT;
+      const pLabel = pIdx === 0 ? 'PLAYER 1' : 'PLAYER 2';
 
-      // HUD Background panel (top-left of viewport)
       const padX = 14;
       const padY = 14;
-      const hudW = 230;
-      const hudH = 68;
+      const hudW = 240;
+      const hudH = 74;
 
+      const isHurt = activePlayer.hurtFlash > 0;
+      const cardBorder = isHurt ? hex('#e74c3c') : pColor;
+      const cardBg = isHurt ? hex('#280808') : hex('#0c160a');
+
+      // HUD Background panel
       pen.surface.poly(
         Float64Array.of(
           padX, padY,
@@ -351,7 +377,7 @@ function drawViewport(
           padX, padY + hudH,
         ),
         4,
-        hex('#0c160a'),
+        cardBg,
       );
       pen.surface.stroke(
         Float64Array.of(
@@ -362,50 +388,120 @@ function drawViewport(
         ),
         4,
         true,
-        pColor,
-        1.5,
+        cardBorder,
+        isHurt ? 2.5 : 1.5,
       );
 
-      // Health bar
-      const hpRatio = Math.max(0, activePlayer.hp / MAX_HP);
-      const barX = padX + 8;
-      const barY = padY + 22;
-      const barW = hudW - 16;
+      // Header row: Player Tag + HP number
+      screenText(
+        pen,
+        padX + 10,
+        padY + 12,
+        pLabel,
+        pAccent,
+        { ...DEFAULT_TEXT, size: 12, weight: 800, align: -1, baseline: 0 },
+      );
+
+      const currentHp = Math.max(0, Math.ceil(activePlayer.hp));
+      const hpRatio = activePlayer.hp / MAX_HP;
+      const hpColor = isHurt ? hex('#ff6b6b') : (hpRatio > 0.3 ? UI_HP_GOOD : UI_HP_BAD);
+      screenText(
+        pen,
+        padX + hudW - 10,
+        padY + 12,
+        `${currentHp} / ${MAX_HP} HP`,
+        hpColor,
+        { ...DEFAULT_TEXT, size: 11, weight: 700, align: 1, baseline: 0 },
+      );
+
+      // Health bar container
+      const barX = padX + 10;
+      const barY = padY + 24;
+      const barW = hudW - 20;
       const barH = 8;
 
-      // Health bar background
       pen.surface.poly(
         Float64Array.of(barX, barY, barX + barW, barY, barX + barW, barY + barH, barX, barY + barH),
         4,
-        hex('#1f2918'),
+        hex('#1a2414'),
       );
-      // Health bar fill
       if (hpRatio > 0) {
+        const fillW = Math.max(2, barW * clamp(hpRatio, 0, 1));
         pen.surface.poly(
-          Float64Array.of(barX, barY, barX + (barW * hpRatio), barY, barX + (barW * hpRatio), barY + barH, barX, barY + barH),
+          Float64Array.of(barX, barY, barX + fillW, barY, barX + fillW, barY + barH, barX, barY + barH),
           4,
-          hpRatio > 0.3 ? UI_HP_GOOD : UI_HP_BAD,
+          isHurt ? hex('#ff7979') : (hpRatio > 0.3 ? UI_HP_GOOD : UI_HP_BAD),
         );
       }
 
-      // Active Tool Badge Indicator
-      const toolX = padX + 8;
-      const toolY = padY + 36;
-      const toolW = hudW - 16;
-      const toolH = 24;
+      // Tool / Mode badge
+      const toolX = padX + 10;
+      const toolY = padY + 38;
+      const toolW = hudW - 20;
+      const toolH = 26;
 
       pen.surface.poly(
         Float64Array.of(toolX, toolY, toolX + toolW, toolY, toolX + toolW, toolY + toolH, toolX, toolY + toolH),
         4,
-        hex('#172614'),
+        hex('#132110'),
       );
       pen.surface.stroke(
         Float64Array.of(toolX, toolY, toolX + toolW, toolY, toolX + toolW, toolY + toolH, toolX, toolY + toolH),
         4,
         true,
-        UI_TOOL_GOLD,
+        activePlayer.mode === 'move' ? hex('#34495e') : UI_TOOL_GOLD,
         1,
       );
+
+      const modeText = activePlayer.mode === 'move' ? 'MODE: MOVE' : `BUILD: ${activePlayer.mode.toUpperCase()}`;
+      const cycleKey = pIdx === 0 ? '[F] Cycle' : '[H] Cycle';
+
+      screenText(
+        pen,
+        toolX + 8,
+        toolY + 13,
+        modeText,
+        activePlayer.mode === 'move' ? hex('#bdc3c7') : UI_TOOL_GOLD,
+        { ...DEFAULT_TEXT, size: 11, weight: 700, align: -1, baseline: 0 },
+      );
+
+      screenText(
+        pen,
+        toolX + toolW - 8,
+        toolY + 13,
+        cycleKey,
+        hex('#8da882'),
+        { ...DEFAULT_TEXT, size: 10, weight: 600, align: 1, baseline: 0 },
+      );
+
+      // Respawn banner if knocked down
+      if (activePlayer.respawnTimer > 0) {
+        const respawnSec = Math.ceil(activePlayer.respawnTimer);
+        const bannerY = viewH * 0.45;
+        const bannerW = Math.min(300, viewW - 40);
+        const bannerX = (viewW - bannerW) * 0.5;
+
+        pen.surface.poly(
+          Float64Array.of(bannerX, bannerY, bannerX + bannerW, bannerY, bannerX + bannerW, bannerY + 44, bannerX, bannerY + 44),
+          4,
+          hex('#400a0a'),
+        );
+        pen.surface.stroke(
+          Float64Array.of(bannerX, bannerY, bannerX + bannerW, bannerY, bannerX + bannerW, bannerY + 44, bannerX, bannerY + 44),
+          4,
+          true,
+          hex('#e74c3c'),
+          2,
+        );
+        screenText(
+          pen,
+          viewW * 0.5,
+          bannerY + 22,
+          `KNOCKED DOWN — RESPAWN IN ${respawnSec}s`,
+          hex('#ffffff'),
+          { ...DEFAULT_TEXT, size: 12, weight: 800, align: 0, baseline: 0 },
+        );
+      }
     },
   };
 

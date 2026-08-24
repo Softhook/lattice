@@ -15,7 +15,7 @@
 import { Rng, createRng, hash2, toUnit, clamp, moveTowards } from '@latticekit/core';
 import type { WorldTerrain } from './world.js';
 import { isWalkable, W, H } from './world.js';
-import type { Player } from './players.js';
+import { damagePlayer, type Player } from './players.js';
 
 // ── Species ────────────────────────────────────────────────────────────────────
 
@@ -197,11 +197,12 @@ function updateOne(c: Creature, world: WorldTerrain, players: Player[], dt: numb
   // State machine.
   const isHostile = (c.species === 'wolf' || c.species === 'troll') && c.traits.aggression > 0.65;
 
-  if (nearestPlayer !== undefined && nearestDist < NOTICE_RANGE) {
+  if (nearestPlayer !== undefined && nearestDist < NOTICE_RANGE && nearestPlayer.respawnTimer <= 0) {
     if (isHostile) {
       if (nearestDist < ATTACK_RANGE) {
         c.state = 'attack';
-        nearestPlayer.hp -= dt * 2 * c.traits.size;
+        const baseDmg = c.species === 'troll' ? 32 : 18;
+        damagePlayer(nearestPlayer, dt * baseDmg * c.traits.size);
       } else {
         c.state = 'chase';
         moveTowardsTile(c, nearestPlayer.gx, nearestPlayer.gy, speed, dt, world);

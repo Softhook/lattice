@@ -19,6 +19,8 @@ import { placeBuilding, type BuildingKind } from './buildings.js';
 
 export type Facing = 'n' | 's' | 'e' | 'w';
 
+export type PlayerMode = 'move' | BuildingKind;
+
 export interface Player {
   readonly index: 0 | 1;
   /** Current tile position (non-integer while walking). */
@@ -26,10 +28,16 @@ export interface Player {
   gy: number;
   /** Which grid direction the player is facing. Affects action target tile. */
   facing: Facing;
-  /** What to build when pressing build action key. Cycles with mode key (F / H). */
+  /** Current active tool/mode. Defaults to 'move'. */
+  mode: PlayerMode;
+  /** What to build when pressing build action key. */
   buildKind: BuildingKind;
   /** Hit points. 0 → player is knocked down (respawns after 3 s). */
   hp: number;
+  /** Seconds remaining before HP regen resumes. Set on taking damage. */
+  combatCooldown: number;
+  /** Seconds remaining for red damage flash indicator. */
+  hurtFlash: number;
   /** Respawn timer in seconds. > 0 means knocked down. */
   respawnTimer: number;
   /** Accumulated movement sub-tile distance for smooth stepping. */
@@ -42,12 +50,13 @@ const WALK_SPEED = 3.2;
 /** Max player HP. */
 const MAX_HP = 100;
 
-/** HP regen rate per second when not under attack. */
-const REGEN_RATE = 2;
+/** HP regen rate per second when out of combat. */
+const REGEN_RATE = 4;
 
 /** Seconds before respawn after reaching 0 HP. */
 const RESPAWN_TIME = 3;
 
+export const PLAYER_MODES: readonly PlayerMode[] = ['move', 'wall', 'floor', 'tower', 'ramp'];
 export const BUILD_KINDS: readonly BuildingKind[] = ['wall', 'floor', 'tower', 'ramp'];
 
 // ── Factory ────────────────────────────────────────────────────────────────────
@@ -66,8 +75,11 @@ function makePlayer(index: 0 | 1, gx: number, gy: number): Player {
     gx,
     gy,
     facing: 's',
+    mode: 'move',
     buildKind: 'wall',
-    hp:     MAX_HP,
+    hp: MAX_HP,
+    combatCooldown: 0,
+    hurtFlash: 0,
     respawnTimer: 0,
     moveAccum: 0,
   };
@@ -126,15 +138,15 @@ export function facingTile(player: Player): { gx: number; gy: number } {
   }
 }
 
-/** Build the currently selected structure at the player's facing tile. */
+/** Build the currently selected structure at the player's facing tile. Only active in build mode. */
 export function buildAtFacing(
   player: Player,
   world: WorldTerrain,
   buildings: Building[],
 ): Building | undefined {
-  if (player.respawnTimer > 0) return undefined;
+  if (player.respawnTimer > 0 || player.mode === 'move') return undefined;
   const { gx, gy } = facingTile(player);
-  return placeBuilding(player.buildKind, gx, gy, world, buildings);
+  return placeBuilding(player.mode, gx, gy, world, buildings);
 }
 
 /** Dig (lower ground) at the player's facing tile. */
@@ -151,32 +163,47 @@ export function raiseAtFacing(player: Player, world: WorldTerrain): boolean {
   return raise(world, gx, gy);
 }
 
-/** Cycle through build kinds: wall -> floor -> tower -> ramp -> wall. */
-export function cycleBuildKind(player: Player): BuildingKind {
-  const idx = BUILD_KINDS.indexOf(player.buildKind);
-  player.buildKind = BUILD_KINDS[(idx + 1) % BUILD_KINDS.length] as BuildingKind;
-  return player.buildKind;
+/** Cycle through player modes: move -> wall -> floor -> tower -> ramp -> move. */
+export function cycleBuildKind(player: Player): PlayerMode {
+  const idx = PLAYER_MODES.indexOf(player.mode);
+  const nextMode = PLAYER_MODES[(idx + 1) % PLAYER_MODES.length] as PlayerMode;
+  player.mode = nextMode;
+  if (nextMode !== 'move') {
+    player.buildKind = nextMode;
+  }
+  return player.mode;
 }
 
 // ── HP and respawn ─────────────────────────────────────────────────────────────
 
-/** Update HP regen and respawn timer. Call once per update tick. */
+/** Update HP regen, damage flash, and respawn timer. Call once per update tick. */
 export function tickPlayer(player: Player, dt: number): void {
+  if (player.hurtFlash > 0) {
+    player.hurtFlash = Math.max(0, player.hurtFlash - dt);
+  }
   if (player.respawnTimer > 0) {
     player.respawnTimer -= dt;
     if (player.respawnTimer <= 0) {
       player.hp = MAX_HP;
       player.respawnTimer = 0;
+      player.combatCooldown = 0;
+      player.hurtFlash = 0;
     }
     return;
   }
-  player.hp = Math.min(MAX_HP, player.hp + REGEN_RATE * dt);
+  if (player.combatCooldown > 0) {
+    player.combatCooldown = Math.max(0, player.combatCooldown - dt);
+  } else if (player.hp < MAX_HP) {
+    player.hp = Math.min(MAX_HP, player.hp + REGEN_RATE * dt);
+  }
 }
 
 /** Apply incoming damage. Triggers respawn if HP reaches 0. */
 export function damagePlayer(player: Player, amount: number): void {
   if (player.respawnTimer > 0) return;
-  player.hp -= amount;
+  player.hp = Math.max(0, player.hp - amount);
+  player.combatCooldown = 3.0;
+  player.hurtFlash = 0.35;
   if (player.hp <= 0) {
     player.hp = 0;
     player.respawnTimer = RESPAWN_TIME;

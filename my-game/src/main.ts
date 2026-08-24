@@ -161,7 +161,10 @@ loop.onUpdate((dt, tick) => {
   }
   if (edges.p1Build) {
     const placed = buildAtFacing(p1, world, buildings);
-    if (placed !== undefined) buildings.push(placed);
+    if (placed !== undefined) {
+      buildings.push(placed);
+      updateDomHud();
+    }
   }
   if (edges.p1Dig) {
     digAtFacing(p1, world);
@@ -179,7 +182,10 @@ loop.onUpdate((dt, tick) => {
   }
   if (edges.p2Build) {
     const placed = buildAtFacing(p2, world, buildings);
-    if (placed !== undefined) buildings.push(placed);
+    if (placed !== undefined) {
+      buildings.push(placed);
+      updateDomHud();
+    }
   }
   if (edges.p2Dig) {
     digAtFacing(p2, world);
@@ -224,14 +230,19 @@ loop.onUpdate((dt, tick) => {
 function updateDomHud(): void {
   const p1ToolEl = document.getElementById('p1-tool');
   const p2ToolEl = document.getElementById('p2-tool');
-  if (p1ToolEl) p1ToolEl.textContent = p1.buildKind.toUpperCase();
-  if (p2ToolEl) p2ToolEl.textContent = p2.buildKind.toUpperCase();
+  if (p1ToolEl) p1ToolEl.textContent = p1.mode.toUpperCase();
+  if (p2ToolEl) p2ToolEl.textContent = p2.mode.toUpperCase();
 }
 
 // ── Render (display rate) ─────────────────────────────────────────────────────
 
 loop.onRender((_alpha, t, nowMs) => {
   input.frame(nowMs);
+
+  // Synchronize camera2 zoom with camera1 zoom
+  if (Math.abs(camera2.zoom - camera1.zoom) > 1e-4) {
+    camera2.zoomAt(camera1.zoom / camera2.zoom, camera2.viewW / 2, camera2.viewH / 2);
+  }
 
   // Lock camera center to each player's world position.
   lockCameraToPlayer(camera1, p1);
