@@ -1,19 +1,18 @@
 /**
  * Keyboard input for two players.
  *
- * Player movement is continuous (held-key), so we track currently held keys in a Set
- * rather than using @latticekit/input's action system (which is event-based).
+ * Player movement is continuous (held-key), so we track currently held keys in a Set.
+ * Actions (dig, raise, build, cycle tool) use rising-edge detection so they fire once per press.
  *
- * @latticekit/input handles pointer and camera for each viewport.
+ * Key layout:
  *
- * Key layout (chosen to avoid overlap and keep both hands on natural positions):
- *
- *   Player 1              Player 2
- *   W / S  → move N / S   I / K  → move N / S
- *   A / D  → move W / E   J / L  → move W / E
- *   Q      → dig action    U      → dig action
- *   E      → build action  O      → build action
- *   F      → switch mode   H      → switch mode
+ *   Player 1 (Left Viewport)       Player 2 (Right Viewport)
+ *   W / S    → move N / S          I / K    → move N / S
+ *   A / D    → move W / E          J / L    → move W / E
+ *   Q        → Dig ground          U        → Dig ground
+ *   R        → Raise ground        Y        → Raise ground
+ *   E        → Build structure     O        → Build structure
+ *   F        → Cycle building      H        → Cycle building
  */
 
 export interface KeyState {
@@ -24,11 +23,10 @@ export interface KeyState {
 export function createKeyState(): { state: KeyState; dispose: () => void } {
   const held = new Set<string>();
   const onDown = (e: KeyboardEvent) => {
-    // Ignore if focus is in an input field.
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
     held.add(e.code);
   };
-  const onUp   = (e: KeyboardEvent) => { held.delete(e.code); };
+  const onUp = (e: KeyboardEvent) => { held.delete(e.code); };
   document.addEventListener('keydown', onDown);
   document.addEventListener('keyup',   onUp);
   return {
@@ -65,46 +63,39 @@ export function pollP2Movement(keys: Set<string>): { dx: number; dy: number } {
 }
 
 // ── Action edge detection ──────────────────────────────────────────────────────
-//
-// Actions (dig, build) fire once per keydown, not continuously.
-// We track which action keys were held last tick to compute rising edges.
 
 export interface ActionEdges {
-  /** True on the first tick a key is held (rising edge). */
-  p1Action: boolean;
-  p2Action: boolean;
-  p1Mode: boolean;
-  p2Mode: boolean;
+  p1Dig: boolean;
+  p1Raise: boolean;
+  p1Build: boolean;
+  p1Cycle: boolean;
+
+  p2Dig: boolean;
+  p2Raise: boolean;
+  p2Build: boolean;
+  p2Cycle: boolean;
 }
 
 /**
  * Compute rising-edge action signals.
  *
  * `prev` is the set from the previous tick; `curr` is the current held set.
- * A rising edge is a key in `curr` that was NOT in `prev`.
  */
 export function pollActions(prev: Set<string>, curr: Set<string>): ActionEdges {
   return {
-    p1Action: (curr.has('KeyQ') && !prev.has('KeyQ')) || (curr.has('KeyE') && !prev.has('KeyE')),
-    p2Action: (curr.has('KeyU') && !prev.has('KeyU')) || (curr.has('KeyO') && !prev.has('KeyO')),
-    p1Mode:   curr.has('KeyF') && !prev.has('KeyF'),
-    p2Mode:   curr.has('KeyH') && !prev.has('KeyH'),
+    p1Dig:   curr.has('KeyQ') && !prev.has('KeyQ'),
+    p1Raise: curr.has('KeyR') && !prev.has('KeyR'),
+    p1Build: curr.has('KeyE') && !prev.has('KeyE'),
+    p1Cycle: curr.has('KeyF') && !prev.has('KeyF'),
+
+    p2Dig:   curr.has('KeyU') && !prev.has('KeyU'),
+    p2Raise: curr.has('KeyY') && !prev.has('KeyY'),
+    p2Build: curr.has('KeyO') && !prev.has('KeyO'),
+    p2Cycle: curr.has('KeyH') && !prev.has('KeyH'),
   };
 }
 
 /** Snapshot the current held set for next-tick edge detection. */
 export function snapshotKeys(held: Set<string>): Set<string> {
   return new Set(held);
-}
-
-// ── Action type disambiguation ─────────────────────────────────────────────────
-
-/** True if Player 1's action key this tick was the "dig" key (Q). */
-export function isP1Dig(curr: Set<string>, prev: Set<string>): boolean {
-  return curr.has('KeyQ') && !prev.has('KeyQ');
-}
-
-/** True if Player 2's action key this tick was the "dig" key (U). */
-export function isP2Dig(curr: Set<string>, prev: Set<string>): boolean {
-  return curr.has('KeyU') && !prev.has('KeyU');
 }

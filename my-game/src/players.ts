@@ -5,7 +5,7 @@
  * Movement is continuous (held-key, polled each update tick) at a fixed speed.
  * Actions (dig, build) fire at the tile the player is currently facing.
  *
- * Players are drawn as isometric capsule sprites colored by their index.
+ * Players are drawn as isometric explorer sprites colored by their index.
  * HP drains when a hostile creature attacks; it regenerates slowly when safe.
  */
 
@@ -18,7 +18,6 @@ import { placeBuilding, type BuildingKind } from './buildings.js';
 // ── Player state ───────────────────────────────────────────────────────────────
 
 export type Facing = 'n' | 's' | 'e' | 'w';
-export type PlayerMode = 'move' | 'dig' | 'build';
 
 export interface Player {
   readonly index: 0 | 1;
@@ -27,9 +26,7 @@ export interface Player {
   gy: number;
   /** Which grid direction the player is facing. Affects action target tile. */
   facing: Facing;
-  /** What pressing the action key does. */
-  mode: PlayerMode;
-  /** What to build when mode === 'build'. Cycles with mode switch. */
+  /** What to build when pressing build action key. Cycles with mode key (F / H). */
   buildKind: BuildingKind;
   /** Hit points. 0 → player is knocked down (respawns after 3 s). */
   hp: number;
@@ -40,7 +37,7 @@ export interface Player {
 }
 
 /** Tiles per second at normal walk speed. */
-const WALK_SPEED = 3.0;
+const WALK_SPEED = 3.2;
 
 /** Max player HP. */
 const MAX_HP = 100;
@@ -51,7 +48,7 @@ const REGEN_RATE = 2;
 /** Seconds before respawn after reaching 0 HP. */
 const RESPAWN_TIME = 3;
 
-const BUILD_KINDS: BuildingKind[] = ['wall', 'floor', 'tower', 'ramp'];
+export const BUILD_KINDS: readonly BuildingKind[] = ['wall', 'floor', 'tower', 'ramp'];
 
 // ── Factory ────────────────────────────────────────────────────────────────────
 
@@ -69,7 +66,6 @@ function makePlayer(index: 0 | 1, gx: number, gy: number): Player {
     gx,
     gy,
     facing: 's',
-    mode:   'move',
     buildKind: 'wall',
     hp:     MAX_HP,
     respawnTimer: 0,
@@ -119,56 +115,47 @@ export function movePlayer(
 // ── Actions ────────────────────────────────────────────────────────────────────
 
 /** The tile the player is facing — where their action lands. */
-function facingTile(player: Player): { gx: number; gy: number } {
+export function facingTile(player: Player): { gx: number; gy: number } {
   const gx = Math.floor(player.gx);
   const gy = Math.floor(player.gy);
   switch (player.facing) {
-    case 'n': return { gx, gy: gy - 1 };
-    case 's': return { gx, gy: gy + 1 };
-    case 'e': return { gx: gx + 1, gy };
-    case 'w': return { gx: gx - 1, gy };
+    case 'n': return { gx, gy: Math.max(0, gy - 1) };
+    case 's': return { gx, gy: Math.min(H - 1, gy + 1) };
+    case 'e': return { gx: Math.min(W - 1, gx + 1), gy };
+    case 'w': return { gx: Math.max(0, gx - 1), gy };
   }
 }
 
-/**
- * Perform the player's current mode action on the facing tile.
- *
- * - `dig`:   lowers terrain at the facing tile.
- * - `build`: places the selected building kind at the facing tile.
- * Returns the placed building (if any) so main can add it to the world list.
- */
-export function playerAction(
+/** Build the currently selected structure at the player's facing tile. */
+export function buildAtFacing(
   player: Player,
   world: WorldTerrain,
   buildings: Building[],
 ): Building | undefined {
   if (player.respawnTimer > 0) return undefined;
   const { gx, gy } = facingTile(player);
-
-  if (player.mode === 'dig') {
-    dig(world, gx, gy);
-  } else if (player.mode === 'build') {
-    return placeBuilding(player.buildKind, gx, gy, world, buildings);
-  }
-  return undefined;
+  return placeBuilding(player.buildKind, gx, gy, world, buildings);
 }
 
-/** Cycle through build kinds or switch between dig/move/build modes. */
-export function switchMode(player: Player): void {
-  if (player.mode === 'move') {
-    player.mode = 'dig';
-  } else if (player.mode === 'dig') {
-    player.mode = 'build';
-  } else {
-    // Cycle build kinds, then return to move.
-    const idx = BUILD_KINDS.indexOf(player.buildKind);
-    if (idx < BUILD_KINDS.length - 1) {
-      player.buildKind = BUILD_KINDS[idx + 1] as BuildingKind;
-    } else {
-      player.buildKind = 'wall';
-      player.mode = 'move';
-    }
-  }
+/** Dig (lower ground) at the player's facing tile. */
+export function digAtFacing(player: Player, world: WorldTerrain): boolean {
+  if (player.respawnTimer > 0) return false;
+  const { gx, gy } = facingTile(player);
+  return dig(world, gx, gy);
+}
+
+/** Raise (mound ground) at the player's facing tile. */
+export function raiseAtFacing(player: Player, world: WorldTerrain): boolean {
+  if (player.respawnTimer > 0) return false;
+  const { gx, gy } = facingTile(player);
+  return raise(world, gx, gy);
+}
+
+/** Cycle through build kinds: wall -> floor -> tower -> ramp -> wall. */
+export function cycleBuildKind(player: Player): BuildingKind {
+  const idx = BUILD_KINDS.indexOf(player.buildKind);
+  player.buildKind = BUILD_KINDS[(idx + 1) % BUILD_KINDS.length] as BuildingKind;
+  return player.buildKind;
 }
 
 // ── HP and respawn ─────────────────────────────────────────────────────────────

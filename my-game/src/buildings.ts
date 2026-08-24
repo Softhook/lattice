@@ -6,26 +6,31 @@
  *
  * Sprite massings use `SolidWriter` — the declarative emitter — not `Pen`, so the same
  * massing drives both drawing and thumbnail generation from one body of code.
- *
- * Placement rules:
- * - Cannot place on a water tile.
- * - Cannot overlap another building's footprint.
  */
 
 import {
-  LEVEL_H,
   defineSprite,
-  spriteHeightPx,
-  VARIANT_ZERO,
   type SpriteDef,
   type Massing,
   type SolidWriter,
   type Variant,
+  hex,
 } from '@latticekit/draw';
+import { Rng } from '@latticekit/core';
 import { footprintBase, type Footprint } from '@latticekit/iso';
 import { TIMBER, STONE, TOWER, FLOOR } from './palette.js';
 import type { WorldTerrain } from './world.js';
 import { MAT_WATER } from './world.js';
+
+// ── Building Colors ───────────────────────────────────────────────────────────
+
+export const WALL_WOOD    = hex('#795548');
+export const WALL_BEAM    = hex('#4e342e');
+export const WALL_STONE   = hex('#78909c');
+export const ROOF_GOLD    = hex('#f39c12');
+export const LANTERN_GLOW = hex('#f1c40f');
+export const BANNER_RED   = hex('#e74c3c');
+export const RAMP_TIMBER  = hex('#8d6e63');
 
 // ── Building kinds ─────────────────────────────────────────────────────────────
 
@@ -50,30 +55,75 @@ export interface Building {
 
 // ── Sprite definitions ─────────────────────────────────────────────────────────
 
-const wallMassing: Massing = (w: SolidWriter) => {
-  w.shadow(0, 0, 1, 1, 0.35);
-  w.box(0, 0, 1, 1, { color: TIMBER, h: 2 });
+/** Palisade fortification with stone footings and timber posts. */
+const wallMassing: Massing = (w: SolidWriter, _v: Variant, _rng: Rng) => {
+  w.shadow(0, 0, 1, 1, 0.4);
+  // Stone foundation footing
+  w.box(0, 0, 1, 1, { color: WALL_STONE, h: 0.35, outline: false });
+  // Main timber palisade body
+  w.box(0.08, 0.08, 0.84, 0.84, { color: WALL_WOOD, h: 1.8, z: 0.35 });
+  // Reinforcing cross-beams
+  w.box(0.04, 0.04, 0.92, 0.92, { color: WALL_BEAM, h: 0.25, z: 1.2, outline: false });
+  // Corner palisade stakes jutting up
+  w.box(0.06, 0.06, 0.22, 0.22, { color: WALL_BEAM, h: 0.45, z: 2.15 });
+  w.box(0.72, 0.06, 0.22, 0.22, { color: WALL_BEAM, h: 0.45, z: 2.15 });
+  w.box(0.06, 0.72, 0.22, 0.22, { color: WALL_BEAM, h: 0.45, z: 2.15 });
+  w.box(0.72, 0.72, 0.22, 0.22, { color: WALL_BEAM, h: 0.45, z: 2.15 });
 };
 
-const floorMassing: Massing = (w: SolidWriter) => {
-  w.box(0, 0, 1, 1, { color: FLOOR, h: 0.4 });
+/** Decking and floor tiles with timber planks and corner brass rivets. */
+const floorMassing: Massing = (w: SolidWriter, _v: Variant, _rng: Rng) => {
+  w.shadow(0, 0, 1, 1, 0.15);
+  // Floor plank platform
+  w.box(0, 0, 1, 1, { color: FLOOR, h: 0.25 });
+  // Inner plank lines
+  w.box(0.15, 0.05, 0.7, 0.9, { color: WALL_WOOD, h: 0.08, z: 0.25, outline: false });
+  // Corner rivets
+  w.box(0.04, 0.04, 0.1, 0.1, { color: WALL_STONE, h: 0.12, z: 0.25, outline: false });
+  w.box(0.86, 0.04, 0.1, 0.1, { color: WALL_STONE, h: 0.12, z: 0.25, outline: false });
+  w.box(0.04, 0.86, 0.1, 0.1, { color: WALL_STONE, h: 0.12, z: 0.25, outline: false });
+  w.box(0.86, 0.86, 0.1, 0.1, { color: WALL_STONE, h: 0.12, z: 0.25, outline: false });
 };
 
-const towerMassing: Massing = (w: SolidWriter, _v: Variant, _rng: import('@latticekit/core').Rng) => {
-  w.shadow(0, 0, 2, 2, 0.4);
-  // Base.
-  w.box(0, 0, 2, 2, { color: STONE, h: 1, outline: false });
-  // Shaft.
-  w.box(0.1, 0.1, 1.8, 1.8, { color: TOWER, h: 4, z: 1, outline: false });
-  // Parapet.
-  w.box(0, 0, 2, 2, { color: STONE, h: 0.5, z: 5 });
-  // Flag — using a post; motion is added via the animate hook.
-  w.post(0.9, 0.9, 5.6, 0.08, TOWER, 0.06);
+/** Fortified Watchtower with stone foundation, archer platform, lantern beacon, and waving banner. */
+const towerMassing: Massing = (w: SolidWriter, _v: Variant, _rng: Rng) => {
+  w.shadow(0, 0, 2, 2, 0.5);
+  // Stone Fortress Base
+  w.box(0, 0, 2, 2, { color: WALL_STONE, h: 1.2, outline: true });
+  // Shaft
+  w.box(0.15, 0.15, 1.7, 1.7, { color: TOWER, h: 3.2, z: 1.2, outline: true });
+  // Timber corbels
+  w.box(0.05, 0.05, 1.9, 1.9, { color: WALL_BEAM, h: 0.35, z: 4.4, outline: false });
+  // Archer Lookout Platform & Battlements
+  w.box(0, 0, 2, 2, { color: WALL_STONE, h: 0.7, z: 4.75 });
+  // Arrow slit embrasures
+  w.box(0.2, 0.2, 1.6, 1.6, { color: FLOOR, h: 0.1, z: 4.9, outline: false });
+  // Corner battlement merlons
+  w.box(0.02, 0.02, 0.45, 0.45, { color: WALL_STONE, h: 0.5, z: 5.45 });
+  w.box(1.53, 0.02, 0.45, 0.45, { color: WALL_STONE, h: 0.5, z: 5.45 });
+  w.box(0.02, 1.53, 0.45, 0.45, { color: WALL_STONE, h: 0.5, z: 5.45 });
+  w.box(1.53, 1.53, 0.45, 0.45, { color: WALL_STONE, h: 0.5, z: 5.45 });
+
+  // Central Beacon Lantern Post
+  w.post(0.95, 0.95, 5.45, 0.95, WALL_BEAM, 0.08);
+  // Warm Lantern Beacon
+  w.box(0.85, 0.85, 0.3, 0.3, { color: LANTERN_GLOW, h: 0.35, z: 6.4 });
+  // Heraldic Pennant Banner
+  w.box(0.96, 0.96, 0.08, 0.55, { color: BANNER_RED, h: 0.3, z: 6.1 });
 };
 
-const rampMassing: Massing = (w: SolidWriter) => {
-  w.box(0, 0, 1, 2, { color: TIMBER, h: 0.5 });
-  w.box(0, 0, 1, 1, { color: TIMBER, h: 1, z: 0.5, outline: false });
+/** Sturdy inclined staircase / ramp connecting elevation levels. */
+const rampMassing: Massing = (w: SolidWriter, _v: Variant, _rng: Rng) => {
+  w.shadow(0, 0, 1, 2, 0.3);
+  // Lower step
+  w.box(0, 1.0, 1.0, 1.0, { color: RAMP_TIMBER, h: 0.45 });
+  // Middle step
+  w.box(0, 0.5, 1.0, 1.0, { color: RAMP_TIMBER, h: 0.9, z: 0.45, outline: false });
+  // Top step
+  w.box(0, 0, 1.0, 1.0, { color: RAMP_TIMBER, h: 1.35, z: 0.9, outline: true });
+  // Side guard rails
+  w.box(0.04, 0, 0.12, 2.0, { color: WALL_BEAM, h: 0.3, z: 1.35, outline: false });
+  w.box(0.84, 0, 0.12, 2.0, { color: WALL_BEAM, h: 0.3, z: 1.35, outline: false });
 };
 
 export const WALL_DEF: SpriteDef  = defineSprite({ id: 'wall',  w: 1, d: 1, massing: wallMassing });
@@ -94,10 +144,10 @@ export function defFor(kind: BuildingKind): SpriteDef {
 /** Map a kind to HP. */
 function hpFor(kind: BuildingKind): number {
   switch (kind) {
-    case 'wall':  return 20;
-    case 'floor': return 10;
-    case 'tower': return 50;
-    case 'ramp':  return 15;
+    case 'wall':  return 40;
+    case 'floor': return 25;
+    case 'tower': return 100;
+    case 'ramp':  return 35;
   }
 }
 
@@ -124,6 +174,7 @@ export function placeBuilding(
     for (let dy = 0; dy < d; dy++) {
       const tx = gx + dx;
       const ty = gy + dy;
+      if (tx < 0 || ty < 0 || tx >= 160 || ty >= 160) return undefined;
       if (world.surface.get(tx, ty) === MAT_WATER) return undefined;
       for (const b of existing) {
         if (tx >= b.gx && tx < b.gx + b.w &&
@@ -147,6 +198,32 @@ export function placeBuilding(
     hp:    maxHp,
     maxHp,
   };
+}
+
+/** Check if a building can be legally placed at (gx, gy). */
+export function canPlaceBuilding(
+  kind: BuildingKind,
+  gx: number,
+  gy: number,
+  world: WorldTerrain,
+  existing: Building[],
+): boolean {
+  const def = defFor(kind);
+  const { w, d } = def;
+
+  for (let dx = 0; dx < w; dx++) {
+    for (let dy = 0; dy < d; dy++) {
+      const tx = gx + dx;
+      const ty = gy + dy;
+      if (tx < 0 || ty < 0 || tx >= 160 || ty >= 160) return false;
+      if (world.surface.get(tx, ty) === MAT_WATER) return false;
+      for (const b of existing) {
+        if (tx >= b.gx && tx < b.gx + b.w &&
+            ty >= b.gy && ty < b.gy + b.d) return false;
+      }
+    }
+  }
+  return true;
 }
 
 /** Apply troll damage to buildings within 1.5 tiles. Called each update tick. */

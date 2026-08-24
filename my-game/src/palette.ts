@@ -37,25 +37,44 @@ export const FLOOR  = hex('#a07848');
 /** Tower body. */
 export const TOWER  = hex('#686058');
 
-// ── Creature base hues ─────────────────────────────────────────────────────────
+// ── Creature & Character detail hues ─────────────────────────────────────────
 
 /** Rabbit — small, shy, fast. */
-export const RABBIT = hex('#c8b89a');
+export const RABBIT       = hex('#e8dfd8');
+export const RABBIT_EAR   = hex('#f5b8be');
 /** Deer — graceful, medium, grazer. */
-export const DEER   = hex('#b08060');
+export const DEER         = hex('#a66a38');
+export const DEER_BELLY   = hex('#e6cfb8');
+export const ANTLER_BONE  = hex('#dcd2b8');
 /** Wolf — predator, low silhouette, dark. */
-export const WOLF   = hex('#505060');
+export const WOLF         = hex('#424754');
+export const WOLF_MANE    = hex('#6a7282');
+export const WOLF_EYE     = hex('#f39c12');
 /** Troll — hostile, large, aggressive. Destroys buildings. */
-export const TROLL  = hex('#486840');
+export const TROLL        = hex('#4d5747');
+export const TROLL_MOSS   = hex('#5b7a3e');
+export const TROLL_EYE    = hex('#e74c3c');
 /** Fox — cunning, mid-tier, raids food stores. */
-export const FOX    = hex('#c87030');
+export const FOX          = hex('#d35400');
+export const FOX_WHITE    = hex('#fdfefe');
+export const FOX_DARK     = hex('#2c3e50');
 
-// ── Player colors ──────────────────────────────────────────────────────────────
+// ── Player & Tool colors ───────────────────────────────────────────────────────
 
-/** Player 1 accent — cool blue. */
-export const P1_COLOR = hex('#60a8e0');
-/** Player 2 accent — warm amber. */
-export const P2_COLOR = hex('#e08040');
+/** Player 1 accent — vibrant cobalt blue. */
+export const P1_COLOR     = hex('#2980b9');
+export const P1_ACCENT    = hex('#5dade2');
+/** Player 2 accent — warm explorer amber/orange. */
+export const P2_COLOR     = hex('#d35400');
+export const P2_ACCENT    = hex('#f39c12');
+
+export const SKIN_TONE    = hex('#f5cba7');
+export const HAIR_DARK    = hex('#342216');
+export const HAIR_BLONDE  = hex('#d4ac0d');
+export const BOOTS_DARK   = hex('#212f3d');
+export const BACKPACK_COL = hex('#6e4c27');
+export const TOOL_GOLD    = hex('#f1c40f');
+export const TOOL_STEEL   = hex('#bdc3c7');
 
 // ── Sky and atmosphere ─────────────────────────────────────────────────────────
 

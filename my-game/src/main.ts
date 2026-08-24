@@ -3,17 +3,6 @@
  *
  * Wiring only: surfaces, cameras, loop, input, keyboard state, and the game tick.
  * No game logic lives here. This file is the ordering that cannot be wrong.
- *
- * Boot sequence (order matters — see skills/starting/SKILL.md):
- *   1. Canvas + Surface
- *   2. Palette + LightField
- *   3. World generation (needs the seed)
- *   4. Camera setup (needs the world bounds)
- *   5. Loop (needed by Input)
- *   6. Input (pointer/camera control)
- *   7. Keyboard state
- *   8. Players + Creatures
- *   9. loop.start() — nothing runs before this
  */
 
 import { hashString } from '@latticekit/core';
@@ -30,9 +19,9 @@ import { createInput } from '@latticekit/input';
 
 import {
   createWorld,
-  dig as digTile,
   W, H, MAX_HEIGHT_PX, STEP_PX,
 } from './world.js';
+import { populateFlora } from './flora.js';
 import {
   populateWorld,
   updateCreatures,
@@ -42,8 +31,10 @@ import {
 import {
   createPlayers,
   movePlayer,
-  playerAction,
-  switchMode,
+  buildAtFacing,
+  digAtFacing,
+  raiseAtFacing,
+  cycleBuildKind,
   tickPlayer,
 } from './players.js';
 import {
@@ -56,8 +47,6 @@ import {
   pollP2Movement,
   pollActions,
   snapshotKeys,
-  isP1Dig,
-  isP2Dig,
 } from './input.js';
 import {
   createVerdantPalette,
@@ -78,16 +67,17 @@ const surface = createCanvas2dSurface(canvas);
 const palette = createVerdantPalette();
 const light   = createLightField(surface, { scale: 0.5, falloff: 1.8, bloom: 0.3 });
 
-// ── World ──────────────────────────────────────────────────────────────────────
+// ── World & Nature ─────────────────────────────────────────────────────────────
 
 const world     = createWorld(SEED);
+const flora     = populateFlora(SEED, world);
 const buildings: Building[] = [];
 
 // World bounding rectangle in world pixels.
 const worldRect: Rect = { minX: 0, minY: 0, maxX: 0, maxY: 0 };
 tileBounds(0, 0, W, H, MAX_HEIGHT_PX, worldRect);
 
-// ── Players ────────────────────────────────────────────────────────────────────
+// ── Players & Creatures ────────────────────────────────────────────────────────
 
 const [p1, p2] = createPlayers();
 const creatures = populateWorld(SEED, world);
@@ -164,36 +154,39 @@ loop.onUpdate((dt, tick) => {
   movePlayer(p1, dx1, dy1, world, dt);
   movePlayer(p2, dx2, dy2, world, dt);
 
-  // ── Mode switches ────────────────────────────────────────────────────────────
-  if (edges.p1Mode) switchMode(p1);
-  if (edges.p2Mode) switchMode(p2);
-
-  // ── Player 1 action ──────────────────────────────────────────────────────────
-  if (edges.p1Action) {
-    if (isP1Dig(curr, prevKeys)) {
-      // Q key: always dig the player's facing tile regardless of mode.
-      const gx = Math.floor(p1.gx);
-      const gy = Math.floor(p1.gy);
-      digTile(world, gx, gy);
-    } else {
-      // E key: perform the mode action (which may build or dig depending on mode).
-      const placed = playerAction(p1, world, buildings);
-      if (placed !== undefined) buildings.push(placed);
-    }
-    // Update terrain for tap resolution after any ground change.
+  // ── Player 1 Actions ─────────────────────────────────────────────────────────
+  if (edges.p1Cycle) {
+    cycleBuildKind(p1);
+    updateDomHud();
+  }
+  if (edges.p1Build) {
+    const placed = buildAtFacing(p1, world, buildings);
+    if (placed !== undefined) buildings.push(placed);
+  }
+  if (edges.p1Dig) {
+    digAtFacing(p1, world);
+    input.setTerrain({ field: world.field, maxHeightPx: world.currentMaxHeightPx });
+  }
+  if (edges.p1Raise) {
+    raiseAtFacing(p1, world);
     input.setTerrain({ field: world.field, maxHeightPx: world.currentMaxHeightPx });
   }
 
-  // ── Player 2 action ──────────────────────────────────────────────────────────
-  if (edges.p2Action) {
-    if (isP2Dig(curr, prevKeys)) {
-      const gx = Math.floor(p2.gx);
-      const gy = Math.floor(p2.gy);
-      digTile(world, gx, gy);
-    } else {
-      const placed = playerAction(p2, world, buildings);
-      if (placed !== undefined) buildings.push(placed);
-    }
+  // ── Player 2 Actions ─────────────────────────────────────────────────────────
+  if (edges.p2Cycle) {
+    cycleBuildKind(p2);
+    updateDomHud();
+  }
+  if (edges.p2Build) {
+    const placed = buildAtFacing(p2, world, buildings);
+    if (placed !== undefined) buildings.push(placed);
+  }
+  if (edges.p2Dig) {
+    digAtFacing(p2, world);
+    input.setTerrain({ field: world.field, maxHeightPx: world.currentMaxHeightPx });
+  }
+  if (edges.p2Raise) {
+    raiseAtFacing(p2, world);
     input.setTerrain({ field: world.field, maxHeightPx: world.currentMaxHeightPx });
   }
 
@@ -226,6 +219,15 @@ loop.onUpdate((dt, tick) => {
   tickPlayer(p2, dt);
 });
 
+// ── DOM Controls Bar Helper ───────────────────────────────────────────────────
+
+function updateDomHud(): void {
+  const p1ToolEl = document.getElementById('p1-tool');
+  const p2ToolEl = document.getElementById('p2-tool');
+  if (p1ToolEl) p1ToolEl.textContent = p1.buildKind.toUpperCase();
+  if (p2ToolEl) p2ToolEl.textContent = p2.buildKind.toUpperCase();
+}
+
 // ── Render (display rate) ─────────────────────────────────────────────────────
 
 loop.onRender((_alpha, t, nowMs) => {
@@ -240,9 +242,7 @@ loop.onRender((_alpha, t, nowMs) => {
   const phase    = (t % 120) / 120;
   const darkness = Math.max(0, Math.sin(phase * Math.PI * 2) * -1) * 0.7;
 
-  // Begin the light field with the primary pen for this frame.
-  // `renderVerdant` calls `beginFrame` internally; we pass the light so it can be
-  // handed to `beginFrame`. The light field's `begin` is called inside `renderVerdant`.
+  // Render split-screen frame
   renderVerdant(
     surface,
     light,
@@ -250,6 +250,7 @@ loop.onRender((_alpha, t, nowMs) => {
     camera1,
     camera2,
     world,
+    flora,
     creatures,
     [p1, p2],
     buildings,
@@ -268,6 +269,7 @@ if (window.visualViewport !== null) {
   window.visualViewport?.addEventListener('resize', fit);
 }
 fit();
+updateDomHud();
 
 // ── Teardown (HMR) ────────────────────────────────────────────────────────────
 
