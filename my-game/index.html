@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Verdant</title>
+    <style>
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body {
+        background: #0a1208;
+        color: #c8e0b0;
+        font-family: system-ui, sans-serif;
+        height: 100%;
+        overflow: hidden;
+        user-select: none;
+      }
+      body {
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+      }
+      #app {
+        position: relative;
+        flex: 1;
+        min-height: 0;
+      }
+      #app canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+      /* Divider drawn by the game itself — this is only a fallback for the DOM layer */
+      #divider {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 50%;
+        width: 2px;
+        background: #1a2a12;
+        transform: translateX(-50%);
+        pointer-events: none;
+      }
+      #controls {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 2px;
+        background: #0a1208;
+        border-top: 1px solid #1a2a12;
+        flex-shrink: 0;
+      }
+      .player-legend {
+        padding: 6px 12px;
+        font-size: 11px;
+        opacity: 0.7;
+        display: flex;
+        gap: 16px;
+        align-items: center;
+      }
+      .player-legend span {
+        display: inline-flex;
+        gap: 4px;
+        align-items: center;
+      }
+      kbd {
+        background: #1a2a12;
+        border: 1px solid #2a4020;
+        border-radius: 3px;
+        padding: 1px 4px;
+        font-size: 10px;
+        font-family: monospace;
+      }
+      .p1-label { color: #80c8ff; }
+      .p2-label { color: #ff9060; }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="viewport"></canvas>
+      <div id="divider"></div>
+    </div>
+    <div id="controls">
+      <div class="player-legend">
+        <strong class="p1-label">Player 1</strong>
+        <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move</span>
+        <span><kbd>Q</kbd> dig &nbsp;<kbd>E</kbd> build</span>
+        <span><kbd>F</kbd> mode</span>
+      </div>
+      <div class="player-legend">
+        <strong class="p2-label">Player 2</strong>
+        <span><kbd>I</kbd><kbd>J</kbd><kbd>K</kbd><kbd>L</kbd> move</span>
+        <span><kbd>U</kbd> dig &nbsp;<kbd>O</kbd> build</span>
+        <span><kbd>H</kbd> mode</span>
+      </div>
+    </div>
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>

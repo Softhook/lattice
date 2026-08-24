@@ -15,7 +15,8 @@
   "workspaces": [
     "packages/*",
     "examples/*",
-    "showcase/*"
+    "showcase/*",
+    "my-game"
   ],
   "scripts": {
     "build": "tsc --build",
@@ -28,6 +29,7 @@
     "lint": "node tools/lint.mjs",
     "verify": "npm run build && npm run lint && npm run docs && npm run skills && npm run test:counted && npm run measured && npm run gallery && npm run looking",
     "dev": "npm run dev --workspace=@latticekit/demo",
+    "game": "npm run dev --workspace=my-game",
     "size": "node tools/size.mjs",
     "gallery": "node tools/gallery.mjs",
     "docs": "node tools/check-docs.mjs",
