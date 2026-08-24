@@ -41,6 +41,18 @@ export const MAT_STONE  = 7;  // placed by players
 
 // ── world state ────────────────────────────────────────────────────────────────
 
+export interface SavedVertexDelta {
+  readonly x: number;
+  readonly y: number;
+  readonly h: number;
+}
+
+export interface SavedSurfaceDelta {
+  readonly x: number;
+  readonly y: number;
+  readonly mat: number;
+}
+
 /** The live height field handed to `input` and `draw`. */
 export interface WorldTerrain {
   /** W+1 × H+1 vertex heights, in height units (not world px). */
@@ -51,6 +63,10 @@ export interface WorldTerrain {
   readonly field: HeightField;
   /** Highest vertex on the current map, in world pixels. Updated by dig/raise. */
   currentMaxHeightPx: number;
+  /** Mutated vertex height deltas for persistence (key: y * (W + 1) + x). */
+  readonly heightDeltas: Map<number, number>;
+  /** Mutated tile surface material deltas for persistence (key: y * W + x). */
+  readonly surfaceDeltas: Map<number, number>;
 }
 
 /**
@@ -98,7 +114,59 @@ export function createWorld(seed: number): WorldTerrain {
     surface,
     field,
     currentMaxHeightPx: MAX_HEIGHT_PX,
+    heightDeltas: new Map<number, number>(),
+    surfaceDeltas: new Map<number, number>(),
   };
+}
+
+/** Apply saved terrain height and surface material deltas onto a freshly seeded world. */
+export function applyTerrainDeltas(
+  world: WorldTerrain,
+  heights: readonly SavedVertexDelta[],
+  surfaces: readonly SavedSurfaceDelta[],
+): void {
+  let maxH = 0;
+  for (let i = 0; i < heights.length; i++) {
+    const d = heights[i];
+    if (d !== undefined && d.x >= 0 && d.x <= W && d.y >= 0 && d.y <= H) {
+      world.heights.set(d.x, d.y, d.h);
+      world.heightDeltas.set(d.y * (W + 1) + d.x, d.h);
+      if (d.h > maxH) maxH = d.h;
+    }
+  }
+  for (let i = 0; i < surfaces.length; i++) {
+    const s = surfaces[i];
+    if (s !== undefined && s.x >= 0 && s.x < W && s.y >= 0 && s.y < H) {
+      world.surface.set(s.x, s.y, s.mat);
+      world.surfaceDeltas.set(s.y * W + s.x, s.mat);
+    }
+  }
+  const maxPx = maxH * STEP_PX;
+  if (maxPx > world.currentMaxHeightPx) {
+    world.currentMaxHeightPx = maxPx;
+  }
+}
+
+/** Extract all modified terrain vertices and surface tiles. */
+export function extractTerrainDeltas(world: WorldTerrain): {
+  heights: SavedVertexDelta[];
+  surfaces: SavedSurfaceDelta[];
+} {
+  const heights: SavedVertexDelta[] = [];
+  world.heightDeltas.forEach((h, key) => {
+    const x = key % (W + 1);
+    const y = Math.floor(key / (W + 1));
+    heights.push({ x, y, h });
+  });
+
+  const surfaces: SavedSurfaceDelta[] = [];
+  world.surfaceDeltas.forEach((mat, key) => {
+    const x = key % W;
+    const y = Math.floor(key / W);
+    surfaces.push({ x, y, mat });
+  });
+
+  return { heights, surfaces };
 }
 
 /** Map a height unit value to its default material. */
@@ -127,13 +195,16 @@ export function dig(world: WorldTerrain, gx: number, gy: number): boolean {
       const y = gy + dy;
       const cur = world.heights.get(x, y);
       if (cur > 0) {
-        world.heights.set(x, y, cur - 1);
+        const next = cur - 1;
+        world.heights.set(x, y, next);
+        world.heightDeltas.set(y * (W + 1) + x, next);
         changed = true;
       }
     }
   }
   if (changed) {
     world.surface.set(gx, gy, MAT_DIRT);
+    world.surfaceDeltas.set(gy * W + gx, MAT_DIRT);
   }
   return changed;
 }
@@ -155,6 +226,7 @@ export function raise(world: WorldTerrain, gx: number, gy: number): boolean {
       if (cur < MAX_HEIGHT_UNITS) {
         const next = cur + 1;
         world.heights.set(x, y, next);
+        world.heightDeltas.set(y * (W + 1) + x, next);
         if (next > maxNewH) maxNewH = next;
         changed = true;
       }
@@ -162,6 +234,7 @@ export function raise(world: WorldTerrain, gx: number, gy: number): boolean {
   }
   if (changed) {
     world.surface.set(gx, gy, MAT_DIRT);
+    world.surfaceDeltas.set(gy * W + gx, MAT_DIRT);
     const newMaxPx = maxNewH * STEP_PX;
     if (newMaxPx > world.currentMaxHeightPx) {
       world.currentMaxHeightPx = newMaxPx;

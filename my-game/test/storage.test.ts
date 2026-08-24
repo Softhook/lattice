@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { createPlayers } from '../src/players.js';
-import { createWorld } from '../src/world.js';
+import { createWorld, applyTerrainDeltas } from '../src/world.js';
 import { placeBuilding, restoreBuilding, type Building } from '../src/buildings.js';
+import { populateFlora, restoreFlora, harvestFloraAt, type FloraItem } from '../src/flora.js';
 import {
   extractSaveState,
   recognizeVerdantSaveV1,
@@ -122,6 +123,53 @@ describe('Verdant Storage', () => {
     expect(reloaded.state.p1.wood).toBe(99);
     expect(reloaded.state.p1.weapon).toBe('sword');
     expect(reloaded.state.p1.craftedWeapons).toEqual(['hands', 'sword']);
+  });
+
+  it('persists and restores terrain height and surface material terraforming deltas', () => {
+    const world = createWorld(77);
+    const initialH = world.heights.get(10, 10);
+    // Terraforming: raise terrain at (10, 10)
+    world.heights.set(10, 10, initialH + 3);
+    world.heightDeltas.set(10 * 201 + 10, initialH + 3);
+    world.surface.set(10, 10, 1); // MAT_DIRT
+    world.surfaceDeltas.set(10 * 200 + 10, 1);
+
+    const [p1, p2] = createPlayers();
+    const saveState = extractSaveState(77, [p1, p2], [], world);
+    expect(saveState.terrainHeights?.length).toBe(1);
+    expect(saveState.terrainHeights?.[0]).toEqual({ x: 10, y: 10, h: initialH + 3 });
+    expect(saveState.terrainSurfaces?.length).toBe(1);
+    expect(saveState.terrainSurfaces?.[0]).toEqual({ x: 10, y: 10, mat: 1 });
+
+    // Fresh seeded world
+    const freshWorld = createWorld(77);
+    expect(freshWorld.heights.get(10, 10)).toBe(initialH);
+
+    // Apply saved deltas
+    applyTerrainDeltas(freshWorld, saveState.terrainHeights!, saveState.terrainSurfaces!);
+    expect(freshWorld.heights.get(10, 10)).toBe(initialH + 3);
+    expect(freshWorld.surface.get(10, 10)).toBe(1);
+  });
+
+  it('persists and restores harvested and living flora landscape', () => {
+    const world = createWorld(77);
+    const flora = populateFlora(77, world);
+    const initialCount = flora.length;
+    expect(initialCount).toBeGreaterThan(0);
+
+    // Harvest first flora item
+    const target = flora[0]!;
+    harvestFloraAt(flora, target.gx, target.gy);
+    expect(flora.length).toBe(initialCount - 1);
+
+    const [p1, p2] = createPlayers();
+    const saveState = extractSaveState(77, [p1, p2], [], world, flora);
+    expect(saveState.flora?.length).toBe(initialCount - 1);
+
+    // Restore flora into new session
+    const restoredFlora = restoreFlora(saveState.flora!);
+    expect(restoredFlora.length).toBe(initialCount - 1);
+    expect(restoredFlora.some((f: FloraItem) => Math.abs(f.gx - target.gx) < 0.1 && Math.abs(f.gy - target.gy) < 0.1)).toBe(false);
   });
 });
 

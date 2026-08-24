@@ -60,6 +60,10 @@ export interface Player {
   respawnTimer: number;
   /** Accumulated movement distance for footstep sound cadence. */
   moveAccum: number;
+  /** Walk animation phase [0, 1) for continuous leg swing. */
+  walkCycle: number;
+  /** Whether the player was moving this tick. */
+  isMoving: boolean;
   /** Floating action notification string. */
   lastActionMsg: string;
   /** Message display timer in seconds. */
@@ -126,6 +130,8 @@ function makePlayer(index: 0 | 1, gx: number, gy: number): Player {
     hurtFlash: 0,
     respawnTimer: 0,
     moveAccum: 0,
+    walkCycle: 0,
+    isMoving: false,
     lastActionMsg: '',
     msgTimer: 0,
   };
@@ -219,14 +225,24 @@ export function movePlayer(
   buildings: readonly Building[],
   dt: number,
 ): boolean {
-  if (player.respawnTimer > 0) return false;
-  if (dx === 0 && dy === 0) return false;
+  if (player.respawnTimer > 0) {
+    player.isMoving = false;
+    return false;
+  }
+  if (dx === 0 && dy === 0) {
+    player.isMoving = false;
+    player.walkCycle = 0;
+    return false;
+  }
 
   // Update facing from movement direction
   if      (dy < 0) player.facing = 'n';
   else if (dy > 0) player.facing = 's';
   else if (dx < 0) player.facing = 'w';
   else             player.facing = 'e';
+
+  player.isMoving = true;
+  player.walkCycle = (player.walkCycle + dt * 1.8) % 1;
 
   const speed  = WALK_SPEED * dt;
   const mag    = dx !== 0 && dy !== 0 ? 0.7071 : 1; // diagonal normalisation

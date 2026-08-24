@@ -21,9 +21,10 @@ import { createInput } from '@latticekit/input';
 
 import {
   createWorld,
+  applyTerrainDeltas,
   W, H, MAX_HEIGHT_PX,
 } from './world.js';
-import { populateFlora, tickFloraRegrowth } from './flora.js';
+import { populateFlora, tickFloraRegrowth, restoreFlora } from './flora.js';
 import {
   populateWorld,
   updateCreatures,
@@ -106,7 +107,7 @@ const creatures = populateWorld(SEED, world);
 
 // ── Persistent Storage ────────────────────────────────────────────────────────
 
-const store = createVerdantStore(SEED, () => extractSaveState(SEED, [p1, p2], buildings));
+const store = createVerdantStore(SEED, () => extractSaveState(SEED, [p1, p2], buildings, world, flora));
 const opened = store.open();
 if (opened.source === 'save' && opened.state && opened.state.p1 && opened.state.p2) {
   // Restore saved player inventories, positions & combat gear
@@ -128,6 +129,17 @@ if (opened.source === 'save' && opened.state && opened.state.p1 && opened.state.
   p2.gy = s.p2.gy;
   p2.weapon = s.p2.weapon;
   p2.craftedWeapons = [...s.p2.craftedWeapons];
+
+  // Restore terraformed landscape (vertex heights and surface materials)
+  if (Array.isArray(s.terrainHeights) || Array.isArray(s.terrainSurfaces)) {
+    applyTerrainDeltas(world, s.terrainHeights ?? [], s.terrainSurfaces ?? []);
+  }
+
+  // Restore harvested / regrown flora landscape
+  if (Array.isArray(s.flora) && s.flora.length > 0) {
+    flora.length = 0;
+    flora.push(...restoreFlora(s.flora));
+  }
 
   // Restore saved constructed buildings
   if (Array.isArray(s.buildings)) {
@@ -426,7 +438,7 @@ loop.onUpdate((dt, tick) => {
   autosaveTimer += dt;
   if (autosaveTimer >= 10.0) {
     autosaveTimer = 0;
-    store.save(extractSaveState(SEED, [p1, p2], buildings));
+    store.save(extractSaveState(SEED, [p1, p2], buildings, world, flora));
   }
 });
 

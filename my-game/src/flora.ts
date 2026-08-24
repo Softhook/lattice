@@ -58,6 +58,41 @@ export interface FloraItem {
   subType: number;
 }
 
+export interface SavedFlora {
+  readonly kind: FloraKind;
+  readonly gx: number;
+  readonly gy: number;
+  readonly scale: number;
+  readonly subType: number;
+}
+
+/** Extract current living flora items for persistence. */
+export function extractSavedFlora(flora: readonly FloraItem[]): SavedFlora[] {
+  return flora.map((f) => ({
+    kind: f.kind,
+    gx: f.gx,
+    gy: f.gy,
+    scale: f.scale,
+    subType: f.subType,
+  }));
+}
+
+/** Reconstruct flora items from saved state. */
+export function restoreFlora(saved: readonly SavedFlora[]): FloraItem[] {
+  let seq = 1;
+  return saved.map((s) => ({
+    id: seq++,
+    kind: s.kind,
+    gx: s.gx,
+    gy: s.gy,
+    w: 1,
+    d: 1,
+    basePx: 0,
+    scale: s.scale,
+    subType: s.subType,
+  }));
+}
+
 // ── Pine Tree Massing ─────────────────────────────────────────────────────────
 
 const pineMassing: Massing = (w: SolidWriter, v: Variant, _rng: Rng) => {

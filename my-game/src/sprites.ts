@@ -4,14 +4,11 @@
  * Rules followed throughout:
  * 1. Silhouette first — every sprite reads at 40 px as a distinct shape.
  * 2. Three-tone faces from one color — `draw` derives left/right/top for free.
- * 3. Something moves on every entity — bob, ear flick, tail sway.
+ * 3. Something moves on every entity — walking legs, bounding hops, tail sways, ear flicks, breathing bobs.
  * 4. Per-instance variation keyed on identity (seed via Rng), not draw order.
  * 5. Zero assets — geometry + `SolidWriter` primitives only.
  *
- * Massing callbacks receive `(SolidWriter, Variant, Rng)`. SolidWriter methods match
- * the free-function names (box, post, tile, etc.) but are relative to the footprint
- * origin; heights are in storeys throughout. All @tier-b calls are in animate hooks,
- * not in massing, because massing must be deterministic for the measuring replay.
+ * All procedural math using sin/cos is presentation-only (@tier-b).
  */
 
 import {
@@ -25,77 +22,183 @@ import {
 import { Rng, hash2 } from '@latticekit/core';
 import type { Creature } from './creatures.js';
 import type { Player } from './players.js';
-import { P1_COLOR, P2_COLOR, RABBIT, DEER, WOLF, TROLL, FOX } from './palette.js';
+import {
+  P1_COLOR,
+  P2_COLOR,
+  RABBIT,
+  RABBIT_EAR,
+  DEER,
+  DEER_BELLY,
+  ANTLER_BONE,
+  WOLF,
+  WOLF_MANE,
+  WOLF_EYE,
+  TROLL,
+  TROLL_MOSS,
+  TROLL_EYE,
+  FOX,
+  FOX_WHITE,
+  FOX_DARK,
+  BOOTS_DARK,
+  SKIN_TONE,
+  HAIR_DARK,
+  BACKPACK_COL,
+  TOOL_GOLD,
+  TOOL_STEEL,
+} from './palette.js';
 
-// ── Sprite definitions ─────────────────────────────────────────────────────────
+// ── Player Sprite ─────────────────────────────────────────────────────────────
 
-/** Player capsule — index determines color accent; facing renders visor & gear with exact centering and strict back-to-front depth order. */
+/** Player adventurer — detailed outfit, articulated walking legs, weapon in hand, and backpack. */
 function makePlayerMassing(bodyColor: Ink): Massing {
   const visorColor = 0xffe066ff; // Bright gold visor
-  const packColor  = 0x243342ff; // Adventurer backpack
+  const packColor  = BACKPACK_COL;
+  const hiltGold   = TOOL_GOLD;
+  const bladeSteel = TOOL_STEEL;
+  const woodShaft  = 0x8a6040ff;
 
   return (w: SolidWriter, v: Variant, _rng: Rng) => {
-    // 1. Contact shadow at base (centered at 0.5, 0.5)
-    w.shadow(0.15, 0.15, 0.7, 0.7, 0.25);
+    // 1. Ground contact shadow
+    w.shadow(0.15, 0.15, 0.7, 0.7, 0.3);
 
-    const facing = v.flags; // 0: 'n', 1: 's', 2: 'e', 3: 'w'
+    const facing = v.flags & 3; // 0: 'n', 1: 's', 2: 'e', 3: 'w'
+    const isMoving = (v.flags & 4) !== 0;
+    const weaponCode = (v.flags >> 4) & 3; // 0: hands, 1: axe, 2: sword, 3: bow
+    const walkPhase = v.progress; // 0..1 stride cycle
 
-    // Strict isometric painter's order (draw back/north elements first, front/south elements last)
+    // @tier-b — smooth, natural leg stride and body bob kinematics
+    const swing = isMoving ? Math.sin(walkPhase * Math.PI * 2) * 0.08 : 0;
+    const armSwing = isMoving ? Math.sin(walkPhase * Math.PI * 2) * 0.05 : 0;
+    const bob = isMoving ? Math.abs(Math.sin(walkPhase * Math.PI * 2)) * 0.03 : 0;
+    const zBase = bob;
+
     if (facing === 1) {
-      // ── Facing South (faces camera) ──
-      // Backpack is on North face (back), draw FIRST: centered at gx = 0.50
-      w.box(0.33, 0.14, 0.34, 0.12, { color: packColor, h: 0.6, z: 0.55 });
-      // Legs (centered at gx = 0.50)
-      w.box(0.27, 0.35, 0.18, 0.3, { color: bodyColor, h: 0.45, outline: false });
-      w.box(0.55, 0.35, 0.18, 0.3, { color: bodyColor, h: 0.45, outline: false });
-      // Torso (centered at gx = 0.50, gy = 0.50)
-      w.box(0.25, 0.25, 0.5, 0.5, { color: bodyColor, h: 0.9, z: 0.45 });
-      // Head (centered at gx = 0.50, gy = 0.50)
-      w.box(0.28, 0.28, 0.44, 0.44, { color: bodyColor, h: 0.5, z: 1.35 });
-      // Visor is on South face (front), draw LAST: centered at gx = 0.50
-      w.box(0.34, 0.70, 0.32, 0.04, { color: visorColor, h: 0.18, z: 1.48 });
+      // ── Facing South (S key / toward camera) ──
+      // 1. Far/North elements draw FIRST in painter's order:
+      // Backpack on north face
+      w.box(0.32, 0.16, 0.36, 0.14, { color: packColor, h: 0.55, z: 0.5 + zBase });
+      w.box(0.44, 0.14, 0.12, 0.04, { color: hiltGold, h: 0.12, z: 0.7 + zBase });
+
+      // Far Arm (Left Arm on north-west shoulder) — drawn BEFORE torso so torso naturally clips it
+      w.box(0.14, 0.32 - armSwing, 0.12, 0.20, { color: bodyColor, h: 0.55, z: 0.68 + zBase });
+      w.box(0.14, 0.38 - armSwing, 0.12, 0.12, { color: SKIN_TONE, h: 0.14, z: 0.56 + zBase });
+
+      // 2. Legs:
+      w.box(0.26, 0.36 + swing, 0.18, 0.24, { color: BOOTS_DARK, h: 0.45 });
+      w.box(0.54, 0.36 - swing, 0.18, 0.24, { color: BOOTS_DARK, h: 0.45 });
+
+      // 3. Torso & Belt (cleanly occludes far arm):
+      w.box(0.24, 0.24, 0.52, 0.52, { color: bodyColor, h: 0.4, z: 0.45 + zBase });
+      w.box(0.23, 0.23, 0.54, 0.54, { color: 0x1a252fff, h: 0.1, z: 0.48 + zBase });
+      w.box(0.25, 0.25, 0.50, 0.50, { color: bodyColor, h: 0.5, z: 0.85 + zBase });
+
+      // 4. Head, Hair & Visor on south face:
+      w.box(0.28, 0.28, 0.44, 0.44, { color: SKIN_TONE, h: 0.44, z: 1.35 + zBase });
+      w.box(0.26, 0.26, 0.48, 0.48, { color: HAIR_DARK, h: 0.18, z: 1.68 + zBase });
+      w.box(0.34, 0.70, 0.32, 0.04, { color: visorColor, h: 0.14, z: 1.48 + zBase });
+
+      // 5. Near Arm (Right Arm on south-east side) — drawn AFTER torso in foreground:
+      w.box(0.74, 0.32 + armSwing, 0.14, 0.20, { color: bodyColor, h: 0.55, z: 0.7 + zBase });
+      w.box(0.74, 0.40 + armSwing, 0.14, 0.14, { color: SKIN_TONE, h: 0.16, z: 0.58 + zBase });
+
+      // 6. Weapon in near hand:
+      if (weaponCode === 1) {
+        // Woodsman Axe
+        w.post(0.79, 0.46, 0.3 + zBase, 0.85, woodShaft, 0.05);
+        w.box(0.75, 0.48, 0.22, 0.12, { color: bladeSteel, h: 0.28, z: 0.95 + zBase });
+      } else if (weaponCode === 2) {
+        // Stone Blade (Sword)
+        w.box(0.77, 0.45, 0.06, 0.14, { color: bladeSteel, h: 0.95, z: 0.4 + zBase });
+        w.box(0.72, 0.44, 0.16, 0.16, { color: hiltGold, h: 0.08, z: 0.65 + zBase });
+      } else if (weaponCode === 3) {
+        // Hunting Bow
+        w.box(0.74, 0.48, 0.04, 0.22, { color: woodShaft, h: 0.85, z: 0.5 + zBase });
+        w.post(0.75, 0.48, 0.55 + zBase, 0.75, 0xffffffff, 0.02);
+      }
 
     } else if (facing === 0) {
-      // ── Facing North (faces away from camera) ──
-      // Visor is on North face (front), draw FIRST: centered at gx = 0.50
-      w.box(0.34, 0.26, 0.32, 0.04, { color: visorColor, h: 0.18, z: 1.48 });
-      // Legs (centered at gx = 0.50)
-      w.box(0.27, 0.35, 0.18, 0.3, { color: bodyColor, h: 0.45, outline: false });
-      w.box(0.55, 0.35, 0.18, 0.3, { color: bodyColor, h: 0.45, outline: false });
-      // Torso (centered at gx = 0.50, gy = 0.50)
-      w.box(0.25, 0.25, 0.5, 0.5, { color: bodyColor, h: 0.9, z: 0.45 });
-      // Head (centered at gx = 0.50, gy = 0.50)
-      w.box(0.28, 0.28, 0.44, 0.44, { color: bodyColor, h: 0.5, z: 1.35 });
-      // Backpack is on South face (back), draw LAST: centered at gx = 0.50
-      w.box(0.33, 0.74, 0.34, 0.12, { color: packColor, h: 0.6, z: 0.55 });
+      // ── Facing North (W key / away from camera) ──
+      // 1. Visor on North face (draw first)
+      w.box(0.34, 0.26, 0.32, 0.04, { color: visorColor, h: 0.14, z: 1.48 + zBase });
+
+      // 2. Far Arm (Left Arm) — drawn BEFORE torso so torso naturally clips it
+      w.box(0.14, 0.32 + armSwing, 0.12, 0.20, { color: bodyColor, h: 0.55, z: 0.68 + zBase });
+      w.box(0.14, 0.26 + armSwing, 0.12, 0.12, { color: SKIN_TONE, h: 0.14, z: 0.56 + zBase });
+
+      // 3. Legs
+      w.box(0.26, 0.36 - swing, 0.18, 0.24, { color: BOOTS_DARK, h: 0.45 });
+      w.box(0.54, 0.36 + swing, 0.18, 0.24, { color: BOOTS_DARK, h: 0.45 });
+
+      // 4. Torso (covers far arm)
+      w.box(0.24, 0.24, 0.52, 0.52, { color: bodyColor, h: 0.4, z: 0.45 + zBase });
+      w.box(0.25, 0.25, 0.50, 0.50, { color: bodyColor, h: 0.5, z: 0.85 + zBase });
+
+      // 5. Head & Hair
+      w.box(0.28, 0.28, 0.44, 0.44, { color: HAIR_DARK, h: 0.44, z: 1.35 + zBase });
+
+      // 6. Near Arm (Right Arm)
+      w.box(0.74, 0.32 - armSwing, 0.14, 0.20, { color: bodyColor, h: 0.55, z: 0.7 + zBase });
+      w.box(0.74, 0.26 - armSwing, 0.14, 0.14, { color: SKIN_TONE, h: 0.16, z: 0.58 + zBase });
+
+      // 7. Backpack on South face (facing camera, draw last)
+      w.box(0.32, 0.70, 0.36, 0.14, { color: packColor, h: 0.55, z: 0.5 + zBase });
+      w.box(0.44, 0.82, 0.12, 0.04, { color: hiltGold, h: 0.12, z: 0.7 + zBase });
 
     } else if (facing === 2) {
-      // ── Facing East (+gx) ──
-      // Backpack is on West face (back), draw FIRST: centered at gy = 0.50
-      w.box(0.14, 0.33, 0.12, 0.34, { color: packColor, h: 0.6, z: 0.55 });
-      // Legs (centered at gy = 0.50)
-      w.box(0.35, 0.27, 0.3, 0.18, { color: bodyColor, h: 0.45, outline: false });
-      w.box(0.35, 0.55, 0.3, 0.18, { color: bodyColor, h: 0.45, outline: false });
-      // Torso (centered at gx = 0.50, gy = 0.50)
-      w.box(0.25, 0.25, 0.5, 0.5, { color: bodyColor, h: 0.9, z: 0.45 });
-      // Head (centered at gx = 0.50, gy = 0.50)
-      w.box(0.28, 0.28, 0.44, 0.44, { color: bodyColor, h: 0.5, z: 1.35 });
-      // Visor is on East face (front), draw LAST: centered at gy = 0.50
-      w.box(0.70, 0.34, 0.04, 0.32, { color: visorColor, h: 0.18, z: 1.48 });
+      // ── Facing East (D key / +gx) ──
+      // Backpack on West side
+      w.box(0.16, 0.32, 0.14, 0.36, { color: packColor, h: 0.55, z: 0.5 + zBase });
+
+      // Far Arm (north side) — draw BEFORE torso
+      w.box(0.32 + armSwing, 0.14, 0.20, 0.12, { color: bodyColor, h: 0.55, z: 0.68 + zBase });
+
+      // Legs
+      w.box(0.36 + swing, 0.26, 0.24, 0.18, { color: BOOTS_DARK, h: 0.45 });
+      w.box(0.36 - swing, 0.54, 0.24, 0.18, { color: BOOTS_DARK, h: 0.45 });
+
+      // Torso (covers far arm)
+      w.box(0.24, 0.24, 0.52, 0.52, { color: bodyColor, h: 0.4, z: 0.45 + zBase });
+      w.box(0.25, 0.25, 0.50, 0.50, { color: bodyColor, h: 0.5, z: 0.85 + zBase });
+
+      // Head & Visor
+      w.box(0.28, 0.28, 0.44, 0.44, { color: SKIN_TONE, h: 0.44, z: 1.35 + zBase });
+      w.box(0.26, 0.26, 0.48, 0.48, { color: HAIR_DARK, h: 0.18, z: 1.68 + zBase });
+      w.box(0.70, 0.34, 0.04, 0.32, { color: visorColor, h: 0.14, z: 1.48 + zBase });
+
+      // Near Arm (south side) — draw AFTER torso
+      w.box(0.32 - armSwing, 0.74, 0.20, 0.14, { color: bodyColor, h: 0.55, z: 0.7 + zBase });
+      w.box(0.40 - armSwing, 0.74, 0.14, 0.14, { color: SKIN_TONE, h: 0.16, z: 0.58 + zBase });
+
+      // Weapon
+      if (weaponCode === 2) {
+        w.box(0.75, 0.46, 0.24, 0.06, { color: bladeSteel, h: 0.85, z: 0.55 + zBase });
+      }
 
     } else {
-      // ── Facing West (-gx) ──
-      // Visor is on West face (front), draw FIRST: centered at gy = 0.50
-      w.box(0.26, 0.34, 0.04, 0.32, { color: visorColor, h: 0.18, z: 1.48 });
-      // Legs (centered at gy = 0.50)
-      w.box(0.35, 0.27, 0.3, 0.18, { color: bodyColor, h: 0.45, outline: false });
-      w.box(0.35, 0.55, 0.3, 0.18, { color: bodyColor, h: 0.45, outline: false });
-      // Torso (centered at gx = 0.50, gy = 0.50)
-      w.box(0.25, 0.25, 0.5, 0.5, { color: bodyColor, h: 0.9, z: 0.45 });
-      // Head (centered at gx = 0.50, gy = 0.50)
-      w.box(0.28, 0.28, 0.44, 0.44, { color: bodyColor, h: 0.5, z: 1.35 });
-      // Backpack is on East face (back), draw LAST: centered at gy = 0.50
-      w.box(0.74, 0.33, 0.12, 0.34, { color: packColor, h: 0.6, z: 0.55 });
+      // ── Facing West (A key / -gx) ──
+      w.box(0.26, 0.34, 0.04, 0.32, { color: visorColor, h: 0.14, z: 1.48 + zBase });
+
+      // Far Arm (north side) — draw BEFORE torso
+      w.box(0.32 - armSwing, 0.14, 0.20, 0.12, { color: bodyColor, h: 0.55, z: 0.68 + zBase });
+
+      // Legs
+      w.box(0.36 - swing, 0.26, 0.24, 0.18, { color: BOOTS_DARK, h: 0.45 });
+      w.box(0.36 + swing, 0.54, 0.24, 0.18, { color: BOOTS_DARK, h: 0.45 });
+
+      // Torso
+      w.box(0.24, 0.24, 0.52, 0.52, { color: bodyColor, h: 0.4, z: 0.45 + zBase });
+      w.box(0.25, 0.25, 0.50, 0.50, { color: bodyColor, h: 0.5, z: 0.85 + zBase });
+
+      // Head
+      w.box(0.28, 0.28, 0.44, 0.44, { color: SKIN_TONE, h: 0.44, z: 1.35 + zBase });
+      w.box(0.26, 0.26, 0.48, 0.48, { color: HAIR_DARK, h: 0.18, z: 1.68 + zBase });
+
+      // Near Arm (south side) — draw AFTER torso
+      w.box(0.32 + armSwing, 0.74, 0.20, 0.14, { color: bodyColor, h: 0.55, z: 0.7 + zBase });
+      w.box(0.26 + armSwing, 0.74, 0.14, 0.14, { color: SKIN_TONE, h: 0.16, z: 0.58 + zBase });
+
+      // Backpack on East side
+      w.box(0.70, 0.32, 0.14, 0.36, { color: packColor, h: 0.55, z: 0.5 + zBase });
     }
   };
 }
@@ -105,67 +208,487 @@ export const PLAYER_SPRITES: [SpriteDef, SpriteDef] = [
   defineSprite({ id: 'player1', w: 1, d: 1, massing: makePlayerMassing(P2_COLOR) }),
 ];
 
-/** Rabbit — small, round, big ears, hop. */
-const rabbitMassing: Massing = (w, _v, _rng) => {
-  w.shadow(0.15, 0.15, 0.7, 0.7, 0.2);
-  w.box(0.2, 0.2, 0.6, 0.6, { color: RABBIT, h: 0.6 });
-  w.box(0.3, 0.3, 0.4, 0.4, { color: RABBIT, h: 0.45, z: 0.6, inset: 0.05 });
-  // Ears
-  w.post(0.38, 0.35, 0.55, 1.0, RABBIT, 0.04);
-  w.post(0.55, 0.35, 0.55, 1.0, RABBIT, 0.04);
+// ── 1. Rabbit (Detailed Fluffy Bounding Hare with 4-Way Facing) ────────────────
+
+const rabbitMassing: Massing = (w, v, _rng) => {
+  const facing = v.flags & 3; // 0: 'n', 1: 's', 2: 'e', 3: 'w'
+  const phase = ((v.level % 1000) / 1000);
+  // @tier-b — gentle periodic hopping arc with ground rest and subtle ear twitches
+  // Hop occurs during the first 35% of the cycle, staying grounded with gentle sniffing for the remaining 65%
+  const hop = phase < 0.35 ? Math.sin((phase / 0.35) * Math.PI) * 0.08 : 0;
+  const earTwitch = phase < 0.35 ? Math.sin((phase / 0.35) * Math.PI * 2) * 0.015 : Math.sin(phase * Math.PI * 4) * 0.006;
+
+  w.shadow(0.18, 0.18, 0.64, 0.64, 0.22);
+
+  if (facing === 1) {
+    // ── South: Facing Camera ──
+    // Fluffy tail at north (draw first)
+    w.box(0.42, 0.14, 0.16, 0.16, { color: 0xffffffff, h: 0.18, z: 0.20 + hop });
+
+    // Hind haunches & feet
+    w.box(0.18, 0.30, 0.20, 0.32, { color: RABBIT, h: 0.28, z: 0 });
+    w.box(0.62, 0.30, 0.20, 0.32, { color: RABBIT, h: 0.28, z: 0 });
+
+    // Body & chest
+    w.box(0.24, 0.22, 0.52, 0.54, { color: RABBIT, h: 0.46, z: 0.12 + hop });
+    w.box(0.30, 0.48, 0.40, 0.24, { color: 0xffffffff, h: 0.30, z: 0.18 + hop });
+
+    // Front paws
+    w.box(0.28, 0.56, 0.14, 0.16, { color: RABBIT, h: 0.16, z: hop * 0.5 });
+    w.box(0.58, 0.56, 0.14, 0.16, { color: RABBIT, h: 0.16, z: hop * 0.5 });
+
+    // Head, ears, snout
+    w.box(0.30, 0.42, 0.40, 0.38, { color: RABBIT, h: 0.36, z: 0.50 + hop });
+    w.box(0.38, 0.68, 0.24, 0.14, { color: 0xffffffff, h: 0.16, z: 0.54 + hop });
+    w.box(0.46, 0.78, 0.08, 0.04, { color: RABBIT_EAR, h: 0.06, z: 0.62 + hop });
+
+    // Eyes
+    w.box(0.28, 0.54, 0.04, 0.08, { color: 0x1c2833ff, h: 0.08, z: 0.68 + hop });
+    w.box(0.68, 0.54, 0.04, 0.08, { color: 0x1c2833ff, h: 0.08, z: 0.68 + hop });
+
+    // Ears
+    w.post(0.36 + earTwitch, 0.38, 0.84 + hop, 0.48, RABBIT, 0.05);
+    w.post(0.36 + earTwitch, 0.40, 0.86 + hop, 0.38, RABBIT_EAR, 0.03);
+    w.post(0.60 - earTwitch, 0.38, 0.84 + hop, 0.48, RABBIT, 0.05);
+    w.post(0.60 - earTwitch, 0.40, 0.86 + hop, 0.38, RABBIT_EAR, 0.03);
+
+  } else if (facing === 0) {
+    // ── North: Facing Away ──
+    // Head & ears at north
+    w.box(0.30, 0.20, 0.40, 0.38, { color: RABBIT, h: 0.36, z: 0.50 + hop });
+    w.post(0.36 + earTwitch, 0.22, 0.84 + hop, 0.48, RABBIT, 0.05);
+    w.post(0.60 - earTwitch, 0.22, 0.84 + hop, 0.48, RABBIT, 0.05);
+
+    // Body
+    w.box(0.24, 0.24, 0.52, 0.54, { color: RABBIT, h: 0.46, z: 0.12 + hop });
+    w.box(0.18, 0.38, 0.20, 0.32, { color: RABBIT, h: 0.28, z: 0 });
+    w.box(0.62, 0.38, 0.20, 0.32, { color: RABBIT, h: 0.28, z: 0 });
+
+    // Fluffy tail at south (draw last)
+    w.box(0.42, 0.70, 0.16, 0.16, { color: 0xffffffff, h: 0.18, z: 0.20 + hop });
+
+  } else if (facing === 2) {
+    // ── East: Facing +gx ──
+    w.box(0.14, 0.42, 0.16, 0.16, { color: 0xffffffff, h: 0.18, z: 0.20 + hop }); // Tail at west
+    w.box(0.20, 0.30, 0.28, 0.40, { color: RABBIT, h: 0.28, z: 0 }); // Haunches
+    w.box(0.22, 0.24, 0.56, 0.52, { color: RABBIT, h: 0.46, z: 0.12 + hop });
+    w.box(0.46, 0.30, 0.38, 0.40, { color: RABBIT, h: 0.36, z: 0.50 + hop }); // Head at east
+    w.box(0.72, 0.38, 0.16, 0.24, { color: 0xffffffff, h: 0.16, z: 0.54 + hop }); // Snout
+    w.post(0.42 + earTwitch, 0.36, 0.84 + hop, 0.48, RABBIT, 0.05);
+    w.post(0.42 + earTwitch, 0.56, 0.84 + hop, 0.48, RABBIT, 0.05);
+
+  } else {
+    // ── West: Facing -gx ──
+    w.box(0.70, 0.42, 0.16, 0.16, { color: 0xffffffff, h: 0.18, z: 0.20 + hop }); // Tail at east
+    w.box(0.52, 0.30, 0.28, 0.40, { color: RABBIT, h: 0.28, z: 0 }); // Haunches
+    w.box(0.22, 0.24, 0.56, 0.52, { color: RABBIT, h: 0.46, z: 0.12 + hop });
+    w.box(0.16, 0.30, 0.38, 0.40, { color: RABBIT, h: 0.36, z: 0.50 + hop }); // Head at west
+    w.box(0.12, 0.38, 0.16, 0.24, { color: 0xffffffff, h: 0.16, z: 0.54 + hop }); // Snout
+    w.post(0.54 - earTwitch, 0.36, 0.84 + hop, 0.48, RABBIT, 0.05);
+    w.post(0.54 - earTwitch, 0.56, 0.84 + hop, 0.48, RABBIT, 0.05);
+  }
 };
 
 export const RABBIT_SPRITE: SpriteDef = defineSprite({
   id: 'rabbit', w: 1, d: 1, massing: rabbitMassing,
 });
 
-/** Fox — mid-size, pointed face, bushy tail post. */
-const foxMassing: Massing = (w, _v, _rng) => {
-  w.shadow(0.1, 0.1, 0.8, 0.8, 0.25);
-  w.box(0.15, 0.2, 0.7, 0.6, { color: FOX, h: 0.7 });
-  // Narrow head
-  w.box(0.2, 0.2, 0.45, 0.4, { color: FOX, h: 0.5, z: 0.7 });
-  // Tail
-  w.post(0.75, 0.5, 0.4, 0.8, FOX, 0.09);
+// ── 2. Fox (Sleek Red Fox with 4-Way Facing & Articulated Legs) ────────────────
+
+const foxMassing: Massing = (w, v, _rng) => {
+  const facing = v.flags & 3;
+  const phase = ((v.level % 1000) / 1000);
+  // @tier-b — gentle quadruped trot and swaying bushy tail
+  const legSwing = Math.sin(phase * Math.PI * 2) * 0.06;
+  const tailSway = Math.sin(phase * Math.PI * 2) * 0.07;
+
+  w.shadow(0.12, 0.12, 0.76, 0.76, 0.26);
+
+  if (facing === 1) {
+    // ── South: Facing Camera ──
+    // Tail at north (draw first)
+    w.box(0.42 + tailSway, 0.06, 0.22, 0.26, { color: FOX, h: 0.24, z: 0.50 });
+    w.box(0.44 + tailSway * 1.4, 0.01, 0.18, 0.18, { color: FOX_WHITE, h: 0.18, z: 0.58 });
+
+    // 4 Legs
+    w.box(0.20, 0.22 + legSwing, 0.14, 0.16, { color: FOX_DARK, h: 0.36 });
+    w.box(0.66, 0.22 - legSwing, 0.14, 0.16, { color: FOX_DARK, h: 0.36 });
+    w.box(0.20, 0.62 - legSwing, 0.14, 0.16, { color: FOX_DARK, h: 0.36 });
+    w.box(0.66, 0.62 + legSwing, 0.14, 0.16, { color: FOX_DARK, h: 0.36 });
+
+    // Body & white chest
+    w.box(0.22, 0.18, 0.56, 0.64, { color: FOX, h: 0.40, z: 0.34 });
+    w.box(0.28, 0.44, 0.44, 0.34, { color: FOX_WHITE, h: 0.32, z: 0.36 });
+
+    // Head, muzzle, ears
+    w.box(0.28, 0.52, 0.44, 0.36, { color: FOX, h: 0.36, z: 0.62 });
+    w.box(0.34, 0.76, 0.32, 0.22, { color: FOX_WHITE, h: 0.18, z: 0.62 });
+    w.box(0.44, 0.92, 0.12, 0.08, { color: FOX_DARK, h: 0.08, z: 0.70 });
+    w.box(0.30, 0.68, 0.05, 0.06, { color: WOLF_EYE, h: 0.06, z: 0.82 });
+    w.box(0.65, 0.68, 0.05, 0.06, { color: WOLF_EYE, h: 0.06, z: 0.82 });
+
+    w.post(0.30, 0.50, 0.94, 0.22, FOX_DARK, 0.05);
+    w.post(0.31, 0.52, 0.94, 0.18, FOX_WHITE, 0.03);
+    w.post(0.66, 0.50, 0.94, 0.22, FOX_DARK, 0.05);
+    w.post(0.65, 0.52, 0.94, 0.18, FOX_WHITE, 0.03);
+
+  } else if (facing === 0) {
+    // ── North: Facing Away ──
+    // Head at north
+    w.box(0.28, 0.12, 0.44, 0.36, { color: FOX, h: 0.36, z: 0.62 });
+    w.post(0.30, 0.20, 0.94, 0.22, FOX_DARK, 0.05);
+    w.post(0.66, 0.20, 0.94, 0.22, FOX_DARK, 0.05);
+
+    // 4 Legs
+    w.box(0.20, 0.22 - legSwing, 0.14, 0.16, { color: FOX_DARK, h: 0.36 });
+    w.box(0.66, 0.22 + legSwing, 0.14, 0.16, { color: FOX_DARK, h: 0.36 });
+    w.box(0.20, 0.62 + legSwing, 0.14, 0.16, { color: FOX_DARK, h: 0.36 });
+    w.box(0.66, 0.62 - legSwing, 0.14, 0.16, { color: FOX_DARK, h: 0.36 });
+
+    // Body
+    w.box(0.22, 0.18, 0.56, 0.64, { color: FOX, h: 0.40, z: 0.34 });
+
+    // Tail at south (draw last)
+    w.box(0.42 + tailSway, 0.68, 0.22, 0.26, { color: FOX, h: 0.24, z: 0.50 });
+    w.box(0.44 + tailSway * 1.4, 0.82, 0.18, 0.18, { color: FOX_WHITE, h: 0.18, z: 0.58 });
+
+  } else if (facing === 2) {
+    // ── East: Facing +gx ──
+    w.box(0.06, 0.42 + tailSway, 0.26, 0.22, { color: FOX, h: 0.24, z: 0.50 }); // Tail at west
+    w.box(0.01, 0.44 + tailSway * 1.4, 0.18, 0.18, { color: FOX_WHITE, h: 0.18, z: 0.58 });
+
+    // 4 Legs
+    w.box(0.22 + legSwing, 0.20, 0.16, 0.14, { color: FOX_DARK, h: 0.36 });
+    w.box(0.22 - legSwing, 0.66, 0.16, 0.14, { color: FOX_DARK, h: 0.36 });
+    w.box(0.62 - legSwing, 0.20, 0.16, 0.14, { color: FOX_DARK, h: 0.36 });
+    w.box(0.62 + legSwing, 0.66, 0.16, 0.14, { color: FOX_DARK, h: 0.36 });
+
+    // Body
+    w.box(0.18, 0.22, 0.64, 0.56, { color: FOX, h: 0.40, z: 0.34 });
+    w.box(0.44, 0.28, 0.34, 0.44, { color: FOX_WHITE, h: 0.32, z: 0.36 });
+
+    // Head at east
+    w.box(0.52, 0.28, 0.36, 0.44, { color: FOX, h: 0.36, z: 0.62 });
+    w.box(0.76, 0.34, 0.22, 0.32, { color: FOX_WHITE, h: 0.18, z: 0.62 });
+    w.box(0.92, 0.44, 0.08, 0.12, { color: FOX_DARK, h: 0.08, z: 0.70 });
+    w.post(0.50, 0.30, 0.94, 0.22, FOX_DARK, 0.05);
+    w.post(0.50, 0.66, 0.94, 0.22, FOX_DARK, 0.05);
+
+  } else {
+    // ── West: Facing -gx ──
+    w.box(0.68, 0.42 + tailSway, 0.26, 0.22, { color: FOX, h: 0.24, z: 0.50 }); // Tail at east
+    w.box(0.82, 0.44 + tailSway * 1.4, 0.18, 0.18, { color: FOX_WHITE, h: 0.18, z: 0.58 });
+
+    // 4 Legs
+    w.box(0.22 - legSwing, 0.20, 0.16, 0.14, { color: FOX_DARK, h: 0.36 });
+    w.box(0.22 + legSwing, 0.66, 0.16, 0.14, { color: FOX_DARK, h: 0.36 });
+    w.box(0.62 + legSwing, 0.20, 0.16, 0.14, { color: FOX_DARK, h: 0.36 });
+    w.box(0.62 - legSwing, 0.66, 0.16, 0.14, { color: FOX_DARK, h: 0.36 });
+
+    // Body
+    w.box(0.18, 0.22, 0.64, 0.56, { color: FOX, h: 0.40, z: 0.34 });
+
+    // Head at west
+    w.box(0.12, 0.28, 0.36, 0.44, { color: FOX, h: 0.36, z: 0.62 });
+    w.box(0.02, 0.34, 0.22, 0.32, { color: FOX_WHITE, h: 0.18, z: 0.62 });
+    w.box(0.00, 0.44, 0.08, 0.12, { color: FOX_DARK, h: 0.08, z: 0.70 });
+    w.post(0.20, 0.30, 0.94, 0.22, FOX_DARK, 0.05);
+    w.post(0.20, 0.66, 0.94, 0.22, FOX_DARK, 0.05);
+  }
 };
 
 export const FOX_SPRITE: SpriteDef = defineSprite({
   id: 'fox', w: 1, d: 1, massing: foxMassing,
 });
 
-/** Deer — tall, neck, antlers, graceful. */
-const deerMassing: Massing = (w, _v, _rng) => {
-  w.shadow(0.1, 0.1, 0.8, 0.8, 0.2);
-  w.box(0.15, 0.2, 0.7, 0.6, { color: DEER, h: 0.8 });
-  w.post(0.35, 0.3, 0.8, 1.1, DEER, 0.08);
-  w.box(0.25, 0.25, 0.4, 0.35, { color: DEER, h: 0.4, z: 1.4 });
-  // Antler posts
-  w.post(0.32, 0.27, 1.8, 0.5, DEER, 0.04);
-  w.post(0.48, 0.27, 1.8, 0.5, DEER, 0.04);
+// ── 3. Deer (Majestic Antlered Forest Stag with 4-Way Facing) ──────────────────
+
+const deerMassing: Massing = (w, v, _rng) => {
+  const facing = v.flags & 3;
+  const phase = ((v.level % 1000) / 1000);
+  // @tier-b — graceful trotting stride & head bob
+  const legSwing = Math.sin(phase * Math.PI * 2) * 0.07;
+  const headBob = Math.sin(phase * Math.PI * 2) * 0.02;
+
+  w.shadow(0.12, 0.12, 0.76, 0.76, 0.28);
+
+  if (facing === 1) {
+    // ── South: Facing Camera ──
+    // Tail at north (draw first)
+    w.box(0.42, 0.12, 0.16, 0.14, { color: DEER_BELLY, h: 0.20, z: 1.05 });
+
+    // 4 Slender legs with dark cloven hooves
+    w.box(0.22, 0.20 + legSwing, 0.14, 0.16, { color: DEER, h: 0.72 });
+    w.box(0.22, 0.20 + legSwing, 0.14, 0.16, { color: BOOTS_DARK, h: 0.12, z: 0 });
+    w.box(0.64, 0.20 - legSwing, 0.14, 0.16, { color: DEER, h: 0.72 });
+    w.box(0.64, 0.20 - legSwing, 0.14, 0.16, { color: BOOTS_DARK, h: 0.12, z: 0 });
+    w.box(0.22, 0.64 - legSwing, 0.14, 0.16, { color: DEER, h: 0.72 });
+    w.box(0.22, 0.64 - legSwing, 0.14, 0.16, { color: BOOTS_DARK, h: 0.12, z: 0 });
+    w.box(0.64, 0.64 + legSwing, 0.14, 0.16, { color: DEER, h: 0.72 });
+    w.box(0.64, 0.64 + legSwing, 0.14, 0.16, { color: BOOTS_DARK, h: 0.12, z: 0 });
+
+    // Body & belly
+    w.box(0.22, 0.18, 0.56, 0.64, { color: DEER, h: 0.52, z: 0.70 });
+    w.box(0.26, 0.24, 0.48, 0.50, { color: DEER_BELLY, h: 0.22, z: 0.70 });
+
+    // Long arching neck & head
+    w.box(0.32, 0.54, 0.36, 0.32, { color: DEER, h: 0.65, z: 1.10 + headBob });
+    w.box(0.30, 0.58, 0.40, 0.36, { color: DEER, h: 0.36, z: 1.65 + headBob });
+    w.box(0.36, 0.82, 0.28, 0.18, { color: DEER_BELLY, h: 0.20, z: 1.68 + headBob });
+    w.box(0.42, 0.94, 0.16, 0.08, { color: 0x1c2833ff, h: 0.10, z: 1.76 + headBob }); // Dark nose
+
+    // Eyes & Ears
+    w.box(0.28, 0.72, 0.04, 0.08, { color: 0x1c2833ff, h: 0.08, z: 1.84 + headBob });
+    w.box(0.68, 0.72, 0.04, 0.08, { color: 0x1c2833ff, h: 0.08, z: 1.84 + headBob });
+    w.box(0.20, 0.52, 0.12, 0.12, { color: DEER, h: 0.18, z: 1.95 + headBob });
+    w.box(0.68, 0.52, 0.12, 0.12, { color: DEER, h: 0.18, z: 1.95 + headBob });
+
+    // Antlers
+    w.post(0.32, 0.56, 1.98 + headBob, 0.85, ANTLER_BONE, 0.04);
+    w.post(0.68, 0.56, 1.98 + headBob, 0.85, ANTLER_BONE, 0.04);
+    w.post(0.30, 0.72, 2.25 + headBob, 0.35, ANTLER_BONE, 0.03);
+    w.post(0.70, 0.72, 2.25 + headBob, 0.35, ANTLER_BONE, 0.03);
+
+  } else if (facing === 0) {
+    // ── North: Facing Away ──
+    // Head & Antlers at north
+    w.box(0.32, 0.14, 0.36, 0.32, { color: DEER, h: 0.65, z: 1.10 + headBob });
+    w.box(0.30, 0.08, 0.40, 0.36, { color: DEER, h: 0.36, z: 1.65 + headBob });
+    w.post(0.32, 0.16, 1.98 + headBob, 0.85, ANTLER_BONE, 0.04);
+    w.post(0.68, 0.16, 1.98 + headBob, 0.85, ANTLER_BONE, 0.04);
+
+    // Legs & Body
+    w.box(0.22, 0.20 - legSwing, 0.14, 0.16, { color: DEER, h: 0.72 });
+    w.box(0.64, 0.20 + legSwing, 0.14, 0.16, { color: DEER, h: 0.72 });
+    w.box(0.22, 0.64 + legSwing, 0.14, 0.16, { color: DEER, h: 0.72 });
+    w.box(0.64, 0.64 - legSwing, 0.14, 0.16, { color: DEER, h: 0.72 });
+    w.box(0.22, 0.18, 0.56, 0.64, { color: DEER, h: 0.52, z: 0.70 });
+
+    // Tail at south (draw last)
+    w.box(0.42, 0.74, 0.16, 0.14, { color: DEER_BELLY, h: 0.20, z: 1.05 });
+
+  } else if (facing === 2) {
+    // ── East: Facing +gx ──
+    w.box(0.08, 0.42, 0.14, 0.16, { color: DEER_BELLY, h: 0.20, z: 1.05 }); // Tail at west
+    w.box(0.20 + legSwing, 0.22, 0.16, 0.14, { color: DEER, h: 0.72 });
+    w.box(0.20 - legSwing, 0.64, 0.16, 0.14, { color: DEER, h: 0.72 });
+    w.box(0.64 - legSwing, 0.22, 0.16, 0.14, { color: DEER, h: 0.72 });
+    w.box(0.64 + legSwing, 0.64, 0.16, 0.14, { color: DEER, h: 0.72 });
+
+    w.box(0.18, 0.22, 0.64, 0.56, { color: DEER, h: 0.52, z: 0.70 });
+    w.box(0.54, 0.32, 0.32, 0.36, { color: DEER, h: 0.65, z: 1.10 + headBob });
+    w.box(0.58, 0.30, 0.36, 0.40, { color: DEER, h: 0.36, z: 1.65 + headBob });
+    w.box(0.82, 0.36, 0.18, 0.28, { color: DEER_BELLY, h: 0.20, z: 1.68 + headBob });
+    w.post(0.56, 0.32, 1.98 + headBob, 0.85, ANTLER_BONE, 0.04);
+    w.post(0.56, 0.68, 1.98 + headBob, 0.85, ANTLER_BONE, 0.04);
+
+  } else {
+    // ── West: Facing -gx ──
+    w.box(0.74, 0.42, 0.14, 0.16, { color: DEER_BELLY, h: 0.20, z: 1.05 }); // Tail at east
+    w.box(0.20 - legSwing, 0.22, 0.16, 0.14, { color: DEER, h: 0.72 });
+    w.box(0.20 + legSwing, 0.64, 0.16, 0.14, { color: DEER, h: 0.72 });
+    w.box(0.64 + legSwing, 0.22, 0.16, 0.14, { color: DEER, h: 0.72 });
+    w.box(0.64 - legSwing, 0.64, 0.16, 0.14, { color: DEER, h: 0.72 });
+
+    w.box(0.18, 0.22, 0.64, 0.56, { color: DEER, h: 0.52, z: 0.70 });
+    w.box(0.14, 0.32, 0.32, 0.36, { color: DEER, h: 0.65, z: 1.10 + headBob });
+    w.box(0.08, 0.30, 0.36, 0.40, { color: DEER, h: 0.36, z: 1.65 + headBob });
+    w.box(0.00, 0.36, 0.18, 0.28, { color: DEER_BELLY, h: 0.20, z: 1.68 + headBob });
+    w.post(0.20, 0.32, 1.98 + headBob, 0.85, ANTLER_BONE, 0.04);
+    w.post(0.20, 0.68, 1.98 + headBob, 0.85, ANTLER_BONE, 0.04);
+  }
 };
 
 export const DEER_SPRITE: SpriteDef = defineSprite({
   id: 'deer', w: 1, d: 1, massing: deerMassing,
 });
 
-/** Wolf — long, low-slung, dangerous. */
-const wolfMassing: Massing = (w, _v, _rng) => {
-  w.shadow(0.05, 0.1, 0.9, 0.8, 0.35);
-  w.box(0.05, 0.15, 0.9, 0.7, { color: WOLF, h: 0.55 });
-  w.box(0.1, 0.12, 0.45, 0.4, { color: WOLF, h: 0.5, z: 0.5 });
-  w.post(0.78, 0.5, 0.45, 0.65, WOLF, 0.06);
+// ── 4. Wolf (Menacing Slate-Grey Apex Stalker with 4-Way Facing) ────────────────
+
+const wolfMassing: Massing = (w, v, _rng) => {
+  const facing = v.flags & 3;
+  const phase = ((v.level % 1000) / 1000);
+  // @tier-b — predatory stalk cadence
+  const legSwing = Math.sin(phase * Math.PI * 2) * 0.07;
+  const tailSway = Math.sin(phase * Math.PI * 2) * 0.05;
+
+  w.shadow(0.08, 0.08, 0.84, 0.84, 0.38);
+
+  if (facing === 1) {
+    // ── South: Facing Camera ──
+    // Tail at north (draw first)
+    w.box(0.40 + tailSway, 0.04, 0.20, 0.28, { color: WOLF, h: 0.26, z: 0.54 });
+    w.box(0.42 + tailSway * 1.4, 0.00, 0.16, 0.16, { color: WOLF_MANE, h: 0.20, z: 0.46 });
+
+    // 4 Legs
+    w.box(0.18, 0.18 + legSwing, 0.16, 0.18, { color: WOLF, h: 0.48 });
+    w.box(0.66, 0.18 - legSwing, 0.16, 0.18, { color: WOLF, h: 0.48 });
+    w.box(0.18, 0.64 - legSwing, 0.16, 0.18, { color: WOLF, h: 0.48 });
+    w.box(0.66, 0.64 + legSwing, 0.16, 0.18, { color: WOLF, h: 0.48 });
+
+    // Body & mane
+    w.box(0.20, 0.18, 0.60, 0.64, { color: WOLF, h: 0.46, z: 0.46 });
+    w.box(0.16, 0.36, 0.68, 0.44, { color: WOLF_MANE, h: 0.54, z: 0.48 });
+
+    // Head, eyes, ears
+    w.box(0.26, 0.50, 0.48, 0.38, { color: WOLF, h: 0.40, z: 0.72 });
+    w.box(0.32, 0.76, 0.36, 0.24, { color: WOLF_MANE, h: 0.22, z: 0.74 });
+    w.box(0.42, 0.94, 0.16, 0.08, { color: 0x111111ff, h: 0.12, z: 0.82 }); // Black nose
+
+    w.box(0.28, 0.72, 0.06, 0.08, { color: WOLF_EYE, h: 0.08, z: 0.96 });
+    w.box(0.66, 0.72, 0.06, 0.08, { color: WOLF_EYE, h: 0.08, z: 0.96 });
+
+    w.post(0.28, 0.48, 1.10, 0.26, WOLF, 0.06);
+    w.post(0.72, 0.48, 1.10, 0.26, WOLF, 0.06);
+
+  } else if (facing === 0) {
+    // ── North: Facing Away ──
+    // Head at north
+    w.box(0.26, 0.12, 0.48, 0.38, { color: WOLF, h: 0.40, z: 0.72 });
+    w.post(0.28, 0.20, 1.10, 0.26, WOLF, 0.06);
+    w.post(0.72, 0.20, 1.10, 0.26, WOLF, 0.06);
+
+    // Legs & Body
+    w.box(0.18, 0.18 - legSwing, 0.16, 0.18, { color: WOLF, h: 0.48 });
+    w.box(0.66, 0.18 + legSwing, 0.16, 0.18, { color: WOLF, h: 0.48 });
+    w.box(0.18, 0.64 + legSwing, 0.16, 0.18, { color: WOLF, h: 0.48 });
+    w.box(0.66, 0.64 - legSwing, 0.16, 0.18, { color: WOLF, h: 0.48 });
+    w.box(0.20, 0.18, 0.60, 0.64, { color: WOLF, h: 0.46, z: 0.46 });
+
+    // Tail at south (draw last)
+    w.box(0.40 + tailSway, 0.74, 0.20, 0.28, { color: WOLF, h: 0.26, z: 0.54 });
+
+  } else if (facing === 2) {
+    // ── East: Facing +gx ──
+    w.box(0.04, 0.40 + tailSway, 0.28, 0.20, { color: WOLF, h: 0.26, z: 0.54 }); // Tail at west
+    w.box(0.18 + legSwing, 0.18, 0.18, 0.16, { color: WOLF, h: 0.48 });
+    w.box(0.18 - legSwing, 0.66, 0.18, 0.16, { color: WOLF, h: 0.48 });
+    w.box(0.64 - legSwing, 0.18, 0.18, 0.16, { color: WOLF, h: 0.48 });
+    w.box(0.64 + legSwing, 0.66, 0.18, 0.16, { color: WOLF, h: 0.48 });
+
+    w.box(0.18, 0.20, 0.64, 0.60, { color: WOLF, h: 0.46, z: 0.46 });
+    w.box(0.36, 0.16, 0.44, 0.68, { color: WOLF_MANE, h: 0.54, z: 0.48 });
+
+    // Head at east
+    w.box(0.50, 0.26, 0.38, 0.48, { color: WOLF, h: 0.40, z: 0.72 });
+    w.box(0.76, 0.32, 0.24, 0.36, { color: WOLF_MANE, h: 0.22, z: 0.74 });
+    w.box(0.94, 0.42, 0.08, 0.16, { color: 0x111111ff, h: 0.12, z: 0.82 });
+    w.post(0.48, 0.28, 1.10, 0.26, WOLF, 0.06);
+    w.post(0.48, 0.72, 1.10, 0.26, WOLF, 0.06);
+
+  } else {
+    // ── West: Facing -gx ──
+    w.box(0.74, 0.40 + tailSway, 0.28, 0.20, { color: WOLF, h: 0.26, z: 0.54 }); // Tail at east
+    w.box(0.18 - legSwing, 0.18, 0.18, 0.16, { color: WOLF, h: 0.48 });
+    w.box(0.18 + legSwing, 0.66, 0.18, 0.16, { color: WOLF, h: 0.48 });
+    w.box(0.64 + legSwing, 0.18, 0.18, 0.16, { color: WOLF, h: 0.48 });
+    w.box(0.64 - legSwing, 0.66, 0.18, 0.16, { color: WOLF, h: 0.48 });
+
+    w.box(0.18, 0.20, 0.64, 0.60, { color: WOLF, h: 0.46, z: 0.46 });
+
+    // Head at west
+    w.box(0.12, 0.26, 0.38, 0.48, { color: WOLF, h: 0.40, z: 0.72 });
+    w.box(0.00, 0.32, 0.24, 0.36, { color: WOLF_MANE, h: 0.22, z: 0.74 });
+    w.box(0.00, 0.42, 0.08, 0.16, { color: 0x111111ff, h: 0.12, z: 0.82 });
+    w.post(0.26, 0.28, 1.10, 0.26, WOLF, 0.06);
+    w.post(0.26, 0.72, 1.10, 0.26, WOLF, 0.06);
+  }
 };
 
 export const WOLF_SPRITE: SpriteDef = defineSprite({
   id: 'wolf', w: 1, d: 1, massing: wolfMassing,
 });
 
-/** Troll — massive, 2×2 footprint, hunched shoulders. */
-const trollMassing: Massing = (w, _v, _rng) => {
-  w.shadow(0.1, 0.1, 1.8, 1.8, 0.5);
-  w.box(0.2, 0.2, 1.6, 1.6, { color: TROLL, h: 2.5 });
-  w.box(0.1, 0.1, 1.8, 1.8, { color: TROLL, h: 0.6, z: 2.5, inset: 0.1, outline: false });
-  w.box(0.5, 0.5, 1.0, 1.0, { color: TROLL, h: 0.8, z: 3.1 });
+// ── 5. Troll (Massive 2x2 Ancient Moss-Stone Behemoth with 4-Way Facing) ───────
+
+const trollMassing: Massing = (w, v, _rng) => {
+  const facing = v.flags & 3;
+  const phase = ((v.level % 1000) / 1000);
+  // @tier-b — lumbering heavy earth-shaking stomp
+  const stompL = Math.sin(phase * Math.PI * 2) * 0.08;
+  const stompR = -stompL;
+  const sway = Math.sin(phase * Math.PI * 2) * 0.04;
+
+  w.shadow(0.1, 0.1, 1.8, 1.8, 0.55);
+
+  if (facing === 1) {
+    // ── South: Facing Camera ──
+    // 2 Massive stone pillar legs
+    w.box(0.24, 0.35 + stompL, 0.55, 0.65, { color: TROLL, h: 1.10 });
+    w.box(0.20, 0.85 + stompL, 0.60, 0.30, { color: 0x3d4737ff, h: 0.35 });
+
+    w.box(1.21, 0.35 + stompR, 0.55, 0.65, { color: TROLL, h: 1.10 });
+    w.box(1.20, 0.85 + stompR, 0.60, 0.30, { color: 0x3d4737ff, h: 0.35 });
+
+    // Hunched boulder torso & mossy plates
+    w.box(0.22 + sway, 0.22, 1.56, 1.56, { color: TROLL, h: 1.50, z: 1.05 });
+    w.box(0.30 + sway, 0.15, 1.40, 1.20, { color: TROLL_MOSS, h: 0.45, z: 2.20 });
+
+    // Tree-trunk arms with boulder knuckles
+    w.box(0.04 + sway, 0.50 - stompL * 0.8, 0.36, 0.55, { color: TROLL, h: 1.70, z: 0.40 });
+    w.box(0.02 + sway, 0.85 - stompL * 0.8, 0.40, 0.35, { color: 0x3d4737ff, h: 0.45, z: 0.15 });
+
+    w.box(1.60 + sway, 0.50 - stompR * 0.8, 0.36, 0.55, { color: TROLL, h: 1.70, z: 0.40 });
+    w.box(1.58 + sway, 0.85 - stompR * 0.8, 0.40, 0.35, { color: 0x3d4737ff, h: 0.45, z: 0.15 });
+
+    // Shoulder boulders
+    w.box(0.12 + sway, 0.45, 0.55, 0.65, { color: 0x5a6654ff, h: 0.65, z: 2.30 });
+    w.box(1.33 + sway, 0.45, 0.55, 0.65, { color: 0x5a6654ff, h: 0.65, z: 2.30 });
+
+    // Head, glowing eyes, tusks
+    w.box(0.55 + sway, 0.80, 0.90, 0.80, { color: TROLL, h: 0.95, z: 1.65 });
+    w.box(0.50 + sway, 1.10, 1.00, 0.45, { color: TROLL_MOSS, h: 0.35, z: 2.45 });
+
+    w.box(0.65 + sway, 1.48, 0.16, 0.08, { color: TROLL_EYE, h: 0.14, z: 2.15 });
+    w.box(1.19 + sway, 1.48, 0.16, 0.08, { color: TROLL_EYE, h: 0.14, z: 2.15 });
+
+    w.post(0.68 + sway, 1.55, 1.85, 0.45, 0xe0d6b8ff, 0.07);
+    w.post(1.24 + sway, 1.55, 1.85, 0.45, 0xe0d6b8ff, 0.07);
+
+  } else if (facing === 0) {
+    // ── North: Facing Away ──
+    // Head at north
+    w.box(0.55 + sway, 0.30, 0.90, 0.80, { color: TROLL, h: 0.95, z: 1.65 });
+
+    // Legs
+    w.box(0.24, 0.35 - stompL, 0.55, 0.65, { color: TROLL, h: 1.10 });
+    w.box(1.21, 0.35 - stompR, 0.55, 0.65, { color: TROLL, h: 1.10 });
+
+    // Torso & Back
+    w.box(0.22 + sway, 0.22, 1.56, 1.56, { color: TROLL, h: 1.50, z: 1.05 });
+    w.box(0.30 + sway, 0.60, 1.40, 1.20, { color: TROLL_MOSS, h: 0.45, z: 2.20 });
+
+    // Arms
+    w.box(0.04 + sway, 0.50 + stompL * 0.8, 0.36, 0.55, { color: TROLL, h: 1.70, z: 0.40 });
+    w.box(1.60 + sway, 0.50 + stompR * 0.8, 0.36, 0.55, { color: TROLL, h: 1.70, z: 0.40 });
+
+  } else if (facing === 2) {
+    // ── East: Facing +gx ──
+    w.box(0.35 + stompL, 0.24, 0.65, 0.55, { color: TROLL, h: 1.10 });
+    w.box(0.35 + stompR, 1.21, 0.65, 0.55, { color: TROLL, h: 1.10 });
+
+    w.box(0.22, 0.22 + sway, 1.56, 1.56, { color: TROLL, h: 1.50, z: 1.05 });
+    w.box(0.15, 0.30 + sway, 1.20, 1.40, { color: TROLL_MOSS, h: 0.45, z: 2.20 });
+
+    // Head at east (+gx)
+    w.box(0.80, 0.55 + sway, 0.80, 0.90, { color: TROLL, h: 0.95, z: 1.65 });
+    w.box(1.48, 0.65 + sway, 0.08, 0.16, { color: TROLL_EYE, h: 0.14, z: 2.15 });
+    w.box(1.48, 1.19 + sway, 0.08, 0.16, { color: TROLL_EYE, h: 0.14, z: 2.15 });
+    w.post(1.55, 0.68 + sway, 1.85, 0.45, 0xe0d6b8ff, 0.07);
+
+  } else {
+    // ── West: Facing -gx ──
+    w.box(0.35 - stompL, 0.24, 0.65, 0.55, { color: TROLL, h: 1.10 });
+    w.box(0.35 - stompR, 1.21, 0.65, 0.55, { color: TROLL, h: 1.10 });
+
+    w.box(0.22, 0.22 + sway, 1.56, 1.56, { color: TROLL, h: 1.50, z: 1.05 });
+
+    // Head at west (-gx)
+    w.box(0.30, 0.55 + sway, 0.80, 0.90, { color: TROLL, h: 0.95, z: 1.65 });
+    w.box(0.16, 0.65 + sway, 0.08, 0.16, { color: TROLL_EYE, h: 0.14, z: 2.15 });
+    w.box(0.16, 1.19 + sway, 0.08, 0.16, { color: TROLL_EYE, h: 0.14, z: 2.15 });
+    w.post(0.25, 0.68 + sway, 1.85, 0.45, 0xe0d6b8ff, 0.07);
+  }
 };
 
 export const TROLL_SPRITE: SpriteDef = defineSprite({
@@ -188,26 +711,32 @@ export function spriteForCreature(species: Creature['species']): SpriteDef {
 /**
  * Build a `Variant` for a creature.
  *
- * Keyed on creature id so it is stable across re-sorts.
+ * Encodes facing orientation, state, and walk animation phase.
  */
 export function creatureVariant(c: Creature): Variant {
+  const facingCode = c.facing === 's' ? 1 : c.facing === 'e' ? 2 : c.facing === 'w' ? 3 : 0;
+  const stateCode = c.state === 'idle' ? 0 : c.state === 'wander' ? 1 : c.state === 'flee' ? 2 : c.state === 'chase' ? 3 : c.state === 'eat' ? 4 : 5;
+
   return {
     seed:     hash2(c.id, 0, 0),
-    flags:    0,
-    level:    0,
+    flags:    facingCode | (stateCode << 3),
+    level:    Math.floor((c.walkCycle % 1) * 1000),
     progress: c.traits.size,
     label:    '',
   };
 }
 
-/** Build a `Variant` for a player — encodes facing orientation in flags. */
+/** Build a `Variant` for a player — encodes facing orientation, movement, weapon, and leg stride phase. */
 export function playerVariant(p: Player): Variant {
   const facingCode = p.facing === 's' ? 1 : p.facing === 'e' ? 2 : p.facing === 'w' ? 3 : 0;
+  const isMovingFlag = p.isMoving ? 4 : 0;
+  const weaponCode = p.weapon === 'hands' ? 0 : p.weapon === 'axe' ? 1 : p.weapon === 'sword' ? 2 : 3;
+
   return {
     seed:     hash2(p.index, 42, 0),
-    flags:    facingCode,
-    level:    0,
-    progress: 1,
+    flags:    facingCode | isMovingFlag | (weaponCode << 4),
+    level:    p.attackCooldown > 0 ? 1 : 0,
+    progress: p.walkCycle % 1,
     label:    '',
   };
 }
@@ -244,3 +773,4 @@ export function setScratchVariant(
   VARIANT_SCRATCH.label = label;
   return VARIANT_SCRATCH;
 }
+

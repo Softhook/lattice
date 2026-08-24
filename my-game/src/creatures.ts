@@ -47,6 +47,10 @@ export interface Creature {
   /** Current tile position (non-integer during movement). */
   gx: number;
   gy: number;
+  /** Facing direction ('n', 's', 'e', 'w'). */
+  facing: 'n' | 's' | 'e' | 'w';
+  /** Continuous walk/bob cycle [0, 1) for live animations. */
+  walkCycle: number;
   /** Move target. NaN means idle. */
   targetGx: number;
   targetGy: number;
@@ -124,6 +128,8 @@ export function spawnCreature(
     traits,
     gx,
     gy,
+    facing: rng.next() > 0.5 ? 's' : 'e',
+    walkCycle: rng.next(),
     targetGx: NaN,
     targetGy: NaN,
     idleTimer: rng.next() * 3,
@@ -215,6 +221,10 @@ function updateOne(
   dt: number,
   events: CreatureEvents,
 ): void {
+  // Slow natural idle/breathing cadence
+  const idleRate = c.species === 'rabbit' ? 0.15 : 0.3;
+  c.walkCycle = (c.walkCycle + dt * idleRate) % 1;
+
   const speed = c.traits.speed;
   // Nighttime increases predator hunting speed and perception range
   const isApex = c.species === 'wolf' || c.species === 'troll';
@@ -466,9 +476,20 @@ function moveWithSeparation(
   const moveLen = Math.sqrt(moveX * moveX + moveY * moveY); // @tier-b
   if (moveLen < 0.01) return;
 
+  const dirX = moveX / moveLen;
+  const dirY = moveY / moveLen;
+  if (Math.abs(dirX) > Math.abs(dirY)) {
+    c.facing = dirX > 0 ? 'e' : 'w';
+  } else {
+    c.facing = dirY > 0 ? 's' : 'n';
+  }
+
   const step = speed * dt;
-  const nx = c.gx + (moveX / moveLen) * step;
-  const ny = c.gy + (moveY / moveLen) * step;
+  const cycleSpeed = c.species === 'troll' ? 0.6 : c.species === 'rabbit' ? 0.45 : 0.9;
+  c.walkCycle = (c.walkCycle + step * cycleSpeed) % 1;
+
+  const nx = c.gx + dirX * step;
+  const ny = c.gy + dirY * step;
 
   const tileX = Math.floor(nx);
   const tileY = Math.floor(ny);

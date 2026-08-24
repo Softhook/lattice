@@ -16,6 +16,18 @@ import {
 import type { Building, BuildingKind } from './buildings.js';
 import type { Player } from './players.js';
 import type { WeaponKind } from './combat.js';
+import {
+  extractTerrainDeltas,
+  type SavedVertexDelta,
+  type SavedSurfaceDelta,
+  type WorldTerrain,
+} from './world.js';
+import {
+  extractSavedFlora,
+  type SavedFlora,
+  type FloraItem,
+  type FloraKind,
+} from './flora.js';
 
 export interface SavedBuilding {
   readonly kind: BuildingKind;
@@ -43,6 +55,9 @@ export interface VerdantSaveV1 {
   readonly p1: SavedPlayer;
   readonly p2: SavedPlayer;
   readonly buildings: readonly SavedBuilding[];
+  readonly terrainHeights?: readonly SavedVertexDelta[];
+  readonly terrainSurfaces?: readonly SavedSurfaceDelta[];
+  readonly flora?: readonly SavedFlora[];
 }
 
 function recognizePlayer(v: unknown, label: string, defaultGx: number, defaultGy: number): SavedPlayer {
@@ -71,6 +86,32 @@ function recognizeBuilding(v: unknown, index: number): SavedBuilding {
   return { kind, gx, gy, hp, maxHp };
 }
 
+function recognizeFlora(v: unknown, index: number): SavedFlora {
+  const o = expectObject(v, `save.flora[${index}]`);
+  const kind = typeof o['kind'] === 'string' ? (o['kind'] as FloraKind) : 'bush';
+  const gx = typeof o['gx'] === 'number' ? o['gx'] : 0;
+  const gy = typeof o['gy'] === 'number' ? o['gy'] : 0;
+  const scale = typeof o['scale'] === 'number' ? o['scale'] : 1.0;
+  const subType = typeof o['subType'] === 'number' ? o['subType'] : 0;
+  return { kind, gx, gy, scale, subType };
+}
+
+function recognizeVertexDelta(v: unknown, index: number): SavedVertexDelta {
+  const o = expectObject(v, `save.terrainHeights[${index}]`);
+  const x = typeof o['x'] === 'number' ? o['x'] : 0;
+  const y = typeof o['y'] === 'number' ? o['y'] : 0;
+  const h = typeof o['h'] === 'number' ? o['h'] : 0;
+  return { x, y, h };
+}
+
+function recognizeSurfaceDelta(v: unknown, index: number): SavedSurfaceDelta {
+  const o = expectObject(v, `save.terrainSurfaces[${index}]`);
+  const x = typeof o['x'] === 'number' ? o['x'] : 0;
+  const y = typeof o['y'] === 'number' ? o['y'] : 0;
+  const mat = typeof o['mat'] === 'number' ? o['mat'] : 0;
+  return { x, y, mat };
+}
+
 export const recognizeVerdantSaveV1: Recognize<VerdantSaveV1> = (value: unknown): VerdantSaveV1 => {
   const o = expectObject(value, 'save.v1');
   const seed = typeof o['seed'] === 'number' ? o['seed'] : 0;
@@ -79,12 +120,24 @@ export const recognizeVerdantSaveV1: Recognize<VerdantSaveV1> = (value: unknown)
   const rawBuildings = Array.isArray(o['buildings']) ? o['buildings'] : [];
   const buildings = rawBuildings.map((b, i) => recognizeBuilding(b, i));
 
+  const rawHeights = Array.isArray(o['terrainHeights']) ? o['terrainHeights'] : [];
+  const terrainHeights = rawHeights.map((h, i) => recognizeVertexDelta(h, i));
+
+  const rawSurfaces = Array.isArray(o['terrainSurfaces']) ? o['terrainSurfaces'] : [];
+  const terrainSurfaces = rawSurfaces.map((s, i) => recognizeSurfaceDelta(s, i));
+
+  const rawFlora = Array.isArray(o['flora']) ? o['flora'] : undefined;
+  const flora = rawFlora ? rawFlora.map((f, i) => recognizeFlora(f, i)) : undefined;
+
   return {
     version: 1,
     seed,
     p1,
     p2,
     buildings,
+    terrainHeights,
+    terrainSurfaces,
+    ...(flora ? { flora } : {}),
   };
 };
 
@@ -108,8 +161,13 @@ export function extractSaveState(
   seed: number,
   players: readonly [Player, Player],
   buildings: readonly Building[],
+  world?: WorldTerrain,
+  flora?: readonly FloraItem[],
 ): VerdantSaveV1 {
   const [p1, p2] = players;
+  const terrain = world ? extractTerrainDeltas(world) : undefined;
+  const savedFlora = flora ? extractSavedFlora(flora) : undefined;
+
   return {
     version: 1,
     seed,
@@ -142,5 +200,8 @@ export function extractSaveState(
       hp: b.hp,
       maxHp: b.maxHp,
     })),
+    terrainHeights: terrain ? terrain.heights : [],
+    terrainSurfaces: terrain ? terrain.surfaces : [],
+    ...(savedFlora ? { flora: savedFlora } : {}),
   };
 }
