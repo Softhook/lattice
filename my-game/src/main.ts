@@ -440,10 +440,10 @@ loop.onRender((_alpha, t, nowMs) => {
   lockCameraToPlayer(camera1, p1);
   lockCameraToPlayer(camera2, p2);
 
-  // Day/night cycle: `t` is seconds since loop start. One cycle = 120 s.
+  // Day/night cycle: `t` is seconds since loop start. One full cycle = 120 s (60s day, 60s night).
   // @tier-b — sin for day/night, visual only, never hashed.
   const cycle    = (t % 120) / 120;
-  const daylight = Math.sin(cycle * Math.PI) * 0.5 + 0.5;
+  const daylight = Math.sin(cycle * Math.PI * 2) * 0.5 + 0.5;
   const darkness = clamp((0.55 - daylight) * 1.8, 0, 0.85);
   currentDarkness = darkness;
 

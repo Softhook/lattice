@@ -125,9 +125,10 @@ function fireflies(
     // Center bright dot
     s.ellipse(pt.x, pt.y, r, r, withAlpha(mix(WARM_GOLD, 0xffffffff, 0.5), a));
 
-    // Ground light pool scaling with zoom and 2:1 isometric aspect
-    const rx = 1.6 * HALF_W * pen.camera.zoom;
-    s.softEllipse(pt.x, pt.y + 4 * pen.camera.zoom, rx, rx * 0.5, withAlpha(WARM_GOLD, a * 0.35), withAlpha(WARM_GOLD, 0));
+    // Register into LightField for ground illumination
+    if (light !== undefined && daylight < 0.6) {
+      light.add(gx, gy, groundH, 1.6, (0.6 - daylight) * 0.4 * blink, WARM_GOLD);
+    }
   }
 }
 

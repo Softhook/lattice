@@ -424,6 +424,16 @@ function drawViewport(
     },
 
     overlay(pen) {
+      // Draw players in the overlay pass above the night mask so the ground light circle sits behind the player!
+      for (let i = 0; i < numPlayers; i++) {
+        const p = players[i];
+        if (p === undefined || p.respawnTimer > 0) continue;
+        const def    = PLAYER_SPRITES[p.index];
+        const v      = playerVariant(p);
+        const basePx = heightAt(world.field, p.gx, p.gy);
+        drawSprite(pen, def, p.gx, p.gy, v, basePx);
+      }
+
       if (isLeft) {
         drawSplitDivider(pen);
       }

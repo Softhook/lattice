@@ -324,20 +324,24 @@ export function interactAtFacing(
   // 1. Check for flora at the facing tile to harvest
   const harvest = harvestFloraAt(flora, gx, gy);
   if (harvest !== undefined) {
+    const kind = harvest.item.kind;
+    const isTree = kind === 'pine' || kind === 'oak';
+    const axeBonus = (player.weapon === 'axe' && isTree) ? 2 : 0;
+
     player.hurtFlash = 0.12;
-    player.inventory.wood += harvest.wood;
+    player.inventory.wood += harvest.wood + axeBonus;
     player.inventory.stone += harvest.stone;
     player.inventory.fiber += harvest.fiber;
 
-    player.lastActionMsg = harvest.label;
+    const label = axeBonus > 0 ? `${harvest.label} (+2 AXE BONUS)` : harvest.label;
+    player.lastActionMsg = label;
     player.msgTimer = 2.2;
 
-    const kind = harvest.item.kind;
     const soundType: InteractType =
-      kind === 'pine' || kind === 'oak' ? 'chop' :
+      isTree ? 'chop' :
       kind === 'rock' ? 'mine' : 'forage';
 
-    return { type: soundType, label: harvest.label };
+    return { type: soundType, label };
   }
 
   // 2. Check if facing a building (can repair building if damaged)

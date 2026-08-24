@@ -54,6 +54,28 @@ export function drawSky(pen: Pen, daylight: number, cycle: number): void {
 
   s.polyRamp(xy, 4, 0, 0, 0, hy, zenith, horizon);
 
+  // Orbiting Sun during daylight (cycle 0.0 to 0.5)
+  if (cycle < 0.5) {
+    const dayProgress = cycle * 2; // 0..1
+    const sunX = dayProgress * w;
+    // @tier-b — celestial sun arc trajectory
+    const sunY = hy - Math.sin(dayProgress * Math.PI) * (hy * 0.65) - 20;
+    s.ellipse(sunX, sunY, 28, 28, withAlpha(hex('#fff3b0'), 0.25 * daylight));
+    s.ellipse(sunX, sunY, 16, 16, withAlpha(hex('#ffe082'), 0.65 * daylight));
+    s.ellipse(sunX, sunY, 8, 8, withAlpha(hex('#ffffff'), 0.95 * daylight));
+  } else {
+    // Glowing Moon during nighttime (cycle 0.5 to 1.0)
+    const nightProgress = (cycle - 0.5) * 2; // 0..1
+    const moonX = nightProgress * w;
+    // @tier-b — celestial moon arc trajectory
+    const moonY = hy - Math.sin(nightProgress * Math.PI) * (hy * 0.60) - 20;
+    const moonAlpha = clamp01((0.55 - daylight) * 2.0);
+    s.ellipse(moonX, moonY, 22, 22, withAlpha(hex('#7986cb'), 0.20 * moonAlpha));
+    s.ellipse(moonX, moonY, 10, 10, withAlpha(hex('#e8eaf6'), 0.90 * moonAlpha));
+    // Crater crescent shadow
+    s.ellipse(moonX + 3, moonY - 2, 7, 7, withAlpha(hex('#0c160a'), 0.85 * moonAlpha));
+  }
+
   // Twinkling stars at night
   if (daylight < 0.65) {
     const starAlpha = clamp01((0.65 - daylight) * 2.2);
