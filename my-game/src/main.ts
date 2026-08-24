@@ -44,6 +44,7 @@ import {
 } from './players.js';
 import {
   damageBuildings,
+  restoreBuilding,
   type Building,
 } from './buildings.js';
 import {
@@ -108,18 +109,38 @@ const creatures = populateWorld(SEED, world);
 const store = createVerdantStore(SEED, () => extractSaveState(SEED, [p1, p2], buildings));
 const opened = store.open();
 if (opened.source === 'save' && opened.state && opened.state.p1 && opened.state.p2) {
-  // Restore saved player inventories & stats
+  // Restore saved player inventories, positions & combat gear
   const s = opened.state;
   p1.inventory.wood = s.p1.wood;
   p1.inventory.stone = s.p1.stone;
   p1.inventory.fiber = s.p1.fiber;
   p1.hp = s.p1.hp;
+  p1.gx = s.p1.gx;
+  p1.gy = s.p1.gy;
+  p1.weapon = s.p1.weapon;
+  p1.craftedWeapons = [...s.p1.craftedWeapons];
 
   p2.inventory.wood = s.p2.wood;
   p2.inventory.stone = s.p2.stone;
   p2.inventory.fiber = s.p2.fiber;
   p2.hp = s.p2.hp;
+  p2.gx = s.p2.gx;
+  p2.gy = s.p2.gy;
+  p2.weapon = s.p2.weapon;
+  p2.craftedWeapons = [...s.p2.craftedWeapons];
+
+  // Restore saved constructed buildings
+  if (Array.isArray(s.buildings)) {
+    for (let i = 0; i < s.buildings.length; i++) {
+      const sb = s.buildings[i];
+      if (sb !== undefined && sb.hp > 0) {
+        buildings.push(restoreBuilding(sb.kind, sb.gx, sb.gy, sb.hp, sb.maxHp, world));
+      }
+    }
+  }
 }
+
+updateDomHud();
 
 // ── Camera Locking ────────────────────────────────────────────────────────────
 

@@ -255,6 +255,32 @@ export function placeBuilding(
   };
 }
 
+/** Reconstruct a saved building into live simulation state. */
+export function restoreBuilding(
+  kind: BuildingKind,
+  gx: number,
+  gy: number,
+  hp: number,
+  maxHp: number,
+  world: WorldTerrain,
+): Building {
+  const def    = defFor(kind);
+  const fp: Footprint = { gx, gy, w: def.w, d: def.d };
+  const basePx = footprintBase(world.field, fp);
+
+  return {
+    id:    nextId++,
+    kind,
+    gx,
+    gy,
+    w:     def.w,
+    d:     def.d,
+    basePx,
+    hp,
+    maxHp,
+  };
+}
+
 /** Check if a building can be legally placed at (gx, gy). */
 export function canPlaceBuilding(
   kind: BuildingKind,
