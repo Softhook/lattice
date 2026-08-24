@@ -20,7 +20,7 @@ import { Rng } from '@latticekit/core';
 import { footprintBase, type Footprint } from '@latticekit/iso';
 import { TIMBER, STONE, TOWER, FLOOR } from './palette.js';
 import type { WorldTerrain } from './world.js';
-import { MAT_WATER } from './world.js';
+import { W, H, MAT_WATER } from './world.js';
 
 // ── Building Colors ───────────────────────────────────────────────────────────
 
@@ -71,6 +71,8 @@ const wallMassing: Massing = (w: SolidWriter, _v: Variant, _rng: Rng) => {
   w.box(0.72, 0.72, 0.22, 0.22, { color: WALL_BEAM, h: 0.45, z: 2.15 });
 };
 
+export const WALL_DEF: SpriteDef = defineSprite({ id: 'building_wall', w: 1, d: 1, massing: wallMassing });
+
 /** Decking and floor tiles with timber planks and corner brass rivets. */
 const floorMassing: Massing = (w: SolidWriter, _v: Variant, _rng: Rng) => {
   w.shadow(0, 0, 1, 1, 0.15);
@@ -84,6 +86,8 @@ const floorMassing: Massing = (w: SolidWriter, _v: Variant, _rng: Rng) => {
   w.box(0.04, 0.86, 0.1, 0.1, { color: WALL_STONE, h: 0.12, z: 0.25, outline: false });
   w.box(0.86, 0.86, 0.1, 0.1, { color: WALL_STONE, h: 0.12, z: 0.25, outline: false });
 };
+
+export const FLOOR_DEF: SpriteDef = defineSprite({ id: 'building_floor', w: 1, d: 1, massing: floorMassing });
 
 /** Fortified Watchtower with stone foundation, archer platform, lantern beacon, and waving banner. */
 const towerMassing: Massing = (w: SolidWriter, _v: Variant, _rng: Rng) => {
@@ -112,6 +116,8 @@ const towerMassing: Massing = (w: SolidWriter, _v: Variant, _rng: Rng) => {
   w.box(0.96, 0.96, 0.08, 0.55, { color: BANNER_RED, h: 0.3, z: 6.1 });
 };
 
+export const TOWER_DEF: SpriteDef = defineSprite({ id: 'building_tower', w: 2, d: 2, massing: towerMassing });
+
 /** Sturdy inclined staircase / ramp connecting elevation levels. */
 const rampMassing: Massing = (w: SolidWriter, _v: Variant, _rng: Rng) => {
   w.shadow(0, 0, 1, 2, 0.3);
@@ -126,12 +132,15 @@ const rampMassing: Massing = (w: SolidWriter, _v: Variant, _rng: Rng) => {
   w.box(0.84, 0, 0.12, 2.0, { color: WALL_BEAM, h: 0.3, z: 1.35, outline: false });
 };
 
-export const WALL_DEF: SpriteDef  = defineSprite({ id: 'wall',  w: 1, d: 1, massing: wallMassing });
-export const FLOOR_DEF: SpriteDef = defineSprite({ id: 'floor', w: 1, d: 1, massing: floorMassing });
-export const TOWER_DEF: SpriteDef = defineSprite({ id: 'tower', w: 2, d: 2, massing: towerMassing });
-export const RAMP_DEF: SpriteDef  = defineSprite({ id: 'ramp',  w: 1, d: 2, massing: rampMassing });
+export const RAMP_DEF: SpriteDef = defineSprite({
+  id: 'building_ramp',
+  w: 1,
+  d: 2,
+  massing: rampMassing,
+});
 
-/** Map a kind to its SpriteDef. */
+// ── Building Lookup & Placement ────────────────────────────────────────────────
+
 export function defFor(kind: BuildingKind): SpriteDef {
   switch (kind) {
     case 'wall':  return WALL_DEF;
@@ -141,22 +150,19 @@ export function defFor(kind: BuildingKind): SpriteDef {
   }
 }
 
-/** Map a kind to HP. */
-function hpFor(kind: BuildingKind): number {
+export function hpFor(kind: BuildingKind): number {
   switch (kind) {
-    case 'wall':  return 40;
-    case 'floor': return 25;
-    case 'tower': return 100;
-    case 'ramp':  return 35;
+    case 'wall':  return 150;
+    case 'floor': return 80;
+    case 'tower': return 400;
+    case 'ramp':  return 120;
   }
 }
-
-// ── Placement ──────────────────────────────────────────────────────────────────
 
 let nextId = 1;
 
 /**
- * Try to place a building at (gx, gy). Returns the new Building on success, undefined on failure.
+ * Attempt to place a building at (gx, gy).
  *
  * Fails if any footprint tile is water, or is already occupied by another building.
  */
@@ -174,7 +180,7 @@ export function placeBuilding(
     for (let dy = 0; dy < d; dy++) {
       const tx = gx + dx;
       const ty = gy + dy;
-      if (tx < 0 || ty < 0 || tx >= 160 || ty >= 160) return undefined;
+      if (tx < 0 || ty < 0 || tx >= W || ty >= H) return undefined;
       if (world.surface.get(tx, ty) === MAT_WATER) return undefined;
       for (const b of existing) {
         if (tx >= b.gx && tx < b.gx + b.w &&
@@ -215,7 +221,7 @@ export function canPlaceBuilding(
     for (let dy = 0; dy < d; dy++) {
       const tx = gx + dx;
       const ty = gy + dy;
-      if (tx < 0 || ty < 0 || tx >= 160 || ty >= 160) return false;
+      if (tx < 0 || ty < 0 || tx >= W || ty >= H) return false;
       if (world.surface.get(tx, ty) === MAT_WATER) return false;
       for (const b of existing) {
         if (tx >= b.gx && tx < b.gx + b.w &&

@@ -191,16 +191,16 @@ export function populateFlora(seed: number, world: WorldTerrain): FloraItem[] {
   for (let gy = 4; gy < H - 4; gy += 2) {
     for (let gx = 4; gx < W - 4; gx += 2) {
       // Don't spawn on spawn zones for players
-      if ((gx >= 28 && gx <= 36 && gy >= 28 && gy <= 36) ||
-          (gx >= 124 && gx <= 132 && gy >= 28 && gy <= 36)) {
+      if ((gx >= 36 && gx <= 44 && gy >= 36 && gy <= 44) ||
+          (gx >= 156 && gx <= 164 && gy >= 36 && gy <= 44)) {
         continue;
       }
 
       const mat = world.surface.get(gx, gy);
       if (mat === MAT_WATER) continue;
 
-      const jitterX = gx + (toUnit(rng.next()) * 1.6 - 0.8);
-      const jitterY = gy + (toUnit(rng.next()) * 1.6 - 0.8);
+      const jitterX = gx + (rng.next() * 1.6 - 0.8);
+      const jitterY = gy + (rng.next() * 1.6 - 0.8);
       const tgx = Math.floor(jitterX);
       const tgy = Math.floor(jitterY);
       if (tgx < 0 || tgy < 0 || tgx >= W || tgy >= H) continue;
@@ -209,18 +209,18 @@ export function populateFlora(seed: number, world: WorldTerrain): FloraItem[] {
       if (tMat === MAT_WATER) continue;
 
       // Use noise density to create organic clusters / forest groves
-      const density = fbm2(seed ^ 0x3333, tgx * 0.05, tgy * 0.05, 3);
-      const roll = toUnit(rng.next());
+      const density = fbm2(seed ^ 0x3333, tgx * 0.04, tgy * 0.04, 3);
+      const roll = rng.next();
 
       let kind: FloraKind | undefined = undefined;
-      let scale = 0.85 + toUnit(rng.next()) * 0.35;
+      let scale = 0.85 + rng.next() * 0.35;
       let subType = 0;
 
       if (tMat === MAT_SNOW) {
         // High altitude: pine trees and rugged rocks
         if (density > 0.1 && roll < 0.45) {
           kind = 'pine';
-          scale = 0.9 + toUnit(rng.next()) * 0.4;
+          scale = 0.9 + rng.next() * 0.4;
         } else if (roll < 0.25) {
           kind = 'rock';
           subType = roll < 0.1 ? 1 : 0;
@@ -240,11 +240,11 @@ export function populateFlora(seed: number, world: WorldTerrain): FloraItem[] {
         }
       } else if (tMat === MAT_GRASS) {
         // Meadows and lush forests
-        if (density > 0.3) {
+        if (density > 0.25) {
           // Dense forest zone
           if (roll < 0.5) {
             kind = 'oak';
-            scale = 0.9 + toUnit(rng.next()) * 0.35;
+            scale = 0.9 + rng.next() * 0.35;
           } else if (roll < 0.75) {
             kind = 'pine';
           } else if (roll < 0.88) {
@@ -253,23 +253,23 @@ export function populateFlora(seed: number, world: WorldTerrain): FloraItem[] {
             kind = 'bush';
             subType = roll > 0.94 ? 1 : 0;
           }
-        } else if (density > -0.1) {
+        } else if (density > -0.15) {
           // Pleasant meadow
-          if (roll < 0.25) {
+          if (roll < 0.3) {
             kind = 'flowers';
-            subType = Math.floor(toUnit(rng.next()) * 3);
-          } else if (roll < 0.4) {
+            subType = Math.floor(rng.next() * 3);
+          } else if (roll < 0.45) {
             kind = 'bush';
             subType = roll > 0.35 ? 1 : 0;
-          } else if (roll < 0.5) {
+          } else if (roll < 0.55) {
             kind = 'oak';
           }
         } else {
           // Open plains / clearing
-          if (roll < 0.2) {
+          if (roll < 0.25) {
             kind = 'flowers';
-            subType = Math.floor(toUnit(rng.next()) * 3);
-          } else if (roll < 0.3) {
+            subType = Math.floor(rng.next() * 3);
+          } else if (roll < 0.35) {
             kind = 'rock';
           }
         }
@@ -292,4 +292,82 @@ export function populateFlora(seed: number, world: WorldTerrain): FloraItem[] {
   }
 
   return items;
+}
+
+/** Find and remove a flora item at or adjacent to (gx, gy). Returns the harvested item. */
+export function harvestFloraAt(flora: FloraItem[], gx: number, gy: number): FloraItem | undefined {
+  const index = flora.findIndex((f) => Math.abs(f.gx - gx) <= 0.8 && Math.abs(f.gy - gy) <= 0.8);
+  if (index === -1) return undefined;
+  const harvested = flora[index];
+  flora.splice(index, 1);
+  return harvested;
+}
+
+/** Find the closest edible flora within radius for herbivores. */
+export function findClosestEdibleFlora(
+  flora: FloraItem[],
+  fromX: number,
+  fromY: number,
+  radius: number,
+  edibleKinds: readonly FloraKind[] = ['flowers', 'bush', 'mushroom'],
+): FloraItem | undefined {
+  let closest: FloraItem | undefined = undefined;
+  let minDistSq = radius * radius;
+
+  for (let i = 0; i < flora.length; i++) {
+    const f = flora[i];
+    if (f === undefined) continue;
+    if (!edibleKinds.includes(f.kind)) continue;
+
+    const dx = f.gx - fromX;
+    const dy = f.gy - fromY;
+    const distSq = dx * dx + dy * dy;
+    if (distSq < minDistSq) {
+      minDistSq = distSq;
+      closest = f;
+    }
+  }
+  return closest;
+}
+
+let regrowthTimer = 0;
+
+/** Slowly regrow small flora (flowers, mushrooms, bushes) in the ecosystem. */
+export function tickFloraRegrowth(
+  seed: number,
+  flora: FloraItem[],
+  world: WorldTerrain,
+  dt: number,
+): void {
+  regrowthTimer += dt;
+  if (regrowthTimer < 5.0) return;
+  regrowthTimer = 0;
+
+  if (flora.length >= 1200) return; // Ecosystem capacity
+
+  const rng = createRng((seed + flora.length * 31) ^ 0xabcdef);
+  const gx = Math.floor(4 + rng.next() * (W - 8));
+  const gy = Math.floor(4 + rng.next() * (H - 8));
+
+  const mat = world.surface.get(gx, gy);
+  if (mat !== MAT_GRASS) return;
+
+  // Check if tile already has flora
+  const existing = flora.some((f) => f.gx === gx && f.gy === gy);
+  if (existing) return;
+
+  const roll = rng.next();
+  const kind: FloraKind = roll < 0.5 ? 'flowers' : roll < 0.8 ? 'bush' : 'mushroom';
+
+  flora.push({
+    id: floraIdSeq++,
+    kind,
+    gx,
+    gy,
+    w: 1,
+    d: 1,
+    basePx: 0,
+    scale: 0.8 + rng.next() * 0.3,
+    subType: Math.floor(rng.next() * 3),
+  });
 }

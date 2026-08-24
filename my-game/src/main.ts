@@ -21,7 +21,7 @@ import {
   createWorld,
   W, H, MAX_HEIGHT_PX, STEP_PX,
 } from './world.js';
-import { populateFlora } from './flora.js';
+import { populateFlora, tickFloraRegrowth } from './flora.js';
 import {
   populateWorld,
   updateCreatures,
@@ -32,6 +32,7 @@ import {
   createPlayers,
   movePlayer,
   buildAtFacing,
+  interactAtFacing,
   digAtFacing,
   raiseAtFacing,
   cycleBuildKind,
@@ -160,10 +161,14 @@ loop.onUpdate((dt, tick) => {
     updateDomHud();
   }
   if (edges.p1Build) {
-    const placed = buildAtFacing(p1, world, buildings);
-    if (placed !== undefined) {
-      buildings.push(placed);
-      updateDomHud();
+    if (p1.mode === 'move') {
+      interactAtFacing(p1, world, flora, buildings);
+    } else {
+      const placed = buildAtFacing(p1, world, buildings);
+      if (placed !== undefined) {
+        buildings.push(placed);
+        updateDomHud();
+      }
     }
   }
   if (edges.p1Dig) {
@@ -181,10 +186,14 @@ loop.onUpdate((dt, tick) => {
     updateDomHud();
   }
   if (edges.p2Build) {
-    const placed = buildAtFacing(p2, world, buildings);
-    if (placed !== undefined) {
-      buildings.push(placed);
-      updateDomHud();
+    if (p2.mode === 'move') {
+      interactAtFacing(p2, world, flora, buildings);
+    } else {
+      const placed = buildAtFacing(p2, world, buildings);
+      if (placed !== undefined) {
+        buildings.push(placed);
+        updateDomHud();
+      }
     }
   }
   if (edges.p2Dig) {
@@ -198,8 +207,9 @@ loop.onUpdate((dt, tick) => {
 
   prevKeys = snapshotKeys(curr);
 
-  // ── Creature AI ──────────────────────────────────────────────────────────────
-  updateCreatures(creatures, world, [p1, p2], dt);
+  // ── Creature & Flora Ecosystem ───────────────────────────────────────────────
+  updateCreatures(creatures, world, [p1, p2], flora, dt);
+  tickFloraRegrowth(SEED, flora, world, dt);
 
   // ── Troll building damage ────────────────────────────────────────────────────
   for (const c of creatures) {

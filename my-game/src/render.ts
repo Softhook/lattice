@@ -453,8 +453,9 @@ function drawViewport(
         1,
       );
 
-      const modeText = activePlayer.mode === 'move' ? 'MODE: MOVE' : `BUILD: ${activePlayer.mode.toUpperCase()}`;
-      const cycleKey = pIdx === 0 ? '[F] Cycle' : '[H] Cycle';
+      const actKey = pIdx === 0 ? '[E]' : '[O]';
+      const modeText = activePlayer.mode === 'move' ? `MOVE  ${actKey} INTERACT` : `BUILD: ${activePlayer.mode.toUpperCase()}  ${actKey}`;
+      const cycleKey = pIdx === 0 ? '[F] Mode' : '[H] Mode';
 
       screenText(
         pen,
@@ -462,7 +463,7 @@ function drawViewport(
         toolY + 13,
         modeText,
         activePlayer.mode === 'move' ? hex('#bdc3c7') : UI_TOOL_GOLD,
-        { ...DEFAULT_TEXT, size: 11, weight: 700, align: -1, baseline: 0 },
+        { ...DEFAULT_TEXT, size: 10, weight: 700, align: -1, baseline: 0 },
       );
 
       screenText(

@@ -49,7 +49,7 @@ function makePlayerMassing(bodyColor: Ink): Massing {
 /** Bob animation: player floats up/down. */
 function makePlayerAnimator(bodyColor: string): Animator {
   return (pen, gx, gy, v, rng, _zPx) => {
-    const fi  = toUnit(rng.next());
+    const fi  = rng.next();
     const t   = pen.t;
     // @tier-b — bob is visual only, pixels only.
     const bob = Math.sin(t * 3.5 + fi * 6.28) * 3; // 3 world pixels

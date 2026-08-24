@@ -12,10 +12,12 @@
  * spawn. No `Math.random()` — determinism is the whole point.
  */
 
-import { Rng, createRng, hash2, toUnit, clamp, moveTowards } from '@latticekit/core';
+import { Rng, createRng, hash2, toUnit, clamp } from '@latticekit/core';
 import type { WorldTerrain } from './world.js';
 import { isWalkable, W, H } from './world.js';
 import { damagePlayer, type Player } from './players.js';
+import type { FloraItem } from './flora.js';
+import { findClosestEdibleFlora } from './flora.js';
 
 // ── Species ────────────────────────────────────────────────────────────────────
 
@@ -34,7 +36,7 @@ export interface Traits {
 }
 
 /** AI behaviour state. */
-export type CreatureState = 'idle' | 'wander' | 'flee' | 'chase' | 'attack';
+export type CreatureState = 'idle' | 'wander' | 'flee' | 'chase' | 'attack' | 'forage' | 'eat';
 
 export interface Creature {
   readonly id: number;
@@ -55,6 +57,8 @@ export interface Creature {
   readonly rng: Rng;
   /** How many generations this lineage has survived. */
   generation: number;
+  /** Foraging / eating timer in seconds. */
+  eatTimer: number;
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -63,21 +67,21 @@ export interface Creature {
 export const GENERATION_TICKS = 600;
 
 /** Maximum creatures alive at once. */
-export const MAX_CREATURES = 120;
+export const MAX_CREATURES = 180;
 
 /** HP formula: base × size. */
 const BASE_HP: Record<Species, number> = {
-  rabbit: 3,
-  deer:   8,
-  fox:    6,
-  wolf:   15,
-  troll:  40,
+  rabbit: 4,
+  deer:   12,
+  fox:    9,
+  wolf:   22,
+  troll:  55,
 };
 
-/** How close (in tiles) a creature must be to attack a player. */
-const ATTACK_RANGE = 1.5;
+/** How close (in tiles) a creature must be to attack. */
+const ATTACK_RANGE = 1.3;
 
-/** How close (in tiles) a creature notices a player. */
+/** How close (in tiles) a creature notices a threat. */
 const NOTICE_RANGE = 8;
 
 /** Mutation magnitude per generation (trait drift). */
@@ -86,11 +90,11 @@ const MUTATION = 0.08;
 // ── Starting trait templates ───────────────────────────────────────────────────
 
 const BASE_TRAITS: Record<Species, Traits> = {
-  rabbit: { speed: 1.8, aggression: 0.05, size: 0.7,  fertility: 2.2 },
-  deer:   { speed: 1.2, aggression: 0.10, size: 1.0,  fertility: 1.5 },
-  fox:    { speed: 1.5, aggression: 0.40, size: 0.85, fertility: 1.4 },
-  wolf:   { speed: 1.6, aggression: 0.72, size: 1.1,  fertility: 0.9 },
-  troll:  { speed: 0.7, aggression: 0.85, size: 1.8,  fertility: 0.5 },
+  rabbit: { speed: 2.0, aggression: 0.05, size: 0.7,  fertility: 2.2 },
+  deer:   { speed: 1.4, aggression: 0.10, size: 1.1,  fertility: 1.5 },
+  fox:    { speed: 1.7, aggression: 0.55, size: 0.85, fertility: 1.4 },
+  wolf:   { speed: 1.75, aggression: 0.75, size: 1.2,  fertility: 0.9 },
+  troll:  { speed: 0.8, aggression: 0.90, size: 1.9,  fertility: 0.5 },
 };
 
 // ── Spawn ──────────────────────────────────────────────────────────────────────
@@ -107,7 +111,7 @@ export function spawnCreature(
   const id  = nextId++;
   const rng = createRng(hash2(worldSeed, id, 0));
   const base = BASE_TRAITS[species];
-  const traits = mutateTrait(base, rng, MUTATION * 2);  // initial variation
+  const traits = mutateTrait(base, rng, MUTATION * 2);
   const maxHp  = Math.round(BASE_HP[species] * traits.size * 4);
 
   return {
@@ -124,24 +128,23 @@ export function spawnCreature(
     maxHp,
     rng,
     generation: 0,
+    eatTimer: 0,
   };
 }
 
 /**
- * Populate the initial world with creatures distributed across the map.
- *
- * Rabbits and deer everywhere. Wolves on mid-to-high ground. Trolls on ridges only.
+ * Populate the world with creatures distributed across the map and elevation zones.
  */
 export function populateWorld(worldSeed: number, world: WorldTerrain): Creature[] {
   const creatures: Creature[] = [];
   const rng = createRng(worldSeed ^ 0xdeadbeef);
 
   const push = (species: Species, count: number, minH: number, maxH: number) => {
-    let attempts = count * 8;
+    let attempts = count * 15;
     let placed   = 0;
     while (placed < count && attempts-- > 0) {
-      const gx = Math.floor(rng.next() * W);
-      const gy = Math.floor(rng.next() * H);
+      const gx = Math.floor(10 + rng.next() * (W - 20));
+      const gy = Math.floor(10 + rng.next() * (H - 20));
       if (!isWalkable(world, gx, gy)) continue;
       const h = world.heights.get(gx, gy);
       if (h < minH || h > maxH) continue;
@@ -150,11 +153,11 @@ export function populateWorld(worldSeed: number, world: WorldTerrain): Creature[
     }
   };
 
-  push('rabbit', 30,  1,  7);
-  push('deer',   20,  2,  8);
-  push('fox',    15,  1,  8);
-  push('wolf',   10,  4, 12);
-  push('troll',   5,  7, 12);
+  push('rabbit', 50,  2, 14);
+  push('deer',   30,  3, 16);
+  push('fox',    25,  2, 18);
+  push('wolf',   18,  8, 22);
+  push('troll',   8, 14, 24);
 
   return creatures;
 }
@@ -164,97 +167,253 @@ export function populateWorld(worldSeed: number, world: WorldTerrain): Creature[
 /**
  * Update all creatures for one simulation tick.
  *
- * `dt` is always 1/60 s (fixed step). Players are needed for chase/flee decisions.
+ * Implements active food webs:
+ * - Herbivores (rabbit, deer) search for edible plants, eat them, and flee from predators.
+ * - Small carnivores (fox) hunt rabbits.
+ * - Apex predators (wolf) hunt deer, rabbits, and attack players.
+ * - Monsters (troll) attack structures and nearby players.
  */
 export function updateCreatures(
   creatures: Creature[],
   world: WorldTerrain,
   players: Player[],
+  flora: FloraItem[],
   dt: number,
 ): void {
-  for (const c of creatures) {
-    if (c.hp <= 0) continue;
-    updateOne(c, world, players, dt);
+  for (let i = 0; i < creatures.length; i++) {
+    const c = creatures[i];
+    if (c === undefined || c.hp <= 0) continue;
+    updateOne(c, creatures, world, players, flora, dt);
   }
 }
 
-function updateOne(c: Creature, world: WorldTerrain, players: Player[], dt: number): void {
+function updateOne(
+  c: Creature,
+  allCreatures: Creature[],
+  world: WorldTerrain,
+  players: Player[],
+  flora: FloraItem[],
+  dt: number,
+): void {
   const speed = c.traits.speed;
 
-  // Find nearest player.
-  let nearestDist = Infinity;
-  let nearestPlayer: Player | undefined;
-  for (const p of players) {
-    const dx = p.gx - c.gx;
-    const dy = p.gy - c.gy;
-    const d  = Math.sqrt(dx * dx + dy * dy);  // @tier-b — distance check, pixels only
-    if (d < nearestDist) {
-      nearestDist = d;
-      nearestPlayer = p;
+  // 1. Check for immediate predator threats to flee from
+  let threatDx = 0;
+  let threatDy = 0;
+  let threatCount = 0;
+
+  const isCreatureHostile = (c.species === 'wolf' || c.species === 'troll') && c.traits.aggression > 0.65;
+  if (!isCreatureHostile) {
+    for (const p of players) {
+      if (p.respawnTimer > 0) continue;
+      const dx = p.gx - c.gx;
+      const dy = p.gy - c.gy;
+      const dSq = dx * dx + dy * dy;
+      if (dSq < NOTICE_RANGE * NOTICE_RANGE) {
+        threatDx += dx;
+        threatDy += dy;
+        threatCount++;
+      }
     }
   }
 
-  // State machine.
-  const isHostile = (c.species === 'wolf' || c.species === 'troll') && c.traits.aggression > 0.65;
+  // Check predator creatures (e.g. wolves hunt deer/rabbits/foxes; foxes hunt rabbits)
+  if (c.species === 'rabbit' || c.species === 'deer' || c.species === 'fox') {
+    for (const other of allCreatures) {
+      if (other.hp <= 0 || other.id === c.id) continue;
+      const isPredator =
+        (c.species === 'rabbit' && (other.species === 'fox' || other.species === 'wolf' || other.species === 'troll')) ||
+        (c.species === 'deer' && (other.species === 'wolf' || other.species === 'troll')) ||
+        (c.species === 'fox' && (other.species === 'wolf' || other.species === 'troll'));
 
-  if (nearestPlayer !== undefined && nearestDist < NOTICE_RANGE && nearestPlayer.respawnTimer <= 0) {
-    if (isHostile) {
-      if (nearestDist < ATTACK_RANGE) {
-        c.state = 'attack';
-        const baseDmg = c.species === 'troll' ? 32 : 18;
-        damagePlayer(nearestPlayer, dt * baseDmg * c.traits.size);
-      } else {
-        c.state = 'chase';
-        moveTowardsTile(c, nearestPlayer.gx, nearestPlayer.gy, speed, dt, world);
+      if (isPredator) {
+        const dx = other.gx - c.gx;
+        const dy = other.gy - c.gy;
+        const dSq = dx * dx + dy * dy;
+        if (dSq < NOTICE_RANGE * NOTICE_RANGE) {
+          threatDx += dx;
+          threatDy += dy;
+          threatCount++;
+        }
       }
-    } else {
-      // Prey flees from players.
-      c.state = 'flee';
-      const fleeGx = c.gx + (c.gx - nearestPlayer.gx);
-      const fleeGy = c.gy + (c.gy - nearestPlayer.gy);
-      moveTowardsTile(c, fleeGx, fleeGy, speed * 1.5, dt, world);
     }
+  }
+
+  // If threatened, scatter and FLEE!
+  if (threatCount > 0) {
+    c.state = 'flee';
+    c.eatTimer = 0;
+    const jitterAngle = (c.rng.next() - 0.5) * 0.8;
+    const baseAngle = Math.atan2(-threatDy, -threatDx) + jitterAngle; // @tier-b — flee scatter angle, pixels only
+    const fleeDx = Math.cos(baseAngle); // @tier-b
+    const fleeDy = Math.sin(baseAngle); // @tier-b
+    moveWithSeparation(c, c.gx + fleeDx * 6, c.gy + fleeDy * 6, speed * 1.45, dt, world, allCreatures);
     return;
   }
 
-  // No player nearby — wander.
+  // 2. Carnivore Hunting (Foxes hunt rabbits; Wolves hunt deer/rabbits/players)
+  if (c.species === 'fox' || c.species === 'wolf' || c.species === 'troll') {
+    let bestTarget: { gx: number; gy: number; dist: number; targetRef?: Creature | Player } | undefined;
+    let minDist = 12;
+
+    // Check prey creatures
+    for (const other of allCreatures) {
+      if (other.hp <= 0 || other.id === c.id) continue;
+      const isPrey =
+        (c.species === 'fox' && other.species === 'rabbit') ||
+        (c.species === 'wolf' && (other.species === 'deer' || other.species === 'rabbit'));
+
+      if (isPrey) {
+        const dx = other.gx - c.gx;
+        const dy = other.gy - c.gy;
+        const d = Math.sqrt(dx * dx + dy * dy); // @tier-b — hunt distance check, pixels only
+        if (d < minDist) {
+          minDist = d;
+          bestTarget = { gx: other.gx, gy: other.gy, dist: d, targetRef: other };
+        }
+      }
+    }
+
+    // Hostile wolves and trolls also target nearby active players
+    if (isCreatureHostile) {
+      for (const p of players) {
+        if (p.respawnTimer > 0) continue;
+        const dx = p.gx - c.gx;
+        const dy = p.gy - c.gy;
+        const d = Math.sqrt(dx * dx + dy * dy); // @tier-b — player chase distance, pixels only
+        if (d < minDist) {
+          minDist = d;
+          bestTarget = { gx: p.gx, gy: p.gy, dist: d, targetRef: p };
+        }
+      }
+    }
+
+    if (bestTarget !== undefined) {
+      if (bestTarget.dist < ATTACK_RANGE) {
+        c.state = 'attack';
+        if (bestTarget.targetRef !== undefined) {
+          if ('respawnTimer' in bestTarget.targetRef) {
+            // Target is a player
+            const baseDmg = c.species === 'troll' ? 34 : 20;
+            damagePlayer(bestTarget.targetRef, dt * baseDmg * c.traits.size);
+          } else {
+            // Target is a prey animal
+            bestTarget.targetRef.hp -= dt * 18 * c.traits.size;
+            if (bestTarget.targetRef.hp <= 0) {
+              c.hp = Math.min(c.maxHp, c.hp + 6); // Carnivore heals from kill
+            }
+          }
+        }
+      } else {
+        c.state = 'chase';
+        moveWithSeparation(c, bestTarget.gx, bestTarget.gy, speed * 1.3, dt, world, allCreatures);
+      }
+      return;
+    }
+  }
+
+  // 3. Herbivore Plant Foraging (Rabbits & Deer seek out and eat flora)
+  if (c.species === 'rabbit' || c.species === 'deer') {
+    const edible = findClosestEdibleFlora(flora, c.gx, c.gy, 8);
+    if (edible !== undefined) {
+      const dx = edible.gx - c.gx;
+      const dy = edible.gy - c.gy;
+      const dist = Math.sqrt(dx * dx + dy * dy); // @tier-b — flora forage distance, pixels only
+
+      if (dist < 0.9) {
+        // In range to nibble / eat plant
+        c.state = 'eat';
+        c.eatTimer += dt;
+        if (c.eatTimer >= 1.8) {
+          // Finished eating plant — remove consumed flora item and heal
+          const fIdx = flora.indexOf(edible);
+          if (fIdx !== -1) flora.splice(fIdx, 1);
+          c.hp = Math.min(c.maxHp, c.hp + 5);
+          c.eatTimer = 0;
+          c.targetGx = NaN;
+          c.targetGy = NaN;
+        }
+        return;
+      } else {
+        c.state = 'forage';
+        moveWithSeparation(c, edible.gx, edible.gy, speed * 0.75, dt, world, allCreatures);
+        return;
+      }
+    }
+  }
+
+  // 4. Default Peaceful Wander
   c.state = 'wander';
+  c.eatTimer = 0;
   c.idleTimer -= dt;
   if (c.idleTimer <= 0 || isNaN(c.targetGx)) {
-    // Pick a new random wander target nearby.
-    const angle = c.rng.next() * 6.28318;   // @tier-b — angle for wander direction, pixels only
+    // Pick a new random wander target nearby
+    const angle = c.rng.next() * 6.28318; // @tier-b — wander angle, pixels only
     const dist  = 3 + c.rng.next() * 5;
-    c.targetGx  = clamp(Math.round(c.gx + Math.cos(angle) * dist), 0, W - 1);  // @tier-b
-    c.targetGy  = clamp(Math.round(c.gy + Math.sin(angle) * dist), 0, H - 1);  // @tier-b
-    c.idleTimer = 2 + c.rng.next() * 4;
+    c.targetGx  = clamp(Math.round(c.gx + Math.cos(angle) * dist), 8, W - 9); // @tier-b
+    c.targetGy  = clamp(Math.round(c.gy + Math.sin(angle) * dist), 8, H - 9); // @tier-b
+    c.idleTimer = 2.5 + c.rng.next() * 4;
   }
-  moveTowardsTile(c, c.targetGx, c.targetGy, speed * 0.6, dt, world);
+  moveWithSeparation(c, c.targetGx, c.targetGy, speed * 0.55, dt, world, allCreatures);
 }
 
-/** Move a creature one step toward (tx, ty) at the given speed. */
-function moveTowardsTile(
+/** Move a creature with soft Boid separation and map margin avoidance. */
+function moveWithSeparation(
   c: Creature,
   tx: number,
   ty: number,
   speed: number,
   dt: number,
   world: WorldTerrain,
+  allCreatures: Creature[],
 ): void {
-  const dx = tx - c.gx;
-  const dy = ty - c.gy;
-  const d  = Math.sqrt(dx * dx + dy * dy);  // @tier-b — movement distance, pixels only
-  if (d < 0.05) return;
+  let dx = tx - c.gx;
+  let dy = ty - c.gy;
+  const d = Math.sqrt(dx * dx + dy * dy); // @tier-b — movement distance, pixels only
+  if (d > 0.01) {
+    dx /= d;
+    dy /= d;
+  }
+
+  // 1. Soft Boid Separation force to prevent stacking and conga lines
+  let sepX = 0;
+  let sepY = 0;
+  for (let i = 0; i < allCreatures.length; i++) {
+    const other = allCreatures[i];
+    if (other === undefined || other.id === c.id || other.hp <= 0) continue;
+    const ox = c.gx - other.gx;
+    const oy = c.gy - other.gy;
+    const distSq = ox * ox + oy * oy;
+    if (distSq < 2.0 && distSq > 0.0001) {
+      const dist = Math.sqrt(distSq); // @tier-b
+      const strength = (1.4 - dist) / 1.4;
+      sepX += (ox / dist) * strength * 0.8;
+      sepY += (oy / dist) * strength * 0.8;
+    }
+  }
+
+  // 2. Soft Map Margin Avoidance (keep creatures dispersed in open world)
+  const MARGIN = 10;
+  if (c.gx < MARGIN) sepX += (MARGIN - c.gx) * 0.2;
+  if (c.gx > W - MARGIN) sepX -= (c.gx - (W - MARGIN)) * 0.2;
+  if (c.gy < MARGIN) sepY += (MARGIN - c.gy) * 0.2;
+  if (c.gy > H - MARGIN) sepY -= (c.gy - (H - MARGIN)) * 0.2;
+
+  const moveX = dx + sepX;
+  const moveY = dy + sepY;
+  const moveLen = Math.sqrt(moveX * moveX + moveY * moveY); // @tier-b
+  if (moveLen < 0.01) return;
+
   const step = speed * dt;
-  const nx   = c.gx + (dx / d) * step;
-  const ny   = c.gy + (dy / d) * step;
-  // Simple walkability check: only move if the destination tile is walkable.
+  const nx = c.gx + (moveX / moveLen) * step;
+  const ny = c.gy + (moveY / moveLen) * step;
+
   const tileX = Math.floor(nx);
   const tileY = Math.floor(ny);
   if (isWalkable(world, tileX, tileY)) {
-    c.gx = nx;
-    c.gy = ny;
+    c.gx = clamp(nx, 2, W - 3);
+    c.gy = clamp(ny, 2, H - 3);
   } else {
-    // Blocked — pick a new target next idle.
     c.targetGx = NaN;
     c.targetGy = NaN;
   }
@@ -265,9 +424,7 @@ function moveTowardsTile(
 /**
  * Evolve the population. Called every GENERATION_TICKS ticks.
  *
- * Survivors reproduce; dead lineages are replaced. Traits drift by MUTATION each generation.
- * The world seed is not involved here — each creature's own `rng` drives mutation, so
- * evolution is deterministic from the creature's identity.
+ * Survivors reproduce; dead lineages are replaced uniformly across the world.
  */
 export function evolveGeneration(
   creatures: Creature[],
@@ -288,22 +445,22 @@ export function evolveGeneration(
     if (creatures.length + toAdd.length >= MAX_CREATURES) break;
     if (c.traits.fertility > 1.0 && c.rng.next() < (c.traits.fertility - 1.0) * 0.5) {
       const child = spawnCreature(c.species, c.gx, c.gy, worldSeed);
-      // Child inherits parent traits with a mutation.
       (child as { traits: Traits }).traits = mutateTrait(c.traits, child.rng, MUTATION);
       (child as { generation: number }).generation = c.generation + 1;
       toAdd.push(child);
     }
   }
 
-  // Replenish extinct species.
+  // Replenish extinct species with uniform spatial distribution across the world
   const counts: Partial<Record<Species, number>> = {};
   for (const c of creatures) counts[c.species] = (counts[c.species] ?? 0) + 1;
-  const minima: Record<Species, number> = { rabbit: 5, deer: 3, fox: 2, wolf: 2, troll: 1 };
+  const minima: Record<Species, number> = { rabbit: 10, deer: 6, fox: 4, wolf: 3, troll: 2 };
   for (const [species, min] of Object.entries(minima) as [Species, number][]) {
     const current = counts[species] ?? 0;
     for (let n = current; n < min && creatures.length + toAdd.length < MAX_CREATURES; n++) {
-      const gx = Math.floor(2 + (worldSeed ^ n) % (W - 4));
-      const gy = Math.floor(2 + (worldSeed ^ (n * 7)) % (H - 4));
+      const rng = createRng(hash2(worldSeed, n + 1, current * 17 + 5));
+      const gx = Math.floor(12 + rng.next() * (W - 24));
+      const gy = Math.floor(12 + rng.next() * (H - 24));
       if (isWalkable(world, gx, gy)) {
         toAdd.push(spawnCreature(species, gx, gy, worldSeed));
       }

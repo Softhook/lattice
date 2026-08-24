@@ -104,9 +104,9 @@ export const HEIGHT_WATER = 1;
 /** Below this → sand/shore. */
 export const HEIGHT_SAND  = 2;
 /** Above this → rock face. */
-export const HEIGHT_ROCK  = 8;
+export const HEIGHT_ROCK  = 14;
 /** Above this → snow cap. */
-export const HEIGHT_SNOW  = 11;
+export const HEIGHT_SNOW  = 19;
 
 /** Pick the terrain ink slot name based on a height unit value. */
 export function terrainColor(heightUnits: number): Rgba {

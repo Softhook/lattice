@@ -14,6 +14,8 @@ import type { WorldTerrain } from './world.js';
 import { dig, raise, isWalkable, W, H } from './world.js';
 import type { Building } from './buildings.js';
 import { placeBuilding, type BuildingKind } from './buildings.js';
+import type { FloraItem } from './flora.js';
+import { harvestFloraAt } from './flora.js';
 
 // ── Player state ───────────────────────────────────────────────────────────────
 
@@ -61,11 +63,11 @@ export const BUILD_KINDS: readonly BuildingKind[] = ['wall', 'floor', 'tower', '
 
 // ── Factory ────────────────────────────────────────────────────────────────────
 
-/** Default spawn positions: player 1 near top-left third, player 2 near top-right third. */
+/** Default spawn positions for 200x200 world: player 1 top-left, player 2 top-right. */
 export function createPlayers(): [Player, Player] {
   return [
-    makePlayer(0, 32, 32),
-    makePlayer(1, 128, 32),
+    makePlayer(0, 40, 40),
+    makePlayer(1, 160, 40),
   ];
 }
 
@@ -147,6 +149,57 @@ export function buildAtFacing(
   if (player.respawnTimer > 0 || player.mode === 'move') return undefined;
   const { gx, gy } = facingTile(player);
   return placeBuilding(player.mode, gx, gy, world, buildings);
+}
+
+/**
+ * Interact / Chop / Harvest / Mine at the player's facing tile.
+ *
+ * - Chops down trees (pine, oak)
+ * - Gathers flowers, bushes, and mushrooms
+ * - Mines rocks/boulders
+ * - Repairs damaged buildings
+ */
+export function interactAtFacing(
+  player: Player,
+  world: WorldTerrain,
+  flora: FloraItem[],
+  buildings: Building[],
+): string | undefined {
+  if (player.respawnTimer > 0) return undefined;
+  const { gx, gy } = facingTile(player);
+
+  // 1. Check for flora at the facing tile
+  const harvested = harvestFloraAt(flora, gx, gy);
+  if (harvested !== undefined) {
+    player.hurtFlash = 0.15;
+    switch (harvested.kind) {
+      case 'pine':
+      case 'oak':
+        return `CHOPPED ${harvested.kind.toUpperCase()} TREE`;
+      case 'flowers':
+        return 'GATHERED WILDFLOWERS';
+      case 'bush':
+        return 'HARVESTED BERRIES';
+      case 'mushroom':
+        return 'FORAGED MUSHROOM';
+      case 'rock':
+        return 'MINED BOULDER';
+    }
+  }
+
+  // 2. Check if facing a building (can repair building if damaged)
+  for (const b of buildings) {
+    if (gx >= b.gx && gx < b.gx + b.w && gy >= b.gy && gy < b.gy + b.d) {
+      if (b.hp < b.maxHp) {
+        b.hp = Math.min(b.maxHp, b.hp + 30);
+        player.hurtFlash = 0.1;
+        return `REPAIRED ${b.kind.toUpperCase()}`;
+      }
+      return `${b.kind.toUpperCase()} (HP: ${Math.round(b.hp)}/${b.maxHp})`;
+    }
+  }
+
+  return undefined;
 }
 
 /** Dig (lower ground) at the player's facing tile. */

@@ -15,16 +15,15 @@ import { TileGrid, type HeightField, type MutableTileSource } from '@latticekit/
 
 // ── map dimensions ─────────────────────────────────────────────────────────────
 
-/** Tile count along each axis. 160 ensures the map is well beyond viewport edges at the
- *  opening zoom, satisfying the "extent ≥ 1.6× viewport" rule for a 1440-wide viewport. */
-export const W = 160;
-export const H = 160;
+/** Tile count along each axis. 200 tiles provides an expansive, vast landscape to explore. */
+export const W = 200;
+export const H = 200;
 
-/** Height units per level — the art proportion. 8 px per unit gives 96 px maximum height. */
-export const STEP_PX = 8;
+/** Height units per level — the art proportion. 10 px per unit gives 240 px maximum height. */
+export const STEP_PX = 10;
 
 /** Maximum terrain height in height units. Peaks reach this; sea level is 0. */
-export const MAX_HEIGHT_UNITS = 12;
+export const MAX_HEIGHT_UNITS = 24;
 
 /** Maximum terrain height in world pixels — what cameras and input.setTerrain need. */
 export const MAX_HEIGHT_PX = MAX_HEIGHT_UNITS * STEP_PX;
@@ -57,10 +56,8 @@ export interface WorldTerrain {
 /**
  * Generate the world from a seed. Same seed → identical terrain, creature spawns, etc.
  *
- * The noise parameters were chosen so the world has distinct biomes (coast, meadow, ridge)
- * visible in the opening frame without needing to zoom out. `fbm2` is Tier B (uses cos/sin
- * internally via `noise2`), which is fine — terrain heights are pixels only and are never
- * hashed or persisted directly (we persist raw height units, which are integers).
+ * Multi-frequency octave noise creates dramatic continental relief, alpine ridges,
+ * mountain cliffs, river valleys, and rolling meadows.
  */
 export function createWorld(seed: number): WorldTerrain {
   // Vertices: one more than tile count on each axis.
@@ -69,9 +66,13 @@ export function createWorld(seed: number): WorldTerrain {
 
   heights.fillFrom((gx, gy) => {
     // @tier-b — terrain shape uses fbm2 (transcendental). Pixels only, never hashed.
-    const n = fbm2(seed, gx * 0.025, gy * 0.025, 5);
-    // Remap [-1,1] noise to [0, MAX_HEIGHT_UNITS], biased toward lower ground
-    const raw = (n + 1) * 0.5 * MAX_HEIGHT_UNITS * 1.1 - 1.5;
+    const continental = fbm2(seed, gx * 0.012, gy * 0.012, 4);
+    const ridges = Math.abs(fbm2(seed ^ 0x9999, gx * 0.022, gy * 0.022, 3)) * 2 - 1;
+    const hills = fbm2(seed ^ 0x5555, gx * 0.045, gy * 0.045, 2) * 0.35;
+
+    const combined = continental * 0.6 + ridges * 0.4 + hills;
+    // Scaled to [0, MAX_HEIGHT_UNITS] with rich height variation
+    const raw = (combined + 0.85) * 0.55 * MAX_HEIGHT_UNITS - 1.2;
     return clamp(Math.round(raw), 0, MAX_HEIGHT_UNITS);
   });
 
@@ -102,10 +103,10 @@ export function createWorld(seed: number): WorldTerrain {
 
 /** Map a height unit value to its default material. */
 function materialFromHeight(h: number): number {
-  if (h <= 0) return MAT_WATER;
-  if (h <= 1) return MAT_SAND;
-  if (h >= 11) return MAT_SNOW;
-  if (h >= 8)  return MAT_ROCK;
+  if (h <= 1) return MAT_WATER;
+  if (h <= 2) return MAT_SAND;
+  if (h >= 19) return MAT_SNOW;
+  if (h >= 14) return MAT_ROCK;
   return MAT_GRASS;
 }
 
