@@ -510,17 +510,20 @@ function drawViewport(
   renderFrame(pen, passes, ORDER);
 }
 
-/** Resize both cameras and the surface to fill the window. */
+/** Resize both cameras and the surface to fill the viewport dimensions. */
 export function resizeCameras(
   surface: { resize(w: number, h: number, ratio: number): void; readonly pixelRatio: number },
   camera1: Camera,
   camera2: Camera,
+  width?: number,
+  height?: number,
 ): void {
-  const w    = Math.max(1, window.innerWidth);
-  const h    = Math.max(1, window.innerHeight - 32);
+  const w = Math.max(1, width ?? (typeof window !== 'undefined' ? window.innerWidth : 1280));
+  const h = Math.max(1, height ?? (typeof window !== 'undefined' ? window.innerHeight : 720));
   surface.resize(w, h, surface.pixelRatio);
 
   const half = Math.max(1, Math.floor(w / 2));
   camera1.resize(half, h);
   camera2.resize(half, h);
 }
+

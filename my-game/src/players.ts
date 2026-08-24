@@ -342,7 +342,8 @@ export function interactAtFacing(
   const harvest = harvestFloraAt(flora, gx, gy);
   if (harvest !== undefined) {
     const kind = harvest.item.kind;
-    const isTree = kind === 'pine' || kind === 'oak';
+    const isTree = kind === 'pine' || kind === 'oak' || kind === 'spruce' || kind === 'birch' || kind === 'swamp_tree';
+    const isRock = kind === 'rock' || kind === 'rock_spire';
     const axeBonus = (player.weapon === 'axe' && isTree) ? 2 : 0;
 
     player.hurtFlash = 0.12;
@@ -356,7 +357,8 @@ export function interactAtFacing(
 
     const soundType: InteractType =
       isTree ? 'chop' :
-      kind === 'rock' ? 'mine' : 'forage';
+      isRock ? 'mine' : 'forage';
+
 
     return { type: soundType, label };
   }

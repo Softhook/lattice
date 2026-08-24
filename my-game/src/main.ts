@@ -514,10 +514,63 @@ loop.onRender((_alpha, t, nowMs) => {
   );
 });
 
+// ── UI Actions & Fullscreen ───────────────────────────────────────────────────
+
+function toggleFullscreen(): void {
+  if (!document.fullscreenElement) {
+    document.documentElement.requestFullscreen().catch(() => {});
+  } else {
+    document.exitFullscreen().catch(() => {});
+  }
+}
+
+function createNewWorld(): void {
+  if (confirm('Create a brand new world from scratch? (Current progress will be reset)')) {
+    localStorage.removeItem('verdant-v1');
+    const newSeed = Math.floor(Math.random() * 900000) + 100000;
+    const url = new URL(window.location.href);
+    url.searchParams.set('seed', String(newSeed));
+    window.location.href = url.toString();
+  }
+}
+
+function toggleControls(): void {
+  const controlsEl = document.getElementById('controls');
+  if (controlsEl) {
+    controlsEl.classList.toggle('hidden');
+    fit();
+  }
+}
+
+const btnFullscreen = document.getElementById('btn-fullscreen');
+btnFullscreen?.addEventListener('click', toggleFullscreen);
+
+const btnNewWorld = document.getElementById('btn-new-world');
+btnNewWorld?.addEventListener('click', createNewWorld);
+
+const btnControlsToggle = document.getElementById('btn-controls-toggle');
+btnControlsToggle?.addEventListener('click', toggleControls);
+
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'F11') {
+    e.preventDefault();
+    toggleFullscreen();
+  } else if (e.key === 'F2') {
+    e.preventDefault();
+    createNewWorld();
+  }
+});
+
+document.addEventListener('fullscreenchange', () => {
+  fit();
+});
+
 // ── Resize ────────────────────────────────────────────────────────────────────
 
 function fit(): void {
-  resizeCameras(surface, camera1, camera2);
+  const w = canvasEl.clientWidth || window.innerWidth;
+  const h = canvasEl.clientHeight || window.innerHeight;
+  resizeCameras(surface, camera1, camera2, w, h);
 }
 window.addEventListener('resize', fit);
 if (window.visualViewport !== null) {
@@ -548,3 +601,4 @@ if (hotMeta.hot) {
 // ── Go! ────────────────────────────────────────────────────────────────────────
 
 loop.start();
+

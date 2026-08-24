@@ -20,10 +20,55 @@
         flex-direction: column;
         height: 100vh;
       }
+      #top-bar {
+        position: absolute;
+        top: 12px;
+        right: 14px;
+        z-index: 100;
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+      .top-btn {
+        background: rgba(13, 27, 10, 0.85);
+        color: #d2e8bf;
+        border: 1px solid #2d4525;
+        border-radius: 6px;
+        padding: 6px 12px;
+        font-size: 12px;
+        font-weight: 700;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        backdrop-filter: blur(8px);
+        transition: all 0.15s ease;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+      }
+      .top-btn:hover {
+        background: rgba(28, 54, 22, 0.95);
+        color: #ffffff;
+        border-color: #4f803f;
+        transform: translateY(-1px);
+      }
+      .top-btn:active {
+        transform: translateY(1px);
+      }
+      .top-btn.btn-accent {
+        background: rgba(20, 60, 35, 0.85);
+        border-color: #27ae60;
+        color: #7eed9e;
+      }
+      .top-btn.btn-accent:hover {
+        background: rgba(25, 90, 50, 0.95);
+        color: #ffffff;
+      }
       #app {
         position: relative;
         flex: 1;
         min-height: 0;
+        width: 100%;
+        height: 100%;
       }
       #app canvas {
         display: block;
@@ -38,6 +83,10 @@
         border-top: 2px solid #1c2b17;
         padding: 8px 16px;
         flex-shrink: 0;
+        transition: transform 0.25s ease, opacity 0.25s ease;
+      }
+      #controls.hidden {
+        display: none;
       }
       .player-legend {
         display: flex;
@@ -84,6 +133,17 @@
     </style>
   </head>
   <body>
+    <div id="top-bar">
+      <button id="btn-new-world" class="top-btn" title="Generate a fresh new world with a new seed (F2)">
+        <span>↺</span> New World
+      </button>
+      <button id="btn-fullscreen" class="top-btn btn-accent" title="Toggle Fullscreen Mode (F11)">
+        <span>⛶</span> Fullscreen
+      </button>
+      <button id="btn-controls-toggle" class="top-btn" title="Toggle Controls Bar (H)">
+        <span>⌨</span> Controls
+      </button>
+    </div>
     <div id="app">
       <canvas id="viewport"></canvas>
     </div>
@@ -118,3 +178,4 @@
     <script type="module" src="./src/main.ts"></script>
   </body>
 </html>
+

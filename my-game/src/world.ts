@@ -56,11 +56,11 @@ export function getBiomeBlendAt(gx: number, gy: number, seed: number, elevation:
   const ny = gy / H;
 
   // Temperature gradient: cooler north (low Y) and alpine heights, warmer south (high Y)
-  const tempNoise = fbm2(seed ^ 0x7777, gx * 0.0035, gy * 0.0035, 3);
-  const temp = clamp(0.5 + tempNoise * 0.35 + (ny - 0.5) * 0.4 - (elevation / MAX_HEIGHT_UNITS) * 0.45, 0, 1);
+  const tempNoise = fbm2(seed ^ 0x7777, gx * 0.012, gy * 0.012, 3);
+  const temp = clamp(0.5 + tempNoise * 0.4 + (ny - 0.5) * 0.3 - (elevation / MAX_HEIGHT_UNITS) * 0.35, 0, 1);
 
   // Moisture noise: rain shadows vs verdant basins
-  const moistNoise = fbm2(seed ^ 0x3333, gx * 0.004, gy * 0.004, 3);
+  const moistNoise = fbm2(seed ^ 0x3333, gx * 0.014, gy * 0.014, 3);
   const moist = clamp(0.5 + moistNoise * 0.45, 0, 1);
 
   const nameMap: Record<BiomeKind, { name: string; icon: string }> = {
@@ -76,30 +76,30 @@ export function getBiomeBlendAt(gx: number, gy: number, seed: number, elevation:
     const info = { kind: 'coastal' as BiomeKind, name: 'Coastal Archipelago', icon: '🏖️', temperature: temp, moisture: moist };
     return { primary: 'coastal', secondary: 'meadow', blend: 0, info };
   }
-  if (elevation >= 15) {
+  if (elevation >= 14) {
     const info = { kind: 'alpine' as BiomeKind, name: 'Alpine Peaks', icon: '🏔️', temperature: temp, moisture: moist };
-    return { primary: 'alpine', secondary: 'taiga', blend: clamp((18 - elevation) / 4, 0, 1), info };
+    return { primary: 'alpine', secondary: 'taiga', blend: clamp((17 - elevation) / 3, 0, 1), info };
   }
 
   // Continuous biome affinity weights
-  const badlandsAffinity = clamp((temp - 0.48) / 0.16, 0, 1) * clamp((0.52 - moist) / 0.16, 0, 1);
-  const wetlandsAffinity = clamp((moist - 0.50) / 0.16, 0, 1) * clamp((10 - elevation) / 6, 0, 1);
-  const taigaAffinity = clamp((0.48 - temp) / 0.16, 0, 1);
+  const badlandsAffinity = clamp((temp - 0.46) / 0.14, 0, 1) * clamp((0.54 - moist) / 0.14, 0, 1);
+  const wetlandsAffinity = clamp((moist - 0.48) / 0.14, 0, 1) * clamp((10 - elevation) / 6, 0, 1);
+  const taigaAffinity = clamp((0.50 - temp) / 0.14, 0, 1);
 
   // Determine primary and secondary biomes
   let primary: BiomeKind = 'meadow';
   let secondary: BiomeKind = 'meadow';
   let secondaryWeight = 0;
 
-  if (badlandsAffinity > 0.5) {
+  if (badlandsAffinity > 0.45) {
     primary = 'badlands';
     secondary = 'meadow';
     secondaryWeight = 1 - badlandsAffinity;
-  } else if (taigaAffinity > 0.5) {
+  } else if (taigaAffinity > 0.45) {
     primary = 'taiga';
     secondary = 'meadow';
     secondaryWeight = 1 - taigaAffinity;
-  } else if (wetlandsAffinity > 0.5) {
+  } else if (wetlandsAffinity > 0.45) {
     primary = 'wetlands';
     secondary = 'meadow';
     secondaryWeight = 1 - wetlandsAffinity;
@@ -127,6 +127,7 @@ export function getBiomeBlendAt(gx: number, gy: number, seed: number, elevation:
 
   return { primary, secondary, blend: secondaryWeight, info };
 }
+
 
 /**
  * Determine the primary biome and environmental climate at (gx, gy).
@@ -201,64 +202,65 @@ export function createWorld(seed: number): WorldTerrain {
     const ny = gy / H;
 
     // Macro climate fields
-    const tempNoise = fbm2(seed ^ 0x7777, gx * 0.0035, gy * 0.0035, 3);
-    const temp = clamp(0.5 + tempNoise * 0.35 + (ny - 0.5) * 0.4, 0, 1);
-    const moistNoise = fbm2(seed ^ 0x3333, gx * 0.004, gy * 0.004, 3);
+    const tempNoise = fbm2(seed ^ 0x7777, gx * 0.012, gy * 0.012, 3);
+    const temp = clamp(0.5 + tempNoise * 0.4 + (ny - 0.5) * 0.3, 0, 1);
+    const moistNoise = fbm2(seed ^ 0x3333, gx * 0.014, gy * 0.014, 3);
     const moist = clamp(0.5 + moistNoise * 0.45, 0, 1);
-    const continental = fbm2(seed, gx * 0.0028, gy * 0.0028, 4);
+    const continental = fbm2(seed, gx * 0.009, gy * 0.009, 3);
 
     // Continuous topographical layer weights
     const alpineW = clamp((continental - 0.12) / 0.18, 0, 1);
     const coastalW = clamp((-0.22 - continental) / 0.15, 0, 1);
-    const badlandsW = (1 - alpineW) * (1 - coastalW) * clamp((temp - 0.48) / 0.16, 0, 1) * clamp((0.52 - moist) / 0.16, 0, 1);
-    const wetlandsW = (1 - alpineW) * (1 - coastalW) * clamp((moist - 0.50) / 0.16, 0, 1) * clamp((0.15 - continental) / 0.15, 0, 1);
-    const taigaW = (1 - alpineW) * (1 - coastalW) * (1 - badlandsW) * clamp((0.48 - temp) / 0.16, 0, 1);
+    const badlandsW = (1 - alpineW) * (1 - coastalW) * clamp((temp - 0.46) / 0.14, 0, 1) * clamp((0.54 - moist) / 0.14, 0, 1);
+    const wetlandsW = (1 - alpineW) * (1 - coastalW) * clamp((moist - 0.48) / 0.14, 0, 1) * clamp((0.15 - continental) / 0.15, 0, 1);
+    const taigaW = (1 - alpineW) * (1 - coastalW) * (1 - badlandsW) * clamp((0.50 - temp) / 0.14, 0, 1);
     const meadowW = Math.max(0, 1 - alpineW - coastalW - badlandsW - wetlandsW - taigaW);
 
     let blendedH = 0;
 
     if (alpineW > 0.01) {
-      const sharpRidge = 1 - Math.abs(fbm2(seed ^ 0x9999, gx * 0.008, gy * 0.008, 4));
-      const needleSpires = Math.max(0, fbm2(seed ^ 0x8888, gx * 0.025, gy * 0.025, 3));
+      const sharpRidge = 1 - Math.abs(fbm2(seed ^ 0x9999, gx * 0.018, gy * 0.018, 3));
+      const needleSpires = Math.max(0, fbm2(seed ^ 0x8888, gx * 0.035, gy * 0.035, 2));
       const alpineH = Math.pow(sharpRidge, 2.2) * 19 + needleSpires * 5 + 4; // @tier-b
       blendedH += alpineH * alpineW;
     }
 
     if (badlandsW > 0.01) {
-      const mesaBase = fbm2(seed ^ 0x4444, gx * 0.006, gy * 0.006, 3);
-      const canyonCut = Math.abs(fbm2(seed ^ 0x2222, gx * 0.015, gy * 0.015, 2));
+      const mesaBase = fbm2(seed ^ 0x4444, gx * 0.014, gy * 0.014, 3);
+      const canyonCut = Math.abs(fbm2(seed ^ 0x2222, gx * 0.025, gy * 0.025, 2));
       const mesaContinuous = (mesaBase * 0.7 + (1 - canyonCut) * 0.5 + 0.4) * 16;
       const mesaH = Math.floor(mesaContinuous / 3.2) * 3.2 + 2;
       blendedH += mesaH * badlandsW;
     }
 
     if (wetlandsW > 0.01) {
-      const marsh = fbm2(seed ^ 0x1111, gx * 0.012, gy * 0.012, 3);
-      const slough = Math.abs(fbm2(seed ^ 0x6666, gx * 0.02, gy * 0.02, 2));
+      const marsh = fbm2(seed ^ 0x1111, gx * 0.02, gy * 0.02, 3);
+      const slough = Math.abs(fbm2(seed ^ 0x6666, gx * 0.035, gy * 0.035, 2));
       const wetlandsH = slough < 0.12 ? 0 : marsh > 0.15 ? 3 : marsh > -0.1 ? 2 : 1;
       blendedH += wetlandsH * wetlandsW;
     }
 
     if (taigaW > 0.01) {
-      const taigaNoise = fbm2(seed ^ 0xaaaa, gx * 0.008, gy * 0.008, 3) * 0.7 + fbm2(seed ^ 0xbbbb, gx * 0.02, gy * 0.02, 2) * 0.3;
+      const taigaNoise = fbm2(seed ^ 0xaaaa, gx * 0.016, gy * 0.016, 3) * 0.7 + fbm2(seed ^ 0xbbbb, gx * 0.03, gy * 0.03, 2) * 0.3;
       const taigaH = (taigaNoise + 0.5) * 13 + 3;
       blendedH += taigaH * taigaW;
     }
 
     if (coastalW > 0.01) {
-      const dune = fbm2(seed ^ 0xcccc, gx * 0.008, gy * 0.008, 2);
+      const dune = fbm2(seed ^ 0xcccc, gx * 0.016, gy * 0.016, 2);
       const coastalH = (dune + 0.3) * 4;
       blendedH += coastalH * coastalW;
     }
 
     if (meadowW > 0.01) {
-      const meadow = fbm2(seed ^ 0x5555, gx * 0.006, gy * 0.006, 3) * 0.75 + fbm2(seed ^ 0x1234, gx * 0.016, gy * 0.016, 2) * 0.25;
+      const meadow = fbm2(seed ^ 0x5555, gx * 0.014, gy * 0.014, 3) * 0.75 + fbm2(seed ^ 0x1234, gx * 0.028, gy * 0.028, 2) * 0.25;
       const meadowH = (meadow + 0.5) * 9 + 2;
       blendedH += meadowH * meadowW;
     }
 
     return clamp(Math.round(blendedH), 0, MAX_HEIGHT_UNITS);
   });
+
 
 
   // Surface material & Precalculated tile colors with smooth biome color blending
