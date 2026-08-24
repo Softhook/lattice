@@ -34,11 +34,17 @@ export interface ActionEdges {
   p1Raise: boolean;
   p1Build: boolean;
   p1Cycle: boolean;
+  p1Attack: boolean;
+  p1CycleWeapon: boolean;
+  p1CraftWeapon: boolean;
 
   p2Dig: boolean;
   p2Raise: boolean;
   p2Build: boolean;
   p2Cycle: boolean;
+  p2Attack: boolean;
+  p2CycleWeapon: boolean;
+  p2CraftWeapon: boolean;
 }
 
 export function createActionEdges(): ActionEdges {
@@ -47,10 +53,17 @@ export function createActionEdges(): ActionEdges {
     p1Raise: false,
     p1Build: false,
     p1Cycle: false,
+    p1Attack: false,
+    p1CycleWeapon: false,
+    p1CraftWeapon: false,
+
     p2Dig: false,
     p2Raise: false,
     p2Build: false,
     p2Cycle: false,
+    p2Attack: false,
+    p2CycleWeapon: false,
+    p2CraftWeapon: false,
   };
 }
 
@@ -115,11 +128,17 @@ export function pollActions(
   out.p1Raise = curr.has('KeyR') && !prev.has('KeyR');
   out.p1Build = curr.has('KeyE') && !prev.has('KeyE');
   out.p1Cycle = curr.has('KeyF') && !prev.has('KeyF');
+  out.p1Attack = curr.has('Space') && !prev.has('Space');
+  out.p1CycleWeapon = curr.has('KeyC') && !prev.has('KeyC');
+  out.p1CraftWeapon = curr.has('KeyV') && !prev.has('KeyV');
 
   out.p2Dig   = curr.has('KeyU') && !prev.has('KeyU');
   out.p2Raise = curr.has('KeyY') && !prev.has('KeyY');
   out.p2Build = curr.has('KeyO') && !prev.has('KeyO');
   out.p2Cycle = curr.has('KeyH') && !prev.has('KeyH');
+  out.p2Attack = curr.has('KeyN') && !prev.has('KeyN');
+  out.p2CycleWeapon = curr.has('Comma') && !prev.has('Comma');
+  out.p2CraftWeapon = curr.has('Period') && !prev.has('Period');
 }
 
 /** Copy current held set into `target` Set in-place without reallocating. */

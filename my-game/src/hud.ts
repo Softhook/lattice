@@ -84,8 +84,8 @@ export function drawPlayerHud(pen: Pen, player: Player): void {
 
   const padX = 14;
   const padY = 14;
-  const hudW = 270;
-  const hudH = 100;
+  const hudW = 280;
+  const hudH = 132;
 
   const isHurt = player.hurtFlash > 0;
   const cardBorder = isHurt ? hex('#e74c3c') : pColor;
@@ -146,7 +146,7 @@ export function drawPlayerHud(pen: Pen, player: Player): void {
   );
   screenText(
     pen,
-    padX + 100,
+    padX + 105,
     invY,
     `STONE: ${inv.stone}`,
     UI_STONE_COL,
@@ -154,7 +154,7 @@ export function drawPlayerHud(pen: Pen, player: Player): void {
   );
   screenText(
     pen,
-    padX + 190,
+    padX + 200,
     invY,
     `FIBER: ${inv.fiber}`,
     UI_FIBER_COL,
@@ -163,20 +163,20 @@ export function drawPlayerHud(pen: Pen, player: Player): void {
 
   // 5. Tool / Mode badge
   const toolX = padX + 10;
-  const toolY = padY + 58;
+  const toolY = padY + 56;
   const toolW = hudW - 20;
-  const toolH = 32;
+  const toolH = 30;
 
   pen.surface.poly(setBox(toolX, toolY, toolW, toolH), 4, hex('#132110'));
 
   const actKey = pIdx === 0 ? '[E]' : '[O]';
-  const cycleKey = pIdx === 0 ? '[F] Mode' : '[H] Mode';
+  const cycleKey = pIdx === 0 ? '[F] Build' : '[H] Build';
 
   let modeText = '';
   let modeColor = hex('#bdc3c7');
 
   if (player.mode === 'move') {
-    modeText = `MOVE  ${actKey} HARVEST/INTERACT`;
+    modeText = `TERRAFORM [Q]Dig [R]Raise`;
   } else {
     const cost = BUILDING_COSTS[player.mode];
     const affordable = canAffordBuilding(player, player.mode);
@@ -196,7 +196,7 @@ export function drawPlayerHud(pen: Pen, player: Player): void {
   screenText(
     pen,
     toolX + 8,
-    toolY + 16,
+    toolY + 15,
     modeText,
     modeColor,
     { ...DEFAULT_TEXT, size: 10, weight: 700, align: -1, baseline: 0 },
@@ -205,13 +205,54 @@ export function drawPlayerHud(pen: Pen, player: Player): void {
   screenText(
     pen,
     toolX + toolW - 8,
-    toolY + 16,
+    toolY + 15,
     cycleKey,
     hex('#8da882'),
     { ...DEFAULT_TEXT, size: 10, weight: 600, align: 1, baseline: 0 },
   );
 
-  // 6. Floating action notification if present
+  // 6. Weapon & Combat Bar
+  const wepX = padX + 10;
+  const wepY = padY + 92;
+  const wepW = hudW - 20;
+  const wepH = 30;
+
+  pen.surface.poly(setBox(wepX, wepY, wepW, wepH), 4, hex('#181a24'));
+  pen.surface.stroke(setBox(wepX, wepY, wepW, wepH), 4, true, hex('#3d5a80'), 1);
+
+  const atkKey = pIdx === 0 ? '[Space]' : '[N]';
+  const wepCycleKey = pIdx === 0 ? '[C] Swap' : '[,] Swap';
+  const wepCraftKey = pIdx === 0 ? '[V] Craft' : '[.] Craft';
+
+  const wName = player.weapon.toUpperCase();
+  screenText(
+    pen,
+    wepX + 8,
+    wepY + 15,
+    `${atkKey} ${wName}`,
+    hex('#90caf9'),
+    { ...DEFAULT_TEXT, size: 10, weight: 800, align: -1, baseline: 0 },
+  );
+
+  screenText(
+    pen,
+    wepX + wepW - 75,
+    wepY + 15,
+    wepCycleKey,
+    hex('#b0bec5'),
+    { ...DEFAULT_TEXT, size: 9, weight: 600, align: -1, baseline: 0 },
+  );
+
+  screenText(
+    pen,
+    wepX + wepW - 6,
+    wepY + 15,
+    wepCraftKey,
+    hex('#ffe082'),
+    { ...DEFAULT_TEXT, size: 9, weight: 700, align: 1, baseline: 0 },
+  );
+
+  // 7. Floating action notification if present
   if (player.lastActionMsg.length > 0 && player.msgTimer > 0) {
     const msgY = padY + hudH + 16;
     const alpha = Math.min(1, player.msgTimer * 2);

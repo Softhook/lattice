@@ -64,6 +64,12 @@ import {
 import { drawSky, farRanges } from './sky.js';
 import { drawAmbientEffects } from './ambient.js';
 import { drawPlayerHud, drawSplitDivider } from './hud.js';
+import type { Projectile } from './combat.js';
+
+// ── Scratch for Projectiles (Zero Allocation) ──────────────────────────────────
+
+const ARROW_LINE_SCRATCH = new Float64Array(4);
+const SHADOW_BOX_SCRATCH = new Float64Array(8);
 
 // ── Palette ────────────────────────────────────────────────────────────────────
 
@@ -108,10 +114,11 @@ export function renderVerdant(
   camera1: Camera,
   camera2: Camera,
   world: WorldTerrain,
-  flora: FloraItem[],
-  creatures: Creature[],
+  flora: readonly FloraItem[],
+  creatures: readonly Creature[],
   players: readonly [Player, Player],
   buildings: readonly Building[],
+  projectiles: readonly Projectile[],
   t: number,
   darkness: number,
   daylight: number,
@@ -141,7 +148,7 @@ export function renderVerdant(
   ctx.beginPath();
   ctx.rect(0, 0, halfW, surface.height);
   ctx.clip();
-  drawViewport(pen, camera1, world, flora, creatures, players, buildings, players[0], t, darkness, daylight, cycle, seed, light1, true);
+  drawViewport(pen, camera1, world, flora, creatures, players, buildings, projectiles, players[0], t, darkness, daylight, cycle, seed, light1, true);
   ctx.restore();
 
   // ── Right viewport (Camera 2 / Player 2) ───────────────────────────────────────
@@ -152,7 +159,7 @@ export function renderVerdant(
   ctx.rect(halfW, 0, halfW, surface.height);
   ctx.clip();
   ctx.translate(halfW, 0);
-  drawViewport(pen2WithLight, camera2, world, flora, creatures, players, buildings, players[1], t, darkness, daylight, cycle, seed, light2, false);
+  drawViewport(pen2WithLight, camera2, world, flora, creatures, players, buildings, projectiles, players[1], t, darkness, daylight, cycle, seed, light2, false);
   ctx.restore();
 
   endFrame(pen);
@@ -167,6 +174,7 @@ function drawViewport(
   creatures: readonly Creature[],
   players: readonly [Player, Player],
   buildings: readonly Building[],
+  projectiles: readonly Projectile[],
   activePlayer: Player,
   t: number,
   darkness: number,
@@ -375,6 +383,44 @@ function drawViewport(
     effects(pen) {
       // Ambient atmospheric particles
       drawAmbientEffects(pen, seed, world, daylight, light, buildings);
+
+      // Render 3D ballistic projectiles (Arrows)
+      const numProj = projectiles.length;
+      for (let pi = 0; pi < numProj; pi++) {
+        const p = projectiles[pi];
+        if (p === undefined || !p.live) continue;
+
+        const wx = (p.x - p.y) * 32;
+        const wy = (p.x + p.y) * 16 - p.z;
+        const sx = (wx - camera.x) * camera.zoom + camera.viewW * 0.5;
+        const sy = (wy - camera.y) * camera.zoom + camera.viewH * 0.5;
+
+        // Ground shadow
+        const groundH = world.heights.get(Math.floor(p.x), Math.floor(p.y)) * 8;
+        const gwy = (p.x + p.y) * 16 - groundH;
+        const gsy = (gwy - camera.y) * camera.zoom + camera.viewH * 0.5;
+
+        // Shadow dot
+        SHADOW_BOX_SCRATCH[0] = sx - 3; SHADOW_BOX_SCRATCH[1] = gsy - 1.5;
+        SHADOW_BOX_SCRATCH[2] = sx + 3; SHADOW_BOX_SCRATCH[3] = gsy - 1.5;
+        SHADOW_BOX_SCRATCH[4] = sx + 3; SHADOW_BOX_SCRATCH[5] = gsy + 1.5;
+        SHADOW_BOX_SCRATCH[6] = sx - 3; SHADOW_BOX_SCRATCH[7] = gsy + 1.5;
+        pen.surface.poly(SHADOW_BOX_SCRATCH, 4, withAlpha(hex('#000000'), 0.35));
+
+        // Arrow shaft and tip
+        const vwx = (p.vx - p.vy) * 32;
+        const vwy = (p.vx + p.vy) * 16 - p.vz;
+        const vlen = Math.sqrt(vwx * vwx + vwy * vwy) || 1;
+        const arrowLen = 10 * camera.zoom;
+        const tailX = sx - (vwx / vlen) * arrowLen;
+        const tailY = sy - (vwy / vlen) * arrowLen;
+
+        ARROW_LINE_SCRATCH[0] = tailX;
+        ARROW_LINE_SCRATCH[1] = tailY;
+        ARROW_LINE_SCRATCH[2] = sx;
+        ARROW_LINE_SCRATCH[3] = sy;
+        pen.surface.stroke(ARROW_LINE_SCRATCH, 2, false, hex('#ffd54f'), 2);
+      }
     },
 
     overlay(pen) {

@@ -17,17 +17,17 @@
     "assetFiles": {
       "value": 0,
       "unit": "",
-      "source": "find packages -type f -not -path '*/node_modules/*' -not -path '*/dist/*' -not -path '*/coverage/*' \u2014 207 .ts, 19 .json, 9 .md, nothing else"
+      "source": "find packages -type f -not -path '*/node_modules/*' -not -path '*/dist/*' -not -path '*/coverage/*' — 207 .ts, 19 .json, 9 .md, nothing else"
     },
     "tests": {
-      "value": 2681,
+      "value": 2685,
       "unit": "",
-      "source": "npx vitest run \u2014 2681 passed (2681)"
+      "source": "npx vitest run — 2685 passed (2685)"
     },
     "testFiles": {
-      "value": 104,
+      "value": 105,
       "unit": "",
-      "source": "npx vitest run \u2014 104 passed (104)"
+      "source": "npx vitest run — 105 passed (105)"
     },
     "publicSymbols": {
       "value": 527,

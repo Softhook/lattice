@@ -154,6 +154,31 @@ export const VERDANT_SOUNDS = {
       { wave: 'triangle', hz: 390, toHz: 320, gain: 0.08, hold: 0.45, attack: 0.10, delay: 0.06, cutoff: 1400 },
     ],
   },
+  bow_shoot: {
+    bus: 'sfx',
+    minGapMs: 120,
+    layers: [
+      { wave: 'triangle', hz: 340, toHz: 780, gain: 0.14, hold: 0.08, attack: 0.01, cutoff: 2200 },
+      { wave: 'noise', hz: 0, gain: 0.07, hold: 0.10, cutoff: 2600, highpass: 700 },
+    ],
+  },
+  hit_meat: {
+    bus: 'sfx',
+    minGapMs: 100,
+    layers: [
+      { wave: 'triangle', hz: 220, toHz: 75, gain: 0.18, hold: 0.07, cutoff: 600 },
+      { wave: 'noise', hz: 0, gain: 0.09, hold: 0.05, cutoff: 1200, highpass: 250 },
+    ],
+  },
+  craft: {
+    bus: 'sfx',
+    minGapMs: 150,
+    ladder: { steps: 3, windowMs: 1000 },
+    layers: [
+      { wave: 'triangle', hz: 587, toHz: 880, gain: 0.15, hold: 0.16, cutoff: 2600 },
+      { wave: 'sine', hz: 1174, gain: 0.08, hold: 0.20, delay: 0.04, cutoff: 3200 },
+    ],
+  },
   dusk_chime: {
     bus: 'music',
     minGapMs: 3000,

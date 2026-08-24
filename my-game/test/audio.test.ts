@@ -28,6 +28,9 @@ describe('Verdant Procedural Audio System', () => {
       'dawn_chime',
       'wake',
       'click',
+      'bow_shoot',
+      'hit_meat',
+      'craft',
     ];
 
     for (const name of expectedSounds) {

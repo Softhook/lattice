@@ -16,6 +16,8 @@ import type { Building, BuildingKind } from './buildings.js';
 import { placeBuilding, isTileOccupiedBySolidBuilding, BUILDING_COSTS } from './buildings.js';
 import type { FloraItem } from './flora.js';
 import { harvestFloraAt } from './flora.js';
+import type { WeaponKind } from './combat.js';
+import { WEAPONS, CRAFTABLE_WEAPONS } from './combat.js';
 
 // ── Player state ───────────────────────────────────────────────────────────────
 
@@ -40,6 +42,12 @@ export interface Player {
   mode: PlayerMode;
   /** What to build when pressing build action key. */
   buildKind: BuildingKind;
+  /** Currently equipped weapon for attacks. */
+  weapon: WeaponKind;
+  /** List of weapons already unlocked/crafted. */
+  craftedWeapons: WeaponKind[];
+  /** Seconds remaining before next attack is ready. */
+  attackCooldown: number;
   /** Resource inventory: wood, stone, fiber. */
   inventory: Inventory;
   /** Hit points. 0 → player is knocked down (respawns after 3 s). */
@@ -105,6 +113,9 @@ function makePlayer(index: 0 | 1, gx: number, gy: number): Player {
     facing: 's',
     mode: 'move',
     buildKind: 'wood_wall',
+    weapon: 'hands',
+    craftedWeapons: ['hands'],
+    attackCooldown: 0,
     inventory: {
       wood: 12,
       stone: 8,
@@ -118,6 +129,62 @@ function makePlayer(index: 0 | 1, gx: number, gy: number): Player {
     lastActionMsg: '',
     msgTimer: 0,
   };
+}
+
+// ── Weapon Crafting & Equipment ────────────────────────────────────────────────
+
+export function canAffordWeapon(player: Player, kind: WeaponKind): boolean {
+  const cost = WEAPONS[kind].cost;
+  return (
+    player.inventory.wood >= cost.wood &&
+    player.inventory.stone >= cost.stone &&
+    player.inventory.fiber >= cost.fiber
+  );
+}
+
+export function craftWeapon(player: Player, kind: WeaponKind): boolean {
+  if (player.respawnTimer > 0) return false;
+  if (player.craftedWeapons.includes(kind)) {
+    player.weapon = kind;
+    player.lastActionMsg = `EQUIPPED ${WEAPONS[kind].name.toUpperCase()}`;
+    player.msgTimer = 2.0;
+    return true;
+  }
+  const def = WEAPONS[kind];
+  if (!canAffordWeapon(player, kind)) {
+    player.lastActionMsg = `NEED ${def.cost.wood}W ${def.cost.stone}S ${def.cost.fiber}F`;
+    player.msgTimer = 2.5;
+    return false;
+  }
+  player.inventory.wood -= def.cost.wood;
+  player.inventory.stone -= def.cost.stone;
+  player.inventory.fiber -= def.cost.fiber;
+  player.craftedWeapons.push(kind);
+  player.weapon = kind;
+  player.lastActionMsg = `CRAFTED ${def.name.toUpperCase()}!`;
+  player.msgTimer = 2.5;
+  return true;
+}
+
+export function craftNextAvailable(player: Player): { crafted: boolean; kind?: WeaponKind } {
+  for (const k of CRAFTABLE_WEAPONS) {
+    if (!player.craftedWeapons.includes(k)) {
+      const ok = craftWeapon(player, k);
+      return { crafted: ok, kind: k };
+    }
+  }
+  // All crafted — cycle equipped
+  cycleWeapon(player);
+  return { crafted: false };
+}
+
+export function cycleWeapon(player: Player): WeaponKind {
+  const currentIdx = player.craftedWeapons.indexOf(player.weapon);
+  const nextIdx = (currentIdx + 1) % player.craftedWeapons.length;
+  player.weapon = player.craftedWeapons[nextIdx] ?? 'hands';
+  player.lastActionMsg = `EQUIPPED ${WEAPONS[player.weapon].name.toUpperCase()}`;
+  player.msgTimer = 1.8;
+  return player.weapon;
 }
 
 // ── Affordability Check ────────────────────────────────────────────────────────
@@ -332,6 +399,9 @@ export function cycleBuildKind(player: Player): PlayerMode {
 
 /** Update HP regen, damage flash, message timer, and respawn timer. Returns true if player just respawned. */
 export function tickPlayer(player: Player, dt: number): boolean {
+  if (player.attackCooldown > 0) {
+    player.attackCooldown = Math.max(0, player.attackCooldown - dt);
+  }
   if (player.msgTimer > 0) {
     player.msgTimer = Math.max(0, player.msgTimer - dt);
     if (player.msgTimer === 0) player.lastActionMsg = '';

@@ -39,6 +39,8 @@ import {
   raiseAtFacing,
   cycleBuildKind,
   tickPlayer,
+  craftNextAvailable,
+  cycleWeapon,
 } from './players.js';
 import {
   damageBuildings,
@@ -60,6 +62,11 @@ import {
 } from './render.js';
 import { createGameAudio } from './audio.js';
 import { createVerdantStore, extractSaveState } from './storage.js';
+import {
+  createProjectilePool,
+  executeAttack,
+  stepProjectiles,
+} from './combat.js';
 
 // ── Seed ───────────────────────────────────────────────────────────────────────
 
@@ -189,6 +196,7 @@ let tickCount = 0;
 let currentDarkness = 0;
 let autosaveTimer = 0;
 let prevDaylight = 1.0;
+const projectiles = createProjectilePool();
 
 loop.onUpdate((dt, tick) => {
   input.tick(tick);
@@ -203,6 +211,27 @@ loop.onUpdate((dt, tick) => {
   movePlayer(p2, moveVec2.dx, moveVec2.dy, world, buildings, dt);
 
   // ── Player 1 Actions ─────────────────────────────────────────────────────────
+  if (edges.p1CycleWeapon) {
+    cycleWeapon(p1);
+    audio.play('click');
+    updateDomHud();
+  }
+  if (edges.p1CraftWeapon) {
+    const res = craftNextAvailable(p1);
+    if (res.crafted) audio.play('craft');
+    else audio.play('deny');
+    updateDomHud();
+  }
+  if (edges.p1Attack) {
+    if (p1.attackCooldown <= 0 && p1.respawnTimer <= 0) {
+      const baseH = heightAt(world.field, p1.gx, p1.gy);
+      const res = executeAttack(p1, creatures, projectiles, baseH);
+      if (res.isRanged) audio.play('bow_shoot');
+      else if (res.hit) audio.play('hit_meat');
+      else audio.play('attack');
+      updateDomHud();
+    }
+  }
   if (edges.p1Cycle) {
     cycleBuildKind(p1);
     audio.play('click');
@@ -248,6 +277,27 @@ loop.onUpdate((dt, tick) => {
   }
 
   // ── Player 2 Actions ─────────────────────────────────────────────────────────
+  if (edges.p2CycleWeapon) {
+    cycleWeapon(p2);
+    audio.play('click');
+    updateDomHud();
+  }
+  if (edges.p2CraftWeapon) {
+    const res = craftNextAvailable(p2);
+    if (res.crafted) audio.play('craft');
+    else audio.play('deny');
+    updateDomHud();
+  }
+  if (edges.p2Attack) {
+    if (p2.attackCooldown <= 0 && p2.respawnTimer <= 0) {
+      const baseH = heightAt(world.field, p2.gx, p2.gy);
+      const res = executeAttack(p2, creatures, projectiles, baseH);
+      if (res.isRanged) audio.play('bow_shoot');
+      else if (res.hit) audio.play('hit_meat');
+      else audio.play('attack');
+      updateDomHud();
+    }
+  }
   if (edges.p2Cycle) {
     cycleBuildKind(p2);
     audio.play('click');
@@ -294,6 +344,13 @@ loop.onUpdate((dt, tick) => {
 
   // Snapshot held keys without heap allocations
   copyKeys(curr, prevKeys);
+
+  // ── Projectile kinematics & collision ────────────────────────────────────────
+  const projHits = stepProjectiles(projectiles, creatures, [p1, p2], world, dt);
+  if (projHits.length > 0) {
+    audio.play('hit_meat');
+    updateDomHud();
+  }
 
   // ── Creature & Flora Ecosystem ───────────────────────────────────────────────
   const creEvents = updateCreatures(creatures, world, [p1, p2], flora, buildings, currentDarkness, dt);
@@ -359,11 +416,13 @@ function updateDomHud(): void {
   const p2ToolEl = document.getElementById('p2-tool');
   if (p1ToolEl) {
     const m = p1.mode.replace('_', ' ').toUpperCase();
-    p1ToolEl.textContent = `${m} [🪵${p1.inventory.wood} 🪨${p1.inventory.stone} 🌿${p1.inventory.fiber}]`;
+    const w = p1.weapon.toUpperCase();
+    p1ToolEl.textContent = `${m} | ⚔️${w} [🪵${p1.inventory.wood} 🪨${p1.inventory.stone} 🌿${p1.inventory.fiber}]`;
   }
   if (p2ToolEl) {
     const m = p2.mode.replace('_', ' ').toUpperCase();
-    p2ToolEl.textContent = `${m} [🪵${p2.inventory.wood} 🪨${p2.inventory.stone} 🌿${p2.inventory.fiber}]`;
+    const w = p2.weapon.toUpperCase();
+    p2ToolEl.textContent = `${m} | ⚔️${w} [🪵${p2.inventory.wood} 🪨${p2.inventory.stone} 🌿${p2.inventory.fiber}]`;
   }
 }
 
@@ -412,6 +471,7 @@ loop.onRender((_alpha, t, nowMs) => {
     creatures,
     [p1, p2],
     buildings,
+    projectiles,
     t,
     darkness,
     daylight,
