@@ -24,3 +24,8 @@ wind that can make trees sway
 
 Create missions such as a necromancer that spawns in a tower And creates particlum monsters let go towards the players and attacks them.
 A mission announcement text pops up telling them that a necromancer tower has been discovered. Make the Necromancer Tower look visually interesting and foreboding with some magic effects. 
+
+Consequence, not just decoration — weather igniting forests, digging causing cave-ins, chopping a tree changing a biome's look over time. You listed weather/fire already; the "soul" part is making these effects linger (burnt ground, regrowth) instead of reverting.
+
+Sound as place, not just cue — layer ambient audio that shifts by biome/time/weather (wind pitch by elevation, distant creature calls, echo underground) rather than one-off SFX. Cheap relative to visual work, disproportionate atmospheric payoff.
+Imperfection and history — footprints that fade, a "first time here" text flourish per location, buildings weathering or getting overgrown if abandoned.

@@ -99,6 +99,11 @@ export interface FloraDefinition {
     readonly axe?: number;
     readonly pickaxe?: number;
   };
+  /** Seconds a player must hold the Interact action on this item to harvest it bare-handed.
+   *  Scaled down by `toolMultiplier` when the right tool is equipped — see `workSecondsFor` in
+   *  `players.ts`. Roughly tracks trunk/body size, not just yield, so a squat rock and a towering
+   *  spruce don't take the same effort to bring down. */
+  readonly workSeconds: number;
   readonly spriteDef: SpriteDef;
 }
 
@@ -570,6 +575,7 @@ export const FLORA_REGISTRY: Record<FloraKind, FloraDefinition> = {
     edible: false,
     preferredBiomes: ['alpine', 'taiga', 'meadow'],
     toolMultiplier: { axe: 1.5 },
+    workSeconds: 1.2,
     spriteDef: PINE_DEF,
   },
   spruce: {
@@ -581,6 +587,7 @@ export const FLORA_REGISTRY: Record<FloraKind, FloraDefinition> = {
     edible: false,
     preferredBiomes: ['taiga'],
     toolMultiplier: { axe: 1.5 },
+    workSeconds: 1.8,
     spriteDef: SPRUCE_DEF,
   },
   oak: {
@@ -592,6 +599,7 @@ export const FLORA_REGISTRY: Record<FloraKind, FloraDefinition> = {
     edible: false,
     preferredBiomes: ['meadow'],
     toolMultiplier: { axe: 1.5 },
+    workSeconds: 1.5,
     spriteDef: OAK_DEF,
   },
   birch: {
@@ -603,6 +611,7 @@ export const FLORA_REGISTRY: Record<FloraKind, FloraDefinition> = {
     edible: false,
     preferredBiomes: ['meadow'],
     toolMultiplier: { axe: 1.5 },
+    workSeconds: 1.1,
     spriteDef: BIRCH_DEF,
   },
   swamp_tree: {
@@ -614,6 +623,7 @@ export const FLORA_REGISTRY: Record<FloraKind, FloraDefinition> = {
     edible: false,
     preferredBiomes: ['wetlands', 'coastal'],
     toolMultiplier: { axe: 1.5 },
+    workSeconds: 2.0,
     spriteDef: SWAMP_TREE_DEF,
   },
   cactus: {
@@ -625,6 +635,7 @@ export const FLORA_REGISTRY: Record<FloraKind, FloraDefinition> = {
     edible: false,
     preferredBiomes: ['badlands'],
     toolMultiplier: { axe: 1.2 },
+    workSeconds: 0.6,
     spriteDef: CACTUS_DEF,
   },
   dead_bush: {
@@ -636,6 +647,7 @@ export const FLORA_REGISTRY: Record<FloraKind, FloraDefinition> = {
     edible: false,
     preferredBiomes: ['badlands', 'coastal'],
     toolMultiplier: { axe: 1.2 },
+    workSeconds: 0.4,
     spriteDef: DEAD_BUSH_DEF,
   },
   rock_spire: {
@@ -647,6 +659,7 @@ export const FLORA_REGISTRY: Record<FloraKind, FloraDefinition> = {
     edible: false,
     preferredBiomes: ['alpine', 'badlands', 'coastal'],
     toolMultiplier: { pickaxe: 2.0 },
+    workSeconds: 2.0,
     spriteDef: ROCK_SPIRE_DEF,
   },
   rock: {
@@ -658,6 +671,7 @@ export const FLORA_REGISTRY: Record<FloraKind, FloraDefinition> = {
     edible: false,
     preferredBiomes: ['alpine', 'taiga', 'meadow', 'badlands', 'coastal'],
     toolMultiplier: { pickaxe: 2.0 },
+    workSeconds: 1.4,
     spriteDef: ROCK_DEF,
   },
   bush: {
@@ -669,6 +683,7 @@ export const FLORA_REGISTRY: Record<FloraKind, FloraDefinition> = {
     edible: true,
     preferredBiomes: ['meadow', 'taiga', 'wetlands', 'coastal'],
     toolMultiplier: { axe: 1.2 },
+    workSeconds: 0.5,
     spriteDef: BUSH_DEF,
   },
   flowers: {
@@ -680,6 +695,7 @@ export const FLORA_REGISTRY: Record<FloraKind, FloraDefinition> = {
     edible: true,
     preferredBiomes: ['meadow', 'wetlands', 'coastal'],
     toolMultiplier: {},
+    workSeconds: 0.3,
     spriteDef: FLOWER_DEF,
   },
   mushroom: {
@@ -691,6 +707,7 @@ export const FLORA_REGISTRY: Record<FloraKind, FloraDefinition> = {
     edible: true,
     preferredBiomes: ['wetlands', 'taiga', 'meadow'],
     toolMultiplier: {},
+    workSeconds: 0.35,
     spriteDef: MUSHROOM_DEF,
   },
 };

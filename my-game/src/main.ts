@@ -44,8 +44,16 @@ import {
   toggleInventory,
   inventoryNav,
   activateInventorySelection,
+  getTargetContext,
+  resolveWork,
+  startWork,
+  advanceWork,
+  clearWork,
+  DIG_WORK_SECONDS,
+  RAISE_WORK_SECONDS,
   type Player,
   type InteractType,
+  type WorkKind,
 } from './players.js';
 import {
   damageBuildings,
@@ -297,16 +305,73 @@ const INTERACT_DEBRIS_COLOR: Partial<Record<InteractType, number>> = {
 };
 
 /**
- * Run one player's action edges for this tick: Inventory toggle/nav/select when it's open,
- * otherwise place-armed-building-or-interact-or-attack, dig, and raise. One implementation for
- * both players — see the `PlayerActionEdges` note in `input.ts` for why that's safe to share.
+ * Resolve a sustained action that just finished its `workRequired` seconds — called from
+ * `runPlayerActions` on the tick `advanceWork` returns true. Reaching this at all means the player
+ * stood still for the whole channel (any movement key would have abandoned it early — see
+ * `movePlayer`'s `workKind` guard in `players.ts`), so `facingTile(player)` is still the exact
+ * tile the channel started on; each underlying instant-resolution function re-derives its own
+ * target from that, same as it always has.
  */
-function runPlayerActions(player: Player, e: PlayerActionEdges): void {
+function resolveCompletedWork(player: Player, kind: WorkKind): void {
+  if (kind === 'build') {
+    const placed = buildAtFacing(player, world, buildings);
+    if (placed !== undefined) {
+      buildings.push(placed);
+      audio.play(placed.kind === 'campfire' ? 'ignite' : 'build');
+    } else {
+      audio.play('deny');
+    }
+    return;
+  }
+
+  if (kind === 'dig' || kind === 'raise') {
+    const targetTile = facingTile(player);
+    const changed = kind === 'dig' ? digAtFacing(player, world) : raiseAtFacing(player, world);
+    if (changed) {
+      audio.play(kind);
+      const targetBaseH = heightAt(world.field, targetTile.gx, targetTile.gy);
+      spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, kind === 'dig' ? 0x795548ff : 0x8d6e63ff);
+      input.setTerrain({ field: world.field, maxHeightPx: world.currentMaxHeightPx });
+    } else {
+      audio.play('deny');
+    }
+    return;
+  }
+
+  // chop / mine / forage / repair / stoke
+  const targetTile = facingTile(player);
+  const targetBaseH = heightAt(world.field, targetTile.gx, targetTile.gy);
+  const interact = interactAtFacing(player, world, flora, buildings);
+  if (interact.type !== 'none') {
+    audio.play(interact.type);
+    const debrisColor = INTERACT_DEBRIS_COLOR[interact.type];
+    if (debrisColor !== undefined) {
+      spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, debrisColor);
+    }
+  } else {
+    audio.play('deny');
+  }
+}
+
+/**
+ * Run one player's action edges for this tick: Inventory toggle/nav/select when it's open,
+ * otherwise continue any in-progress sustained action, or start one (place-armed-building,
+ * harvest/mine/forage/stoke/repair, dig, raise) — or fall through to a combat swing. One
+ * implementation for both players — see the `PlayerActionEdges` note in `input.ts`.
+ *
+ * Harvesting, mining, repairing, stoking, building, and terraforming are all sustained actions
+ * now: a single press commits the player (`startWork`) and it plays out on its own over
+ * `workRequired` seconds (`advanceWork`, called unconditionally below) — no need to hold or
+ * repeat the key. Combat stays an instant rising-edge press — winding up a sword swing would kill
+ * the game's feel — so a creature target (or nothing at all) still fires `executeAttack` at once.
+ */
+function runPlayerActions(player: Player, e: PlayerActionEdges, dt: number): void {
   if (e.invToggle) {
     // A same-tick toggle wins outright — pressing Space in the same 16 ms frame as C/V should
     // never also open-and-immediately-select or close-and-immediately-act.
     toggleInventory(player);
     audio.play('click');
+    clearWork(player);
     return;
   }
 
@@ -322,59 +387,45 @@ function runPlayerActions(player: Player, e: PlayerActionEdges): void {
     return;
   }
 
-  if (e.attack && player.respawnTimer <= 0) {
-    if (player.mode !== 'move') {
-      // A build kind is armed from the Inventory: place it at the facing tile.
-      const placed = buildAtFacing(player, world, buildings);
-      if (placed !== undefined) {
-        buildings.push(placed);
-        audio.play(placed.kind === 'campfire' ? 'ignite' : 'build');
-      } else {
-        audio.play('deny');
-      }
-    } else {
-      // Contextual Interact (Flora harvest, building repair, campfire stoke) or Combat Attack.
-      const targetTile = facingTile(player);
-      const targetBaseH = heightAt(world.field, targetTile.gx, targetTile.gy);
-      const interact = interactAtFacing(player, world, flora, buildings);
-      if (interact.type !== 'none') {
-        audio.play(interact.type);
-        const debrisColor = INTERACT_DEBRIS_COLOR[interact.type];
-        if (debrisColor !== undefined) {
-          spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, debrisColor);
-        }
-      } else if (player.attackCooldown <= 0) {
-        const baseH = heightAt(world.field, player.gx, player.gy) + player.elevationPx;
-        const res = executeAttack(player, creatures, projectiles, baseH, fxPool);
-        audio.play(res.isRanged ? 'bow_shoot' : res.hit ? 'hit_meat' : 'attack');
-      }
+  if (player.respawnTimer > 0) {
+    clearWork(player);
+    return;
+  }
+
+  if (player.workKind !== 'none') {
+    // Already channeling: keep it running on its own. Read the kind before `advanceWork` resets
+    // it back to 'none' on the completing tick.
+    const completingKind = player.workKind;
+    if (advanceWork(player, dt)) {
+      resolveCompletedWork(player, completingKind);
     }
+    return;
+  }
+
+  // Idle: a fresh press starts a sustained action, or (when there's nothing to work) fires an
+  // instant combat swing.
+  if (e.attack) {
+    const target = getTargetContext(player, world, flora, creatures, buildings);
+    const work = resolveWork(player, target, flora, buildings);
+    if (work.kind !== 'none') {
+      startWork(player, work.kind, target.gx, target.gy, work.seconds);
+    } else if (player.attackCooldown <= 0) {
+      const baseH = heightAt(world.field, player.gx, player.gy) + player.elevationPx;
+      const res = executeAttack(player, creatures, projectiles, baseH, fxPool);
+      audio.play(res.isRanged ? 'bow_shoot' : res.hit ? 'hit_meat' : 'attack');
+    }
+    return;
   }
 
   if (e.dig) {
-    const changed = digAtFacing(player, world);
-    if (changed) {
-      audio.play('dig');
-      const targetTile = facingTile(player);
-      const targetBaseH = heightAt(world.field, targetTile.gx, targetTile.gy);
-      spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0x795548ff);
-      input.setTerrain({ field: world.field, maxHeightPx: world.currentMaxHeightPx });
-    } else {
-      audio.play('deny');
-    }
+    const targetTile = facingTile(player);
+    startWork(player, 'dig', targetTile.gx, targetTile.gy, DIG_WORK_SECONDS);
+    return;
   }
 
   if (e.raise) {
-    const changed = raiseAtFacing(player, world);
-    if (changed) {
-      audio.play('raise');
-      const targetTile = facingTile(player);
-      const targetBaseH = heightAt(world.field, targetTile.gx, targetTile.gy);
-      spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0x8d6e63ff);
-      input.setTerrain({ field: world.field, maxHeightPx: world.currentMaxHeightPx });
-    } else {
-      audio.play('deny');
-    }
+    const targetTile = facingTile(player);
+    startWork(player, 'raise', targetTile.gx, targetTile.gy, RAISE_WORK_SECONDS);
   }
 }
 
@@ -402,9 +453,9 @@ loop.onUpdate((dt, tick) => {
 
   // ── Player Actions ────────────────────────────────────────────────────────────
   // Player 2 is skipped entirely while hidden — frozen where they stood until brought back.
-  runPlayerActions(p1, edges.p[0]);
+  runPlayerActions(p1, edges.p[0], dt);
   if (p2.active) {
-    runPlayerActions(p2, edges.p[1]);
+    runPlayerActions(p2, edges.p[1], dt);
   }
 
   // Snapshot held keys without heap allocations

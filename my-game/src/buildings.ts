@@ -61,6 +61,18 @@ export const BUILDING_COSTS: Record<BuildingKind, BuildingCost> = {
   gate:        { wood: 4,  stone: 8 },
 };
 
+/** Seconds a player must hold the Interact action on the placement ghost to raise this
+ *  structure. Roughly tracks material cost — see `workSecondsFor` in `players.ts`. */
+export const BUILD_WORK_SECONDS: Record<BuildingKind, number> = {
+  campfire:    0.8,
+  wood_wall:   0.6,
+  stone_wall:  1.1,
+  wood_tower:  1.6,
+  stone_tower: 2.2,
+  floor:       0.4,
+  gate:        1.0,
+};
+
 /** A placed structure in the world. */
 export interface Building {
   readonly id: number;

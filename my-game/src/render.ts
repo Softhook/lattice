@@ -733,6 +733,32 @@ function drawViewport(
         }
       }
 
+      // Sustained-action progress bar: fills while a harvest/mine/forage/stoke/repair/build/dig/
+      // raise hold is in progress, over the exact tile being worked (so it still shows for dig
+      // and raise, which have no action pill — they're driven by Q/R, not the contextual Space
+      // target above).
+      if (activePlayer.workKind !== 'none' && activePlayer.workRequired > 0) {
+        const wgx = activePlayer.workGx;
+        const wgy = activePlayer.workGy;
+        const wBaseH = heightAt(world.field, wgx, wgy);
+        const wwx = (wgx + 0.5 - (wgy + 0.5)) * 32;
+        const wwy = (wgx + 0.5 + (wgy + 0.5)) * 16 - wBaseH - 14;
+        const wsx = (wwx - pen.camera.x) * pen.camera.zoom + pen.camera.viewW * 0.5;
+        const wsy = (wwy - pen.camera.y) * pen.camera.zoom + pen.camera.viewH * 0.5;
+
+        if (wsx >= 20 && wsx <= pen.camera.viewW - 20 && wsy >= 10 && wsy <= pen.camera.viewH - 10) {
+          const frac = Math.min(1, activePlayer.workProgress / activePlayer.workRequired);
+          const barW = 30;
+          const barH = 5;
+          const barX = wsx - barW * 0.5;
+          const barY = wsy;
+
+          pen.surface.poly(setTargetBox(barX, barY, barW, barH), 4, withAlpha(hex('#0c130e'), 0.85));
+          pen.surface.poly(setTargetBox(barX + 1, barY + 1, Math.max(0, barW - 2) * frac, barH - 2), 4, hex('#f1c40f'));
+          pen.surface.stroke(setTargetBox(barX, barY, barW, barH), 4, true, hex('#f1c40f'), 1);
+        }
+      }
+
       if (activePlayer.invOpen) {
         drawInventoryOverlay(pen, activePlayer);
       }

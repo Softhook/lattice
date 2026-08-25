@@ -17,9 +17,9 @@ import { hex, type Rgba } from '@latticekit/draw';
 import type { WorldTerrain } from './world.js';
 import { dig, raise, isWalkable, W, H } from './world.js';
 import type { Building, BuildingKind } from './buildings.js';
-import { placeBuilding, isTileOccupiedBySolidBuilding, BUILDING_COSTS, findTowerAt, towerPlatformPx } from './buildings.js';
+import { placeBuilding, isTileOccupiedBySolidBuilding, BUILDING_COSTS, BUILD_WORK_SECONDS, findTowerAt, towerPlatformPx } from './buildings.js';
 import type { FloraItem } from './flora.js';
-import { harvestFloraAt, FLORA_REGISTRY } from './flora.js';
+import { harvestFloraAt, FLORA_REGISTRY, FLORA_SPATIAL } from './flora.js';
 import type { WeaponKind } from './combat.js';
 import { WEAPONS, CRAFTABLE_WEAPONS } from './combat.js';
 import type { Creature } from './creatures.js';
@@ -42,6 +42,9 @@ export type PlayerActionType =
   | 'repair'
   | 'dig'
   | 'raise';
+
+/** Sustained (hold-to-complete) actions — see the `work*` fields on `Player`. */
+export type WorkKind = 'chop' | 'mine' | 'forage' | 'stoke' | 'repair' | 'build' | 'dig' | 'raise' | 'none';
 
 export interface Inventory {
   wood: number;
@@ -113,6 +116,19 @@ export interface Player {
   invTab: 'items' | 'craft';
   /** Index of the highlighted row within the active tab's list. Clamped by `inventoryNav`. */
   invCursor: number;
+  /** What sustained action is currently being channeled (chop/mine/forage/stoke/repair/build/
+   *  dig/raise), or 'none' when idle. Progress accumulates in `workProgress` only while the
+   *  action key stays held on the same target tile — see `progressWork` and its call site in
+   *  `main.ts`'s `runPlayerActions`. */
+  workKind: WorkKind;
+  /** Tile the current work is targeting. Progress resets to 0 the moment this no longer matches
+   *  the player's live target (they moved, released the key, or re-aimed elsewhere). */
+  workGx: number;
+  workGy: number;
+  /** Seconds accumulated toward `workRequired` for the current `workKind`. */
+  workProgress: number;
+  /** Seconds of held Interact needed to complete the current `workKind`. */
+  workRequired: number;
 }
 
 /** Trigger an articulated action or combat animation on a player. */
@@ -199,6 +215,11 @@ function makePlayer(index: 0 | 1, gx: number, gy: number): Player {
     invOpen: false,
     invTab: 'items',
     invCursor: 0,
+    workKind: 'none',
+    workGx: gx,
+    workGy: gy,
+    workProgress: 0,
+    workRequired: 0,
   };
 }
 
@@ -413,6 +434,24 @@ export function movePlayer(
     player.vx = 0;
     player.vy = 0;
     return false;
+  }
+
+  if (player.workKind !== 'none') {
+    if (inputDx !== 0 || inputDy !== 0) {
+      // Pressing a movement key mid-chop/mine/dig/build abandons it — a player under attack
+      // needs to be able to run, not finish the swing first. See the sustained-work section
+      // below for `workKind`/`clearWork`. Falls through to normal movement this same tick.
+      clearWork(player);
+    } else {
+      // Standing still is what lets the channel keep running: with no movement input this tick
+      // is a no-op anyway, but skipping the physics below also means `facing` can't drift, so
+      // `facingTile(player)` at completion is guaranteed to be the same tile the channel started
+      // on — nothing here reads the target tile back out mid-channel to double check it.
+      player.isMoving = false;
+      player.vx = 0;
+      player.vy = 0;
+      return false;
+    }
   }
 
   // Target input velocity
@@ -1001,6 +1040,157 @@ export function getTargetContext(
   TARGET_SCRATCH.subLabel = '';
   TARGET_SCRATCH.color = hex('#95a5a6');
   return TARGET_SCRATCH;
+}
+
+// ── Sustained (hold-to-complete) actions ────────────────────────────────────────
+//
+// Harvesting, mining, repairing, stoking, building, and terraforming all take real time now — a
+// single keypress commits the player to `workKind` and it plays out on its own over
+// `workRequired` seconds, no need to hold or repeat the key. `movePlayer` keeps the player
+// standing still for the duration as long as they don't touch a movement key (see its own
+// `workKind` guard), which is also what keeps the target tile from going stale mid-channel — but
+// pressing a movement key abandons the channel outright so the player can run from danger instead
+// of finishing the swing first; see `clearWork`'s call site there. `resolveWork` decides what a
+// fresh press starts and how long it takes (reading duration data out of the flora/building
+// registries so this file doesn't hardcode per-species numbers); `startWork`/`advanceWork`/
+// `clearWork` manage the timer. The caller in `main.ts` is responsible for invoking the
+// underlying instant-resolution function
+// (`interactAtFacing`, `buildAtFacing`, `digAtFacing`, `raiseAtFacing`) exactly once, on the tick
+// `advanceWork` returns true.
+
+/** Fixed channel time for actions with no per-item registry (stoking a fire, repairing a wall,
+ *  digging, raising). Flora and buildings look their own durations up instead — see below. */
+const STOKE_WORK_SECONDS = 0.5;
+const REPAIR_WORK_SECONDS = 0.6;
+export const DIG_WORK_SECONDS = 0.45;
+export const RAISE_WORK_SECONDS = 0.45;
+
+/**
+ * How long the player must hold Interact to complete the given target, in seconds. Returns 0 for
+ * targets that resolve instantly or aren't "work" at all (creature combat, a full-health
+ * building, empty ground) — the `kind` field comes back `'none'` for those, and callers treat
+ * that as "not a sustained action." Reused across ticks — copy fields out before calling again.
+ */
+const WORK_RESOLVE_SCRATCH: { kind: WorkKind; seconds: number } = { kind: 'none', seconds: 0 };
+
+export function resolveWork(
+  player: Player,
+  target: TargetContext,
+  flora: readonly FloraItem[],
+  buildings: readonly Building[],
+): { kind: WorkKind; seconds: number } {
+  WORK_RESOLVE_SCRATCH.kind = 'none';
+  WORK_RESOLVE_SCRATCH.seconds = 0;
+
+  if (player.mode !== 'move' && target.kind === 'build') {
+    WORK_RESOLVE_SCRATCH.kind = 'build';
+    WORK_RESOLVE_SCRATCH.seconds = BUILD_WORK_SECONDS[player.mode];
+    return WORK_RESOLVE_SCRATCH;
+  }
+
+  if (target.kind === 'flora') {
+    const count = FLORA_SPATIAL.queryRadius(target.gx, target.gy, 0.85);
+    for (let i = 0; i < count; i++) {
+      const idx = FLORA_SPATIAL.queryBuffer[i];
+      const f = idx !== undefined ? flora[idx] : undefined;
+      if (f !== undefined && f.gx === target.gx && f.gy === target.gy) {
+        const def = FLORA_REGISTRY[f.kind];
+        const toolBonus = player.weapon === 'axe' && def.toolMultiplier.axe !== undefined ? def.toolMultiplier.axe : 1;
+        WORK_RESOLVE_SCRATCH.kind = def.category === 'tree' ? 'chop' : def.category === 'rock' ? 'mine' : 'forage';
+        WORK_RESOLVE_SCRATCH.seconds = def.workSeconds / toolBonus;
+        return WORK_RESOLVE_SCRATCH;
+      }
+    }
+    return WORK_RESOLVE_SCRATCH;
+  }
+
+  if (target.kind === 'campfire') {
+    for (let i = 0; i < buildings.length; i++) {
+      const b = buildings[i];
+      if (b !== undefined && b.kind === 'campfire' && target.gx >= b.gx && target.gx < b.gx + b.w && target.gy >= b.gy && target.gy < b.gy + b.d) {
+        if (player.inventory.wood > 0 && b.hp < b.maxHp) {
+          WORK_RESOLVE_SCRATCH.kind = 'stoke';
+          WORK_RESOLVE_SCRATCH.seconds = STOKE_WORK_SECONDS;
+        }
+        return WORK_RESOLVE_SCRATCH;
+      }
+    }
+    return WORK_RESOLVE_SCRATCH;
+  }
+
+  if (target.kind === 'repair' && (player.inventory.wood > 0 || player.inventory.stone > 0)) {
+    WORK_RESOLVE_SCRATCH.kind = 'repair';
+    WORK_RESOLVE_SCRATCH.seconds = REPAIR_WORK_SECONDS;
+    return WORK_RESOLVE_SCRATCH;
+  }
+
+  return WORK_RESOLVE_SCRATCH;
+}
+
+/** The articulated swing/dig/hammer animation each `WorkKind` plays, repeated back-to-back for
+ *  the whole channel — see `playWorkAnim` — so a two-second chop reads as several real swings
+ *  landing on the tree, not one animation frozen for two seconds. */
+const WORK_ANIM: Partial<Record<WorkKind, { type: PlayerActionType; duration: number }>> = {
+  chop:   { type: 'chop',   duration: 0.32 },
+  mine:   { type: 'mine',   duration: 0.35 },
+  forage: { type: 'forage', duration: 0.28 },
+  repair: { type: 'repair', duration: 0.3 },
+  stoke:  { type: 'repair', duration: 0.28 },
+  build:  { type: 'repair', duration: 0.3 },
+  dig:    { type: 'dig',    duration: 0.32 },
+  raise:  { type: 'raise',  duration: 0.32 },
+};
+
+/** (Re)start the swing/dig/hammer animation for `kind` once the previous cycle has finished
+ *  playing out, so it visibly repeats for as long as the channel runs. */
+function playWorkAnim(player: Player, kind: WorkKind): void {
+  const anim = WORK_ANIM[kind];
+  if (anim !== undefined && player.actionTimer <= 0) {
+    triggerPlayerAction(player, anim.type, anim.duration);
+  }
+}
+
+/**
+ * Commit the player to a sustained action: one keypress starts it, and it plays out on its own
+ * over `required` seconds — `advanceWork` below is what actually ticks it forward every frame
+ * without any further input. `movePlayer` roots the player while `workKind !== 'none'`, so the
+ * target tile this captures can't go stale.
+ */
+export function startWork(player: Player, kind: WorkKind, gx: number, gy: number, required: number): void {
+  player.workKind = kind;
+  player.workGx = gx;
+  player.workGy = gy;
+  player.workProgress = 0;
+  player.workRequired = required;
+  playWorkAnim(player, kind);
+}
+
+/**
+ * Advance the player's in-progress work by `dt`, replaying the swing animation as each cycle
+ * finishes. Returns true on the tick progress reaches `workRequired` — the caller resolves the
+ * actual harvest/build/dig/raise then, via `facingTile`, which is still valid because the player
+ * has stood still the whole channel: `movePlayer` cancels (`clearWork`) the instant a movement key
+ * is pressed, so this only ever gets to run to completion when they haven't moved. No-op (returns
+ * false) when nothing is in progress.
+ */
+export function advanceWork(player: Player, dt: number): boolean {
+  if (player.workKind === 'none') return false;
+  player.workProgress += dt;
+  playWorkAnim(player, player.workKind);
+  if (player.workProgress >= player.workRequired) {
+    player.workKind = 'none';
+    player.workProgress = 0;
+    return true;
+  }
+  return false;
+}
+
+/** Abandon any in-progress sustained work (target lost, respawned, etc). */
+export function clearWork(player: Player): void {
+  if (player.workKind !== 'none') {
+    player.workKind = 'none';
+    player.workProgress = 0;
+  }
 }
 
 // ── HP and respawn ─────────────────────────────────────────────────────────────
