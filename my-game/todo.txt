@@ -9,9 +9,13 @@ Allow the player to use the mouse to click in the world and make a text bar pop 
 
 
 
-The usability of the crafting and interacting doesn't kind of work right now. When in the middle of selecting options to build, it's impossible to go and attack. somehow the physical interaction method doesn't work very well 
+The usability of the crafting and interacting doesn't work well work right now. When in the middle of selecting options to build, it's impossible to attack.  
 
-Think about the inventory system again that can show all the different things the player has collected and picked up. so the player can switch between different weapons and things to build 
+I'm thinking about a two-button system. One which is the generic interact button, the spacebar right now, and the second is the open inventory button. 
+
+Think about an inventory system that covers most of the viewport and shows the different things the player has collected and Selecting them and clicking on them uses them . The other part of the inventory is used for crafting things. That need to be built. So this is the system that is used to switch between different weapons. If there are more things in the inventory than can be displayed, then the inventory can scroll. Use the normal movement keys to scroll through the inventory and use the spacebar to select it 
+
+
 
 Remove the grid location text and biome name from the HUD. Put the grid location Very small and to the top left corner of each view port 
 

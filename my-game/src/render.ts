@@ -46,7 +46,7 @@ import { CREATURE_SPATIAL, type Creature } from './creatures.js';
 import type { Player } from './players.js';
 import { facingTileInto, canAffordBuilding, type TileCoord } from './players.js';
 import type { Building, BuildingKind } from './buildings.js';
-import { defFor, canPlaceBuilding, findTowerAt, LANTERN_GLOW } from './buildings.js';
+import { defFor, canPlaceBuilding, findTowerAt, gateVariantFlags, LANTERN_GLOW } from './buildings.js';
 import { FLORA_SPATIAL, defForFlora, floraVariant, type FloraItem } from './flora.js';
 import {
   spriteForCreature,
@@ -492,7 +492,8 @@ function drawViewport(
               light.add(b.gx + 0.5, b.gy + 0.5, b.basePx + 6, 14.0 + flicker * 0.5, darkness * (1.15 + flicker * 0.05), hex('#ff9f43'), 1);
             }
           } else {
-            const v = setScratchVariant(b.id, 0, 0, 1, '');
+            const flags = b.kind === 'gate' ? gateVariantFlags(b.gx, b.gy, buildings) : 0;
+            const v = setScratchVariant(b.id, flags, 0, 1, '');
             drawSprite(pen, def, b.gx, b.gy, v, b.basePx);
 
             // Towers emit warm protective beacon light pools at night — falloff 1 keeps every
@@ -553,8 +554,12 @@ function drawViewport(
           }
 
         } else if (idx === ghostIndex && ghostDef !== undefined) {
-          // Ghost preview — depth-sorted against world
-          drawGhost(pen, ghostDef, ghostTile.gx, ghostTile.gy, VARIANT_ZERO, isLegal, ghostBasePx);
+          // Ghost preview — depth-sorted against world. A gate ghost previews its real
+          // orientation against neighboring walls, same as the placed building will render.
+          const ghostVariant = buildKind === 'gate'
+            ? setScratchVariant(0, VARIANT_ZERO.flags | gateVariantFlags(ghostTile.gx, ghostTile.gy, buildings), 1, 1, '')
+            : VARIANT_ZERO;
+          drawGhost(pen, ghostDef, ghostTile.gx, ghostTile.gy, ghostVariant, isLegal, ghostBasePx);
         }
       }
     },

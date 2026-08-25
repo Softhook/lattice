@@ -174,27 +174,73 @@ const floorMassing: Massing = (w: SolidWriter, _v: Variant, _rng: Rng) => {
 
 export const FLOOR_DEF: SpriteDef = defineSprite({ id: 'bld_floor', w: 1, d: 1, massing: floorMassing });
 
-/** Stone Gate: An open archway in a stone perimeter — passable to players, blocked to animals. */
-const gateMassing: Massing = (w: SolidWriter, _v: Variant, _rng: Rng) => {
+/** `Variant.flags` bit a gate massing branches on: its posts run north–south (rotated 90°)
+ *  instead of the default east–west, so the opening lines up with whichever direction its
+ *  neighboring wall run actually goes. Game-defined — above the kit's reserved `FLAG_*` bits. */
+export const GATE_FLAG_ROTATED = 1 << 4;
+
+/**
+ * Stone Gate: An open archway in a stone perimeter — passable to players, blocked to animals.
+ *
+ * Drawn in one of two 90°-rotated orientations depending on `GATE_FLAG_ROTATED` (set by
+ * `gateVariantFlags` from the walls actually built beside it) so the opening always lines up
+ * with the wall line it sits in rather than always facing the same way.
+ */
+const gateMassing: Massing = (w: SolidWriter, v: Variant, _rng: Rng) => {
+  const rotated = (v.flags & GATE_FLAG_ROTATED) !== 0;
+  // Every box below is authored for the default (east–west posts) orientation; swapping x/y and
+  // width/depth here is what turns it into the north–south one, so there is one massing to keep
+  // in sync rather than two hand-mirrored copies drifting apart.
+  const b: SolidWriter['box'] = (x, y, bw, bd, opts) =>
+    rotated ? w.box(y, x, bd, bw, opts) : w.box(x, y, bw, bd, opts);
+
   w.shadow(0, 0, 1, 1, 0.35);
   // Threshold sill
-  w.box(0, 0.38, 1, 0.24, { color: STONE_DARK, h: 0.12, outline: false });
-  // Stone gate posts (left & right pillars) flanking an open passage
-  w.box(0.04, 0.04, 0.22, 0.92, { color: WALL_STONE, h: 2.1, outline: true });
-  w.box(0.74, 0.04, 0.22, 0.92, { color: WALL_STONE, h: 2.1, outline: true });
+  b(0, 0.38, 1, 0.24, { color: STONE_DARK, h: 0.12, outline: false });
+  // Stone gate posts flanking an open passage
+  b(0.04, 0.04, 0.22, 0.92, { color: WALL_STONE, h: 2.1, outline: true });
+  b(0.74, 0.04, 0.22, 0.92, { color: WALL_STONE, h: 2.1, outline: true });
   // Post capstones
-  w.box(0.02, 0.02, 0.26, 0.96, { color: STONE_DARK, h: 0.2, z: 2.1, outline: false });
-  w.box(0.72, 0.02, 0.26, 0.96, { color: STONE_DARK, h: 0.2, z: 2.1, outline: false });
+  b(0.02, 0.02, 0.26, 0.96, { color: STONE_DARK, h: 0.2, z: 2.1, outline: false });
+  b(0.72, 0.02, 0.26, 0.96, { color: STONE_DARK, h: 0.2, z: 2.1, outline: false });
   // Arched lintel spanning the opening overhead
-  w.box(0, 0.06, 1, 0.88, { color: STONE_DARK, h: 0.3, z: 2.3, outline: true });
+  b(0, 0.06, 1, 0.88, { color: STONE_DARK, h: 0.3, z: 2.3, outline: true });
   // Iron-banded doors folded open against each post
-  w.box(0.06, 0.06, 0.16, 0.22, { color: WALL_WOOD, h: 1.7, z: 0.15, outline: false });
-  w.box(0.78, 0.06, 0.16, 0.22, { color: WALL_WOOD, h: 1.7, z: 0.15, outline: false });
-  w.box(0.06, 0.06, 0.16, 0.05, { color: WALL_BEAM, h: 1.7, z: 0.15, outline: false });
-  w.box(0.78, 0.06, 0.16, 0.05, { color: WALL_BEAM, h: 1.7, z: 0.15, outline: false });
+  b(0.06, 0.06, 0.16, 0.22, { color: WALL_WOOD, h: 1.7, z: 0.15, outline: false });
+  b(0.78, 0.06, 0.16, 0.22, { color: WALL_WOOD, h: 1.7, z: 0.15, outline: false });
+  b(0.06, 0.06, 0.16, 0.05, { color: WALL_BEAM, h: 1.7, z: 0.15, outline: false });
+  b(0.78, 0.06, 0.16, 0.05, { color: WALL_BEAM, h: 1.7, z: 0.15, outline: false });
 };
 
 export const GATE_DEF: SpriteDef = defineSprite({ id: 'bld_gate', w: 1, d: 1, massing: gateMassing });
+
+/** Wall-like kinds a gate's orientation reads off — segments its posts visually continue. */
+function isWallLikeKind(kind: BuildingKind): boolean {
+  return kind === 'wood_wall' || kind === 'stone_wall' || kind === 'gate';
+}
+
+/** Whether any active wall-like building occupies tile (gx, gy). */
+function isWallLikeAt(gx: number, gy: number, buildings: readonly Building[]): boolean {
+  for (let i = 0; i < buildings.length; i++) {
+    const b = buildings[i];
+    if (b === undefined || b.hp <= 0 || !isWallLikeKind(b.kind)) continue;
+    if (gx >= b.gx && gx < b.gx + b.w && gy >= b.gy && gy < b.gy + b.d) return true;
+  }
+  return false;
+}
+
+/**
+ * The `Variant.flags` a gate at (gx, gy) should render with, given what's actually built beside
+ * it: rotates the gate's posts to continue a north–south wall run instead of the default
+ * east–west one. Ambiguous layouts (walls on both axes, or no neighboring wall at all) keep the
+ * default. Takes a bare tile rather than a placed `Building` so the placement ghost can preview
+ * the real orientation before the player commits to it.
+ */
+export function gateVariantFlags(gx: number, gy: number, buildings: readonly Building[]): number {
+  const northSouthWall = isWallLikeAt(gx, gy - 1, buildings) || isWallLikeAt(gx, gy + 1, buildings);
+  const eastWestWall = isWallLikeAt(gx - 1, gy, buildings) || isWallLikeAt(gx + 1, gy, buildings);
+  return northSouthWall && !eastWestWall ? GATE_FLAG_ROTATED : 0;
+}
 
 /** Campfire: Stone fire pit ring, crossed timber kindling logs, and warm animated flames. */
 const campfireMassing: Massing = (w: SolidWriter, v: Variant, _rng: Rng) => {
