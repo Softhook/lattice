@@ -96,6 +96,10 @@ export const WOLF_EYE     = hex('#f39c12');
 export const TROLL        = hex('#4d5747');
 export const TROLL_MOSS   = hex('#5b7a3e');
 export const TROLL_EYE    = hex('#e74c3c');
+export const TROLL_DARK   = hex('#363f31');
+export const TROLL_TUSK   = hex('#e0d6b8');
+export const TROLL_CLUB   = hex('#5c4632');
+export const TROLL_CLUB_BAND = hex('#7c8478');
 /** Fox — cunning, mid-tier, raids food stores. */
 export const FOX          = hex('#d35400');
 export const FOX_WHITE    = hex('#fdfefe');
@@ -114,6 +118,7 @@ export const BOAR_MANE    = hex('#362116');
 export const CROC         = hex('#2d502a');
 export const CROC_RIDGE   = hex('#1f3a1d');
 export const CROC_TOOTH   = hex('#fdfefe');
+export const CROC_EYE     = hex('#d4c23a');
 
 
 // ── Player & Tool colors ───────────────────────────────────────────────────────

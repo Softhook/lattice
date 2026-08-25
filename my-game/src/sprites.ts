@@ -36,6 +36,10 @@ import {
   TROLL,
   TROLL_MOSS,
   TROLL_EYE,
+  TROLL_DARK,
+  TROLL_TUSK,
+  TROLL_CLUB,
+  TROLL_CLUB_BAND,
   FOX,
   FOX_WHITE,
   FOX_DARK,
@@ -50,6 +54,7 @@ import {
   CROC,
   CROC_RIDGE,
   CROC_TOOTH,
+  CROC_EYE,
   BOOTS_DARK,
   SKIN_TONE,
   HAIR_DARK,
@@ -802,103 +807,183 @@ const trollMassing: Massing = (w, v, _rng) => {
   const phase = ((v.level % 1000) / 1000);
   const isAttacking = stateCode === 4;
 
-  // @tier-b — heavy earth-shaking stomp and massive two-handed overhead ground slam
-  const smashSin = isAttacking ? Math.sin(phase * Math.PI) : 0;
-  const rearUp = isAttacking && phase < 0.5 ? Math.sin(phase * 2 * Math.PI * 0.5) * 0.45 : 0;
-  const slamDown = isAttacking && phase >= 0.5 ? Math.sin((phase - 0.5) * 2 * Math.PI * 0.5) * 0.35 : 0;
+  // @tier-b — a single continuous swing curve: +1 at the windup peak (phase .25), -1 at the
+  // ground-impact peak (phase .75), passing back through rest at .5 and 1.0. One sine instead
+  // of the old rearUp/slamDown pair — those met at phase .5 with different formulas on each
+  // side and popped the club several tenths of a tile in one frame; a single continuous curve
+  // cannot do that by construction, wherever the split falls.
+  const swing = isAttacking ? Math.sin(phase * Math.PI * 2) : 0;
+  // Peaks at 1 for a short window either side of the impact frame (phase ~.75) — this is what
+  // drives the dust/rubble burst, not the swing curve directly.
+  const impact = isAttacking ? Math.max(0, -swing - 0.5) * 2 : 0;
+  // The strike carries a small lunge toward the target. Kept deliberately modest — this writer
+  // has no depth buffer, so a weapon is drawn in a fixed place in the paint order (see the club,
+  // last, below) and a large lunge would swing it past parts it should sometimes paint behind.
+  const lunge = Math.max(0, -swing) * 0.12;
 
-  const stompL = isAttacking ? 0 : Math.sin(phase * Math.PI * 2) * 0.08;
+  // @tier-b — idle weight-shift stomp, torso sway, and a hurt-flinch shudder.
+  const stompL = isAttacking ? 0 : Math.sin(phase * Math.PI * 2) * 0.07;
   const stompR = -stompL;
-  const sway = isAttacking ? 0 : Math.sin(phase * Math.PI * 2) * 0.04;
-  const hurtShake = isHurt ? Math.sin(phase * Math.PI * 8) * 0.08 : 0;
+  const sway = isAttacking ? 0 : Math.sin(phase * Math.PI * 2) * 0.035;
+  const hurtShake = isHurt ? Math.sin(phase * Math.PI * 9) * 0.08 : 0;
 
-  w.shadow(0.1, 0.1, 1.8, 1.8, 0.55);
+  w.shadow(0.06, 0.06, 1.88, 1.88, 0.6);
+
+  // The club: a strapped haft and a spiked stone head, gripped over the right shoulder.
+  // Deliberately anchored to the *side* of the body rather than dead-center — a centered grip
+  // put the club's head right where the face wants to be at every pose from idle to windup, and
+  // there is no depth buffer here to sort it out after the fact; keeping it beside the arm that
+  // holds it means it never has reason to cross the face at all. Rest height is chest-level, well
+  // under the shoulder/head band, and only the windup carries it up past the head — by design.
+  const club = (gripX: number, gripY: number, gripZ: number): void => {
+    w.post(gripX, gripY, gripZ - 0.55, 1.00, TROLL_CLUB, 0.105);
+    w.box(gripX - 0.19, gripY - 0.09, 0.38, 0.30, { color: TROLL_CLUB_BAND, h: 0.09, z: gripZ + 0.24 });
+    w.box(gripX - 0.20, gripY - 0.11, 0.40, 0.34, { color: TROLL_CLUB, h: 0.36, z: gripZ + 0.33 });
+    w.post(gripX - 0.11, gripY - 0.02, gripZ + 0.66, 0.20, TROLL_TUSK, 0.045);
+    w.post(gripX + 0.11, gripY - 0.02, gripZ + 0.66, 0.20, TROLL_TUSK, 0.045);
+    w.post(gripX, gripY + 0.16, gripZ + 0.63, 0.20, TROLL_TUSK, 0.045);
+  };
+
+  // Rubble kicked up right at impact — reads the strike as having actually landed.
+  const impactBurst = (cx: number, cy: number): void => {
+    if (impact < 0.03) return;
+    const r = impact;
+    w.box(cx - 0.45 * r, cy - 0.20 * r, 0.35 * r + 0.06, 0.22 * r + 0.06, { color: TROLL_DARK, h: 0.05 * r, alpha: r });
+    w.box(cx + 0.10, cy - 0.30 * r, 0.30 * r + 0.06, 0.20 * r + 0.06, { color: TROLL_DARK, h: 0.06 * r, alpha: r });
+    w.box(cx - 0.10, cy + 0.10, 0.34 * r + 0.06, 0.24 * r + 0.06, { color: 0x8a9478ff, h: 0.04 * r, z: 0.02, alpha: r * 0.85 });
+  };
 
   if (facing === 1) {
-    // ── South: Facing Camera ──
-    // 2 Massive stone pillar legs
-    w.box(0.24, 0.35 + stompL, 0.55, 0.65, { color: TROLL, h: 1.10 + rearUp * 0.5 });
-    w.box(0.20, 0.85 + stompL, 0.60, 0.30, { color: 0x3d4737ff, h: 0.35 });
+    // ── South: Facing Camera — the strike lunges toward +y, the near side, so the club can
+    // safely paint last (in front) through the whole swing. ──
+    w.box(0.40 + stompL, 0.26, 0.58, 0.62, { color: TROLL, h: 1.15 });
+    w.box(0.36 + stompL, 0.74, 0.66, 0.34, { color: TROLL_DARK, h: 0.20 });
+    w.box(1.02 + stompR, 0.26, 0.58, 0.62, { color: TROLL, h: 1.15 });
+    w.box(0.98 + stompR, 0.74, 0.66, 0.34, { color: TROLL_DARK, h: 0.20 });
 
-    w.box(1.21, 0.35 + stompR, 0.55, 0.65, { color: TROLL, h: 1.10 + rearUp * 0.5 });
-    w.box(1.20, 0.85 + stompR, 0.60, 0.30, { color: 0x3d4737ff, h: 0.35 });
+    w.box(0.28, 0.70 + lunge, 1.44, 0.28, { color: TROLL_DARK, h: 0.16, z: 0.98 });
 
-    // Hunched boulder torso & mossy plates
-    const torsoZ = 1.05 + rearUp - slamDown + hurtShake;
-    w.box(0.22 + sway, 0.22, 1.56, 1.56, { color: TROLL, h: 1.50, z: torsoZ });
-    w.box(0.30 + sway, 0.15, 1.40, 1.20, { color: TROLL_MOSS, h: 0.45, z: torsoZ + 1.15 });
+    const torsoZ = 0.90 + hurtShake;
+    w.box(0.36 + sway, 0.20 + lunge, 1.28, 1.58, { color: TROLL, h: 1.22, z: torsoZ });
+    w.box(0.42 + sway, 0.14 + lunge, 1.16, 1.30, { color: TROLL_MOSS, h: 0.40, z: torsoZ + 1.08 });
 
-    // Overhead boulder arms (rise high during windup, slam down during strike)
-    const armZ = isAttacking
-      ? (phase < 0.5 ? 0.40 + rearUp * 2.2 : 0.40 - slamDown * 1.8)
-      : 0.40;
-    const armY = isAttacking ? 0.50 + smashSin * 0.45 : 0.50;
+    const armZ = 0.70 + swing * 0.85 + hurtShake;
+    const armY = 0.44 + lunge;
+    w.box(0.00 + sway - stompL * 0.4, armY, 0.42, 0.66, { color: TROLL, h: 1.45, z: armZ });
+    w.box(-0.04 + sway - stompL * 0.4, armY + 0.42, 0.50, 0.44, { color: TROLL_DARK, h: 0.38, z: armZ - 0.08 });
+    w.box(1.58 + sway - stompR * 0.4, armY, 0.42, 0.66, { color: TROLL, h: 1.45, z: armZ });
+    w.box(1.54 + sway - stompR * 0.4, armY + 0.42, 0.50, 0.44, { color: TROLL_DARK, h: 0.38, z: armZ - 0.08 });
 
-    w.box(0.04 + sway, armY - stompL * 0.8, 0.36, 0.55, { color: TROLL, h: 1.70, z: armZ });
-    w.box(0.02 + sway, armY + 0.35 - stompL * 0.8, 0.40, 0.35, { color: 0x3d4737ff, h: 0.45, z: armZ - 0.25 });
 
-    w.box(1.60 + sway, armY - stompR * 0.8, 0.36, 0.55, { color: TROLL, h: 1.70, z: armZ });
-    w.box(1.58 + sway, armY + 0.35 - stompR * 0.8, 0.40, 0.35, { color: 0x3d4737ff, h: 0.45, z: armZ - 0.25 });
+    const headZ = torsoZ + 1.10 + swing * 0.18;
+    w.box(0.52 + sway, 0.60 + lunge * 1.3, 0.96, 0.88, { color: TROLL, h: 1.00, z: headZ });
+    w.box(0.46 + sway, 0.94 + lunge * 1.3, 1.08, 0.50, { color: TROLL_MOSS, h: 0.34, z: headZ + 0.82 });
+    w.box(0.56 + sway, 0.98 + lunge * 1.3, 0.88, 0.20, { color: TROLL_DARK, h: 0.14, z: headZ + 0.54 });
+    w.box(0.66 + sway, 1.40 + lunge * 1.3, 0.16, 0.09, { color: TROLL_EYE, h: 0.15, z: headZ + 0.50 });
+    w.box(1.18 + sway, 1.40 + lunge * 1.3, 0.16, 0.09, { color: TROLL_EYE, h: 0.15, z: headZ + 0.50 });
+    w.post(0.64 + sway, 1.48 + lunge * 1.3, headZ + 0.14, 0.42, TROLL_TUSK, 0.07);
+    w.post(1.26 + sway, 1.48 + lunge * 1.3, headZ + 0.14, 0.42, TROLL_TUSK, 0.07);
 
-    // Shoulder boulders
-    w.box(0.12 + sway, 0.45, 0.55, 0.65, { color: 0x5a6654ff, h: 0.65, z: torsoZ + 1.25 });
-    w.box(1.33 + sway, 0.45, 0.55, 0.65, { color: 0x5a6654ff, h: 0.65, z: torsoZ + 1.25 });
-
-    // Head, glowing eyes, tusks
-    const headZ = 1.65 + rearUp - slamDown + hurtShake;
-    w.box(0.55 + sway, 0.80, 0.90, 0.80, { color: TROLL, h: 0.95, z: headZ });
-    w.box(0.50 + sway, 1.10, 1.00, 0.45, { color: TROLL_MOSS, h: 0.35, z: headZ + 0.80 });
-
-    w.box(0.65 + sway, 1.48, 0.16, 0.08, { color: TROLL_EYE, h: 0.14, z: headZ + 0.50 });
-    w.box(1.19 + sway, 1.48, 0.16, 0.08, { color: TROLL_EYE, h: 0.14, z: headZ + 0.50 });
-
-    w.post(0.68 + sway, 1.55, headZ + 0.20, 0.45, 0xe0d6b8ff, 0.07);
-    w.post(1.24 + sway, 1.55, headZ + 0.20, 0.45, 0xe0d6b8ff, 0.07);
+    club(1.44 + sway - stompR * 0.4, armY + 0.36, armZ + 0.22);
+    impactBurst(0.9, 0.55);
 
   } else if (facing === 0) {
-    // ── North: Facing Away ──
-    const headZ = 1.65 + rearUp - slamDown + hurtShake;
-    w.box(0.55 + sway, 0.30, 0.90, 0.80, { color: TROLL, h: 0.95, z: headZ });
+    // ── North: Facing Away — the strike still lunges toward the world +y the troll is facing,
+    // which from behind is the *near* side too (the troll is walking away from us but swinging
+    // down in front of its own body), so the club stays safe to draw last here as well. ──
+    const torsoZ = 0.90 + hurtShake;
+    const headZ = torsoZ + 1.10 + swing * 0.18;
+    w.box(0.52 + sway, 0.22 - lunge * 0.6, 0.96, 0.88, { color: TROLL, h: 1.00, z: headZ });
+    w.box(0.46 + sway, 0.20 - lunge * 0.6, 1.08, 0.40, { color: TROLL_MOSS, h: 0.34, z: headZ + 0.82 });
 
-    w.box(0.24, 0.35 - stompL, 0.55, 0.65, { color: TROLL, h: 1.10 });
-    w.box(1.21, 0.35 - stompR, 0.55, 0.65, { color: TROLL, h: 1.10 });
+    w.box(0.40 + stompL, 0.26, 0.58, 0.62, { color: TROLL, h: 1.15 });
+    w.box(1.02 + stompR, 0.26, 0.58, 0.62, { color: TROLL, h: 1.15 });
+    w.box(0.36 + stompL, 0.74, 0.66, 0.34, { color: TROLL_DARK, h: 0.20 });
+    w.box(0.98 + stompR, 0.74, 0.66, 0.34, { color: TROLL_DARK, h: 0.20 });
 
-    const torsoZ = 1.05 + rearUp - slamDown + hurtShake;
-    w.box(0.22 + sway, 0.22, 1.56, 1.56, { color: TROLL, h: 1.50, z: torsoZ });
-    w.box(0.30 + sway, 0.60, 1.40, 1.20, { color: TROLL_MOSS, h: 0.45, z: torsoZ + 1.15 });
+    w.box(0.36 + sway, 0.20, 1.28, 1.58, { color: TROLL, h: 1.22, z: torsoZ });
+    w.box(0.42 + sway, 0.50, 1.16, 1.10, { color: TROLL_MOSS, h: 0.40, z: torsoZ + 1.08 });
 
-    const armZ = isAttacking ? (phase < 0.5 ? 0.40 + rearUp * 2.2 : 0.40 - slamDown * 1.8) : 0.40;
-    w.box(0.04 + sway, 0.50 + stompL * 0.8, 0.36, 0.55, { color: TROLL, h: 1.70, z: armZ });
-    w.box(1.60 + sway, 0.50 + stompR * 0.8, 0.36, 0.55, { color: TROLL, h: 1.70, z: armZ });
+
+    const armZ = 0.70 + swing * 0.85 + hurtShake;
+    const armY = 0.44 + lunge * 0.6;
+    w.box(0.00 + sway - stompL * 0.4, armY, 0.42, 0.66, { color: TROLL, h: 1.45, z: armZ });
+    w.box(1.58 + sway - stompR * 0.4, armY, 0.42, 0.66, { color: TROLL, h: 1.45, z: armZ });
+    w.box(-0.04 + sway - stompL * 0.4, armY - 0.10, 0.50, 0.44, { color: TROLL_DARK, h: 0.38, z: armZ - 0.08 });
+    w.box(1.54 + sway - stompR * 0.4, armY - 0.10, 0.50, 0.44, { color: TROLL_DARK, h: 0.38, z: armZ - 0.08 });
+
+    club(1.44 + sway - stompR * 0.4, armY + 0.20, armZ + 0.22);
+    impactBurst(0.9, 0.55);
 
   } else if (facing === 2) {
-    // ── East: Facing +gx ──
-    const torsoZ = 1.05 + rearUp - slamDown + hurtShake;
-    w.box(0.35 + stompL, 0.24, 0.65, 0.55, { color: TROLL, h: 1.10 });
-    w.box(0.35 + stompR, 1.21, 0.65, 0.55, { color: TROLL, h: 1.10 });
+    // ── East: Facing +gx — the strike lunges toward +x. Screen depth in this projection is
+    // driven by (gx + gy), so a swing that also grows +x pushes the club toward camera exactly
+    // like the south case; last-drawn stays correct. ──
+    w.box(0.26, 0.40 + stompL, 0.62, 0.58, { color: TROLL, h: 1.15 });
+    w.box(0.74, 0.36 + stompL, 0.34, 0.66, { color: TROLL_DARK, h: 0.20 });
+    w.box(0.26, 1.02 + stompR, 0.62, 0.58, { color: TROLL, h: 1.15 });
+    w.box(0.74, 0.98 + stompR, 0.34, 0.66, { color: TROLL_DARK, h: 0.20 });
 
-    w.box(0.22, 0.22 + sway, 1.56, 1.56, { color: TROLL, h: 1.50, z: torsoZ });
-    w.box(0.15, 0.30 + sway, 1.20, 1.40, { color: TROLL_MOSS, h: 0.45, z: torsoZ + 1.15 });
+    const torsoZ = 0.90 + hurtShake;
+    w.box(0.20 + lunge, 0.36 + sway, 1.58, 1.28, { color: TROLL, h: 1.22, z: torsoZ });
+    w.box(0.14 + lunge, 0.42 + sway, 1.30, 1.16, { color: TROLL_MOSS, h: 0.40, z: torsoZ + 1.08 });
 
-    const headZ = 1.65 + rearUp - slamDown + hurtShake;
-    w.box(0.80 + (isAttacking ? smashSin * 0.4 : 0), 0.55 + sway, 0.80, 0.90, { color: TROLL, h: 0.95, z: headZ });
-    w.box(1.48 + (isAttacking ? smashSin * 0.4 : 0), 0.65 + sway, 0.08, 0.16, { color: TROLL_EYE, h: 0.14, z: headZ + 0.50 });
-    w.box(1.48 + (isAttacking ? smashSin * 0.4 : 0), 1.19 + sway, 0.08, 0.16, { color: TROLL_EYE, h: 0.14, z: headZ + 0.50 });
-    w.post(1.55 + (isAttacking ? smashSin * 0.4 : 0), 0.68 + sway, headZ + 0.20, 0.45, 0xe0d6b8ff, 0.07);
+    const armZ = 0.70 + swing * 0.85 + hurtShake;
+    const armX = 0.44 + lunge;
+    w.box(armX, 0.00 + sway - stompL * 0.4, 0.66, 0.42, { color: TROLL, h: 1.45, z: armZ });
+    w.box(armX + 0.42, -0.04 + sway - stompL * 0.4, 0.44, 0.50, { color: TROLL_DARK, h: 0.38, z: armZ - 0.08 });
+    w.box(armX, 1.58 + sway - stompR * 0.4, 0.66, 0.42, { color: TROLL, h: 1.45, z: armZ });
+    w.box(armX + 0.42, 1.54 + sway - stompR * 0.4, 0.44, 0.50, { color: TROLL_DARK, h: 0.38, z: armZ - 0.08 });
+
+
+    const headZ = torsoZ + 1.10 + swing * 0.18;
+    const headX = 0.60 + lunge * 1.3;
+    w.box(headX, 0.52 + sway, 0.88, 0.96, { color: TROLL, h: 1.00, z: headZ });
+    w.box(headX + 0.36, 0.46 + sway, 0.50, 1.08, { color: TROLL_MOSS, h: 0.34, z: headZ + 0.82 });
+    w.box(headX + 0.36, 0.56 + sway, 0.20, 0.88, { color: TROLL_DARK, h: 0.14, z: headZ + 0.54 });
+    w.box(headX + 0.76, 0.66 + sway, 0.09, 0.16, { color: TROLL_EYE, h: 0.15, z: headZ + 0.50 });
+    w.box(headX + 0.76, 1.18 + sway, 0.09, 0.16, { color: TROLL_EYE, h: 0.15, z: headZ + 0.50 });
+    w.post(headX + 0.82, 0.64 + sway, headZ + 0.14, 0.42, TROLL_TUSK, 0.07);
+    w.post(headX + 0.82, 1.26 + sway, headZ + 0.14, 0.42, TROLL_TUSK, 0.07);
+
+    club(armX + 0.42, 1.44 + sway - stompR * 0.4, armZ + 0.22);
+    impactBurst(0.55, 0.9);
 
   } else {
-    // ── West: Facing -gx ──
-    const torsoZ = 1.05 + rearUp - slamDown + hurtShake;
-    w.box(0.35 - stompL, 0.24, 0.65, 0.55, { color: TROLL, h: 1.10 });
-    w.box(0.35 - stompR, 1.21, 0.65, 0.55, { color: TROLL, h: 1.10 });
+    // ── West: Facing -gx — the strike lunges toward -x, the *far* side by screen depth. To
+    // keep the pure-painter's-algorithm renderer honest here the lunge is halved rather than
+    // mirrored at full strength, so the club never has to cross in front of geometry it should
+    // paint behind; drawing it last stays a safe approximation at this magnitude. ──
+    const wl = lunge * 0.5;
+    w.box(1.12, 0.40 + stompL, 0.62, 0.58, { color: TROLL, h: 1.15 });
+    w.box(0.92, 0.36 + stompL, 0.34, 0.66, { color: TROLL_DARK, h: 0.20 });
+    w.box(1.12, 1.02 + stompR, 0.62, 0.58, { color: TROLL, h: 1.15 });
+    w.box(0.92, 0.98 + stompR, 0.34, 0.66, { color: TROLL_DARK, h: 0.20 });
 
-    w.box(0.22, 0.22 + sway, 1.56, 1.56, { color: TROLL, h: 1.50, z: torsoZ });
+    const torsoZ = 0.90 + hurtShake;
+    w.box(0.22 - wl, 0.36 + sway, 1.58, 1.28, { color: TROLL, h: 1.22, z: torsoZ });
+    w.box(0.56 - wl, 0.42 + sway, 1.30, 1.16, { color: TROLL_MOSS, h: 0.40, z: torsoZ + 1.08 });
 
-    const headZ = 1.65 + rearUp - slamDown + hurtShake;
-    w.box(0.30 - (isAttacking ? smashSin * 0.4 : 0), 0.55 + sway, 0.80, 0.90, { color: TROLL, h: 0.95, z: headZ });
-    w.box(0.16 - (isAttacking ? smashSin * 0.4 : 0), 0.65 + sway, 0.08, 0.16, { color: TROLL_EYE, h: 0.14, z: headZ + 0.50 });
-    w.box(0.16 - (isAttacking ? smashSin * 0.4 : 0), 1.19 + sway, 0.08, 0.16, { color: TROLL_EYE, h: 0.14, z: headZ + 0.50 });
-    w.post(0.25 - (isAttacking ? smashSin * 0.4 : 0), 0.68 + sway, headZ + 0.20, 0.45, 0xe0d6b8ff, 0.07);
+    const armZ = 0.70 + swing * 0.85 + hurtShake;
+    const armX = 0.90 - wl;
+    w.box(armX, 0.00 + sway - stompL * 0.4, 0.66, 0.42, { color: TROLL, h: 1.45, z: armZ });
+    w.box(armX - 0.42, -0.04 + sway - stompL * 0.4, 0.44, 0.50, { color: TROLL_DARK, h: 0.38, z: armZ - 0.08 });
+    w.box(armX, 1.58 + sway - stompR * 0.4, 0.66, 0.42, { color: TROLL, h: 1.45, z: armZ });
+    w.box(armX - 0.42, 1.54 + sway - stompR * 0.4, 0.44, 0.50, { color: TROLL_DARK, h: 0.38, z: armZ - 0.08 });
+
+
+    const headZ = torsoZ + 1.10 + swing * 0.18;
+    const headX = 1.12 - wl * 1.3;
+    w.box(headX, 0.52 + sway, 0.88, 0.96, { color: TROLL, h: 1.00, z: headZ });
+    w.box(headX - 0.50, 0.46 + sway, 0.50, 1.08, { color: TROLL_MOSS, h: 0.34, z: headZ + 0.82 });
+    w.box(headX - 0.20, 0.56 + sway, 0.20, 0.88, { color: TROLL_DARK, h: 0.14, z: headZ + 0.54 });
+    w.box(headX - 0.09, 0.66 + sway, 0.09, 0.16, { color: TROLL_EYE, h: 0.15, z: headZ + 0.50 });
+    w.box(headX - 0.09, 1.18 + sway, 0.09, 0.16, { color: TROLL_EYE, h: 0.15, z: headZ + 0.50 });
+    w.post(headX - 0.14, 0.64 + sway, headZ + 0.14, 0.42, TROLL_TUSK, 0.07);
+    w.post(headX - 0.14, 1.26 + sway, headZ + 0.14, 0.42, TROLL_TUSK, 0.07);
+
+    club(armX - 0.42, 1.44 + sway - stompR * 0.4, armZ + 0.22);
+    impactBurst(1.35, 0.9);
   }
 };
 
@@ -906,9 +991,71 @@ export const TROLL_SPRITE: SpriteDef = defineSprite({
   id: 'troll', w: 2, d: 2, massing: trollMassing,
 });
 
+/**
+ * Wraps a `SolidWriter` so a massing can be authored at one scale and rendered at another,
+ * enlarging every spatial argument (position, size, height) about a pivot point while passing
+ * colors and strings through untouched.
+ *
+ * The bear's massing was written to fill roughly one tile even though its `SpriteDef` declares
+ * a 2×2 footprint — "Massive Grizzly" in the doc comment and a creature barely bigger than a fox
+ * on screen. Rewriting every coordinate by hand risks introducing exactly the kind of arithmetic
+ * slip that shows up as a floating paw three tiles from its shoulder; scaling the writer instead
+ * keeps every relative offset (`legSwing`, `rearUp`, …) proportionally intact for free.
+ */
+function scaledWriter(base: SolidWriter, scale: number, px: number, py: number): SolidWriter {
+  const sx = (v: number): number => px + (v - px) * scale;
+  const sy = (v: number): number => py + (v - py) * scale;
+  const sz = (v: number): number => v * scale;
+  const ss = (v: number): number => v * scale;
+  return {
+    get palette() { return base.palette; },
+    tile(gx, gy, fill, stroke, inset = 0, z = 0) {
+      base.tile(sx(gx), sy(gy), fill, stroke, ss(inset), sz(z));
+    },
+    box(gx, gy, bw, bd, opts) {
+      base.box(sx(gx), sy(gy), ss(bw), ss(bd), {
+        ...opts,
+        h: sz(opts.h),
+        z: opts.z !== undefined ? sz(opts.z) : opts.z,
+        inset: opts.inset !== undefined ? ss(opts.inset) : opts.inset,
+      });
+    },
+    cylinder(gx, gy, radiusTiles, opts) {
+      base.cylinder(sx(gx), sy(gy), ss(radiusTiles), {
+        ...opts,
+        h: sz(opts.h),
+        z: opts.z !== undefined ? sz(opts.z) : opts.z,
+        inset: opts.inset !== undefined ? ss(opts.inset) : opts.inset,
+      });
+    },
+    roof(gx, gy, rw, rd, z, rise, color, outline) {
+      base.roof(sx(gx), sy(gy), ss(rw), ss(rd), sz(z), sz(rise), color, outline);
+    },
+    patch(gx, gy, pw, pd, z, fill, stroke) {
+      base.patch(sx(gx), sy(gy), ss(pw), ss(pd), sz(z), fill, stroke);
+    },
+    wall(ax, ay, bx, by, z0, z1, fill, stroke) {
+      base.wall(sx(ax), sy(ay), sx(bx), sy(by), sz(z0), sz(z1), fill, stroke);
+    },
+    post(gx, gy, z, h, color, width) {
+      base.post(sx(gx), sy(gy), sz(z), sz(h), color, width !== undefined ? ss(width) : width);
+    },
+    glow(gx, gy, z, color, radius, intensity) {
+      base.glow(sx(gx), sy(gy), sz(z), color, radius !== undefined ? ss(radius) : radius, intensity);
+    },
+    sign(ax, ay, bx, by, ztop, heightLevels, value, color) {
+      base.sign(sx(ax), sy(ay), sx(bx), sy(by), sz(ztop), sz(heightLevels), value, color);
+    },
+    shadow(gx, gy, sw, sd, strength, z = 0) {
+      base.shadow(sx(gx), sy(gy), ss(sw), ss(sd), strength, sz(z));
+    },
+  };
+}
+
 // ── 6. Bear (Massive Grizzly with Rearing Maul Swipe & Foraging Snout) ───────────
 
-const bearMassing: Massing = (w, v, _rng) => {
+const bearMassing: Massing = (writer, v, _rng) => {
+  const w = scaledWriter(writer, 1.55, 0.68, 0.68);
   const facing = v.flags & 3;
   const stateCode = (v.flags >> 3) & 7;
   const phase = ((v.level % 1000) / 1000);
@@ -1109,61 +1256,129 @@ const crocMassing: Massing = (w, v, _rng) => {
 
   const isAttacking = stateCode === 4;
 
-  // @tier-b — sinuous swimming tail sway and explosive jaw snap
+  // @tier-b — sinuous swimming tail sway and an explosive lunging jaw snap
   const snapSin = isAttacking ? Math.sin(phase * Math.PI) : 0;
-  const snapLunge = snapSin * 0.30;
-  const gapeZ = snapSin * 0.15;
-  const tailSway = Math.sin(phase * Math.PI * 2) * (isAttacking ? 0.20 : 0.12);
+  const lunge = snapSin * 0.42;
+  const gape = snapSin * 0.20;
+  // An ambush predator holds still between strikes — the tail keeps a slow submerged sway even
+  // at rest, but the legs stay planted rather than trotting, unlike the pack/herd animals.
+  const tailSway = Math.sin(phase * Math.PI * 2) * (isAttacking ? 0.22 : 0.10);
 
-  w.shadow(0.06, 0.06, 0.88, 0.88, 0.35);
+  w.shadow(0.12, 0.08, 1.72, 1.86, 0.5);
+
+  // Two eye bumps and a nostril ridge on top of the skull — real crocodilians float with only
+  // these breaking the surface, and it is what makes the head silhouette read as croc rather
+  // than as a generic lizard. `skullX/Y` is the near-top-left corner of the flat skull slab.
+  const head = (skullX: number, skullY: number, alongX: boolean): void => {
+    const jawZ = 0.16 - gape * 0.55;
+    const snoutZ = 0.24 + gape;
+    if (alongX) {
+      w.box(skullX, skullY, 0.52, 1.00, { color: CROC, h: 0.16, z: jawZ });
+      w.box(skullX + 0.36, skullY + 0.06, 0.44, 0.88, { color: CROC, h: 0.42, z: snoutZ });
+      w.box(skullX + 0.46, skullY + 0.20, 0.20, 0.22, { color: CROC_RIDGE, h: 0.13, z: snoutZ + 0.42 });
+      w.box(skullX + 0.50, skullY + 0.25, 0.11, 0.11, { color: CROC_EYE, h: 0.08, z: snoutZ + 0.55 });
+      w.box(skullX + 0.46, skullY + 0.62, 0.20, 0.22, { color: CROC_RIDGE, h: 0.13, z: snoutZ + 0.42 });
+      w.box(skullX + 0.50, skullY + 0.67, 0.11, 0.11, { color: CROC_EYE, h: 0.08, z: snoutZ + 0.55 });
+      w.box(skullX + 0.72, skullY + 0.40, 0.16, 0.20, { color: CROC_RIDGE, h: 0.07, z: snoutZ + 0.36 });
+      w.post(skullX + 0.06, skullY + 0.14, jawZ + 0.10, 0.11, CROC_TOOTH, 0.035);
+      w.post(skullX + 0.06, skullY + 0.76, jawZ + 0.10, 0.11, CROC_TOOTH, 0.035);
+      w.post(skullX + 0.30, skullY + 0.22, snoutZ + 0.34, 0.13, CROC_TOOTH, 0.035);
+      w.post(skullX + 0.30, skullY + 0.68, snoutZ + 0.34, 0.13, CROC_TOOTH, 0.035);
+    } else {
+      w.box(skullX, skullY, 1.00, 0.52, { color: CROC, h: 0.16, z: jawZ });
+      w.box(skullX + 0.06, skullY + 0.36, 0.88, 0.44, { color: CROC, h: 0.42, z: snoutZ });
+      w.box(skullX + 0.20, skullY + 0.46, 0.22, 0.20, { color: CROC_RIDGE, h: 0.13, z: snoutZ + 0.42 });
+      w.box(skullX + 0.25, skullY + 0.50, 0.11, 0.11, { color: CROC_EYE, h: 0.08, z: snoutZ + 0.55 });
+      w.box(skullX + 0.62, skullY + 0.46, 0.22, 0.20, { color: CROC_RIDGE, h: 0.13, z: snoutZ + 0.42 });
+      w.box(skullX + 0.67, skullY + 0.50, 0.11, 0.11, { color: CROC_EYE, h: 0.08, z: snoutZ + 0.55 });
+      w.box(skullX + 0.40, skullY + 0.72, 0.20, 0.16, { color: CROC_RIDGE, h: 0.07, z: snoutZ + 0.36 });
+      w.post(skullX + 0.14, skullY + 0.06, jawZ + 0.10, 0.11, CROC_TOOTH, 0.035);
+      w.post(skullX + 0.76, skullY + 0.06, jawZ + 0.10, 0.11, CROC_TOOTH, 0.035);
+      w.post(skullX + 0.22, skullY + 0.30, snoutZ + 0.34, 0.13, CROC_TOOTH, 0.035);
+      w.post(skullX + 0.68, skullY + 0.30, snoutZ + 0.34, 0.13, CROC_TOOTH, 0.035);
+    }
+  };
 
   if (facing === 1) {
-    // South: Facing Camera
-    w.box(0.42 + tailSway, 0.02 - snapLunge * 0.3, 0.16, 0.34, { color: CROC, h: 0.18, z: 0.08 });
-    w.box(0.45 + tailSway * 1.5, 0.00 - snapLunge * 0.3, 0.10, 0.20, { color: CROC_RIDGE, h: 0.14, z: 0.24 });
+    // ── South: Facing Camera — tail far (low y), head near (high y). ──
+    w.box(0.86 + tailSway * 1.4, 0.02, 0.28, 0.20, { color: CROC, h: 0.13, z: 0.05 });
+    w.box(0.72 + tailSway, 0.10, 0.56, 0.34, { color: CROC, h: 0.19, z: 0.04 });
+    w.box(0.85 + tailSway, 0.14, 0.30, 0.24, { color: CROC_RIDGE, h: 0.09, z: 0.22 });
 
-    w.box(0.08, 0.26, 0.18, 0.18, { color: CROC, h: 0.16, z: 0 });
-    w.box(0.74, 0.26, 0.18, 0.18, { color: CROC, h: 0.16, z: 0 });
-    w.box(0.08, 0.58 + snapLunge * 0.5, 0.18, 0.18, { color: CROC, h: 0.16, z: 0 });
-    w.box(0.74, 0.58 + snapLunge * 0.5, 0.18, 0.18, { color: CROC, h: 0.16, z: 0 });
+    w.box(0.20, 0.38, 0.30, 0.32, { color: CROC, h: 0.24 });
+    w.box(1.50, 0.38, 0.30, 0.32, { color: CROC, h: 0.24 });
 
-    w.box(0.20, 0.20 + snapLunge * 0.4, 0.60, 0.58, { color: CROC, h: 0.24, z: 0.06 });
-    w.box(0.36, 0.22 + snapLunge * 0.4, 0.28, 0.52, { color: CROC_RIDGE, h: 0.14, z: 0.28 });
+    w.box(0.42, 0.40 + lunge * 0.35, 1.16, 0.85, { color: CROC, h: 0.56, z: 0.10 });
+    w.box(0.86, 0.46 + lunge * 0.35, 0.28, 0.22, { color: CROC_RIDGE, h: 0.15, z: 0.66 });
+    w.box(0.86, 0.70 + lunge * 0.35, 0.28, 0.22, { color: CROC_RIDGE, h: 0.19, z: 0.66 });
+    w.box(0.86, 0.94 + lunge * 0.35, 0.28, 0.22, { color: CROC_RIDGE, h: 0.15, z: 0.66 });
 
-    // Gaping jaws snap
-    const jawY = 0.68 + snapLunge;
-    w.box(0.26, jawY, 0.48, 0.38, { color: CROC, h: 0.20, z: 0.08 + gapeZ });
-    w.box(0.28, jawY + 0.26, 0.06, 0.08, { color: CROC_TOOTH, h: 0.10, z: 0.16 + gapeZ });
-    w.box(0.66, jawY + 0.26, 0.06, 0.08, { color: CROC_TOOTH, h: 0.10, z: 0.16 + gapeZ });
+    w.box(0.20, 1.06 + lunge * 0.3, 0.30, 0.32, { color: CROC, h: 0.24 });
+    w.box(1.50, 1.06 + lunge * 0.3, 0.30, 0.32, { color: CROC, h: 0.24 });
+
+    head(0.48, 1.20 + lunge, false);
 
   } else if (facing === 0) {
-    // North: Facing Away
-    const jawY = 0.04 - snapLunge;
-    w.box(0.26, jawY, 0.48, 0.38, { color: CROC, h: 0.20, z: 0.08 + gapeZ });
-    w.box(0.20, 0.22, 0.60, 0.58, { color: CROC, h: 0.24, z: 0.06 });
-    w.box(0.36, 0.26, 0.28, 0.52, { color: CROC_RIDGE, h: 0.14, z: 0.28 });
-    w.box(0.42 + tailSway, 0.64, 0.16, 0.34, { color: CROC, h: 0.18, z: 0.08 });
+    // ── North: Facing Away — head far (low y), tail near (high y). ──
+    head(0.48, 0.02 - lunge * 0.6, false);
+
+    w.box(0.20, 0.38, 0.30, 0.32, { color: CROC, h: 0.24 });
+    w.box(1.50, 0.38, 0.30, 0.32, { color: CROC, h: 0.24 });
+
+    w.box(0.42, 0.74, 1.16, 0.85, { color: CROC, h: 0.56, z: 0.10 });
+    w.box(0.86, 0.80, 0.28, 0.22, { color: CROC_RIDGE, h: 0.15, z: 0.66 });
+    w.box(0.86, 1.04, 0.28, 0.22, { color: CROC_RIDGE, h: 0.19, z: 0.66 });
+    w.box(0.86, 1.28, 0.28, 0.22, { color: CROC_RIDGE, h: 0.15, z: 0.66 });
+
+    w.box(0.20, 1.30, 0.30, 0.32, { color: CROC, h: 0.24 });
+    w.box(1.50, 1.30, 0.30, 0.32, { color: CROC, h: 0.24 });
+
+    w.box(0.72 + tailSway, 1.56, 0.56, 0.34, { color: CROC, h: 0.19, z: 0.04 });
+    w.box(0.85 + tailSway, 1.62, 0.30, 0.24, { color: CROC_RIDGE, h: 0.09, z: 0.22 });
+    w.box(0.86 + tailSway * 1.4, 1.78, 0.28, 0.20, { color: CROC, h: 0.13, z: 0.05 });
 
   } else if (facing === 2) {
-    // East: Facing +gx
-    const jawX = 0.68 + snapLunge;
-    w.box(0.02, 0.42 + tailSway, 0.34, 0.16, { color: CROC, h: 0.18, z: 0.08 });
-    w.box(0.20, 0.20, 0.58, 0.60, { color: CROC, h: 0.24, z: 0.06 });
-    w.box(0.24, 0.36, 0.52, 0.28, { color: CROC_RIDGE, h: 0.14, z: 0.28 });
-    w.box(jawX, 0.26, 0.38, 0.48, { color: CROC, h: 0.20, z: 0.08 + gapeZ });
+    // ── East: Facing +gx — tail far (low x), head near (high x). ──
+    w.box(0.02, 0.86 + tailSway * 1.4, 0.20, 0.28, { color: CROC, h: 0.13, z: 0.05 });
+    w.box(0.10, 0.72 + tailSway, 0.34, 0.56, { color: CROC, h: 0.19, z: 0.04 });
+    w.box(0.14, 0.85 + tailSway, 0.24, 0.30, { color: CROC_RIDGE, h: 0.09, z: 0.22 });
+
+    w.box(0.38, 0.20, 0.32, 0.30, { color: CROC, h: 0.24 });
+    w.box(0.38, 1.50, 0.32, 0.30, { color: CROC, h: 0.24 });
+
+    w.box(0.40 + lunge * 0.35, 0.42, 0.85, 1.16, { color: CROC, h: 0.56, z: 0.10 });
+    w.box(0.46 + lunge * 0.35, 0.86, 0.22, 0.28, { color: CROC_RIDGE, h: 0.15, z: 0.66 });
+    w.box(0.70 + lunge * 0.35, 0.86, 0.22, 0.28, { color: CROC_RIDGE, h: 0.19, z: 0.66 });
+    w.box(0.94 + lunge * 0.35, 0.86, 0.22, 0.28, { color: CROC_RIDGE, h: 0.15, z: 0.66 });
+
+    w.box(1.06 + lunge * 0.3, 0.20, 0.32, 0.30, { color: CROC, h: 0.24 });
+    w.box(1.06 + lunge * 0.3, 1.50, 0.32, 0.30, { color: CROC, h: 0.24 });
+
+    head(1.20 + lunge, 0.48, true);
 
   } else {
-    // West: Facing -gx
-    const jawX = 0.04 - snapLunge;
-    w.box(0.64, 0.42 + tailSway, 0.34, 0.16, { color: CROC, h: 0.18, z: 0.08 });
-    w.box(0.22, 0.20, 0.58, 0.60, { color: CROC, h: 0.24, z: 0.06 });
-    w.box(0.24, 0.36, 0.52, 0.28, { color: CROC_RIDGE, h: 0.14, z: 0.28 });
-    w.box(jawX, 0.26, 0.38, 0.48, { color: CROC, h: 0.20, z: 0.08 + gapeZ });
+    // ── West: Facing -gx — tail far (high x), head near (low x). ──
+    head(0.32 - lunge, 0.48, true);
+
+    w.box(1.50, 0.20, 0.32, 0.30, { color: CROC, h: 0.24 });
+    w.box(1.50, 1.50, 0.32, 0.30, { color: CROC, h: 0.24 });
+
+    w.box(0.75, 0.42, 0.85, 1.16, { color: CROC, h: 0.56, z: 0.10 });
+    w.box(0.86, 0.86, 0.22, 0.28, { color: CROC_RIDGE, h: 0.15, z: 0.66 });
+    w.box(1.10, 0.86, 0.22, 0.28, { color: CROC_RIDGE, h: 0.19, z: 0.66 });
+    w.box(1.34, 0.86, 0.22, 0.28, { color: CROC_RIDGE, h: 0.15, z: 0.66 });
+
+    w.box(0.82, 0.20, 0.32, 0.30, { color: CROC, h: 0.24 });
+    w.box(0.82, 1.50, 0.32, 0.30, { color: CROC, h: 0.24 });
+
+    w.box(1.56 + tailSway, 0.72 + tailSway, 0.34, 0.56, { color: CROC, h: 0.19, z: 0.04 });
+    w.box(1.62 + tailSway, 0.85 + tailSway, 0.24, 0.30, { color: CROC_RIDGE, h: 0.09, z: 0.22 });
+    w.box(1.78 + tailSway * 1.4, 0.86 + tailSway, 0.20, 0.28, { color: CROC, h: 0.13, z: 0.05 });
   }
 };
 
 export const CROC_SPRITE: SpriteDef = defineSprite({
-  id: 'croc', w: 1, d: 1, massing: crocMassing,
+  id: 'croc', w: 2, d: 2, massing: crocMassing,
 });
 
 // ── Declarative Creature Sprite Registry ──────────────────────────────────────
