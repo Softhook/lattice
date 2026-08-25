@@ -689,7 +689,7 @@ function drawViewport(
       if (showDivider) {
         drawSplitDivider(pen);
       }
-      drawPlayerHud(pen, activePlayer, world, seed);
+      drawPlayerHud(pen, activePlayer);
 
       // In-world contextual action prompt pill floating over targeted object
       // ONLY shown when an actual interaction/action is available (harvest, stoke, attack, repair)

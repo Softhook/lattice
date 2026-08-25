@@ -19,7 +19,10 @@ trip back to the Inventory.
 
 
 
-Remove the grid location text and biome name from the HUD. Put the grid location Very small and to the top left corner of each view port 
+DONE: Biome name dropped from the HUD entirely; grid location shrank to a tiny label in the top
+left corner of each viewport. The status card itself is now minimal — header (name + HP), HP bar,
+equipped weapon — and only grows a third row while a build kind is armed; resource counts aren't
+repeated since the DOM bar at the bottom of the screen already shows them.
 
 
 

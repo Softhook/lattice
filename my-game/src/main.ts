@@ -45,6 +45,7 @@ import {
   inventoryNav,
   activateInventorySelection,
   type Player,
+  type InteractType,
 } from './players.js';
 import {
   damageBuildings,
@@ -59,6 +60,7 @@ import {
   copyKeys,
   createActionEdges,
   type Vec2Out,
+  type PlayerActionEdges,
 } from './input.js';
 import {
   createVerdantPalette,
@@ -286,6 +288,96 @@ const projectiles = createProjectilePool();
 const fxPool = createFxPool();
 const creatureEvents = createCreatureEvents();
 
+/** Debris tint spawned at the target tile for each harvest/repair interaction type. */
+const INTERACT_DEBRIS_COLOR: Partial<Record<InteractType, number>> = {
+  chop:   0x8a6040ff,
+  mine:   0x95a5a6ff,
+  forage: 0x2ecc71ff,
+  repair: 0xf39c12ff,
+};
+
+/**
+ * Run one player's action edges for this tick: Inventory toggle/nav/select when it's open,
+ * otherwise place-armed-building-or-interact-or-attack, dig, and raise. One implementation for
+ * both players — see the `PlayerActionEdges` note in `input.ts` for why that's safe to share.
+ */
+function runPlayerActions(player: Player, e: PlayerActionEdges): void {
+  if (e.invToggle) {
+    // A same-tick toggle wins outright — pressing Space in the same 16 ms frame as C/V should
+    // never also open-and-immediately-select or close-and-immediately-act.
+    toggleInventory(player);
+    audio.play('click');
+    return;
+  }
+
+  if (player.invOpen) {
+    if (e.navUp)    inventoryNav(player, 0, -1);
+    if (e.navDown)  inventoryNav(player, 0, 1);
+    if (e.navLeft)  inventoryNav(player, -1, 0);
+    if (e.navRight) inventoryNav(player, 1, 0);
+    if (e.attack) {
+      const res = activateInventorySelection(player);
+      audio.play(res.ok ? (res.action === 'craft' ? 'craft' : 'click') : 'deny');
+    }
+    return;
+  }
+
+  if (e.attack && player.respawnTimer <= 0) {
+    if (player.mode !== 'move') {
+      // A build kind is armed from the Inventory: place it at the facing tile.
+      const placed = buildAtFacing(player, world, buildings);
+      if (placed !== undefined) {
+        buildings.push(placed);
+        audio.play(placed.kind === 'campfire' ? 'ignite' : 'build');
+      } else {
+        audio.play('deny');
+      }
+    } else {
+      // Contextual Interact (Flora harvest, building repair, campfire stoke) or Combat Attack.
+      const targetTile = facingTile(player);
+      const targetBaseH = heightAt(world.field, targetTile.gx, targetTile.gy);
+      const interact = interactAtFacing(player, world, flora, buildings);
+      if (interact.type !== 'none') {
+        audio.play(interact.type);
+        const debrisColor = INTERACT_DEBRIS_COLOR[interact.type];
+        if (debrisColor !== undefined) {
+          spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, debrisColor);
+        }
+      } else if (player.attackCooldown <= 0) {
+        const baseH = heightAt(world.field, player.gx, player.gy) + player.elevationPx;
+        const res = executeAttack(player, creatures, projectiles, baseH, fxPool);
+        audio.play(res.isRanged ? 'bow_shoot' : res.hit ? 'hit_meat' : 'attack');
+      }
+    }
+  }
+
+  if (e.dig) {
+    const changed = digAtFacing(player, world);
+    if (changed) {
+      audio.play('dig');
+      const targetTile = facingTile(player);
+      const targetBaseH = heightAt(world.field, targetTile.gx, targetTile.gy);
+      spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0x795548ff);
+      input.setTerrain({ field: world.field, maxHeightPx: world.currentMaxHeightPx });
+    } else {
+      audio.play('deny');
+    }
+  }
+
+  if (e.raise) {
+    const changed = raiseAtFacing(player, world);
+    if (changed) {
+      audio.play('raise');
+      const targetTile = facingTile(player);
+      const targetBaseH = heightAt(world.field, targetTile.gx, targetTile.gy);
+      spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0x8d6e63ff);
+      input.setTerrain({ field: world.field, maxHeightPx: world.currentMaxHeightPx });
+    } else {
+      audio.play('deny');
+    }
+  }
+}
+
 loop.onUpdate((dt, tick) => {
   input.tick(tick);
 
@@ -308,165 +400,11 @@ loop.onUpdate((dt, tick) => {
     audio.play('step');
   }
 
-  // ── Player 1 Actions ──────────────────────────────────────────────────────────
-  if (edges.p1InvToggle) {
-    toggleInventory(p1);
-    audio.play('click');
-    updateDomHud();
-  }
-
-  if (p1.invOpen) {
-    // Inventory open: movement-key edges navigate it instead of moving the player, and
-    // Space activates the highlighted row (equip/craft weapon, or arm/disarm a build kind).
-    if (edges.p1NavUp)    inventoryNav(p1, 0, -1);
-    if (edges.p1NavDown)  inventoryNav(p1, 0, 1);
-    if (edges.p1NavLeft)  inventoryNav(p1, -1, 0);
-    if (edges.p1NavRight) inventoryNav(p1, 1, 0);
-    if (edges.p1Attack) {
-      const res = activateInventorySelection(p1);
-      audio.play(res.ok ? (res.action === 'craft' ? 'craft' : 'click') : 'deny');
-      updateDomHud();
-    }
-  } else {
-    if (edges.p1Attack) {
-      if (p1.respawnTimer <= 0) {
-        if (p1.mode !== 'move') {
-          // A build kind is armed from the Inventory: Space places it at the facing tile.
-          const placed = buildAtFacing(p1, world, buildings);
-          if (placed !== undefined) {
-            buildings.push(placed);
-            audio.play(placed.kind === 'campfire' ? 'ignite' : 'build');
-            updateDomHud();
-          } else {
-            audio.play('deny');
-          }
-        } else {
-          // Contextual Interact (Flora harvest, building repair, campfire stoke) or Combat Attack.
-          const targetTile = facingTile(p1);
-          const targetBaseH = heightAt(world.field, targetTile.gx, targetTile.gy);
-          const interact = interactAtFacing(p1, world, flora, buildings);
-          if (interact.type !== 'none') {
-            audio.play(interact.type);
-            if (interact.type === 'chop') spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0x8a6040ff);
-            else if (interact.type === 'mine') spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0x95a5a6ff);
-            else if (interact.type === 'forage') spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0x2ecc71ff);
-            else if (interact.type === 'repair') spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0xf39c12ff);
-            updateDomHud();
-          } else if (p1.attackCooldown <= 0) {
-            const baseH = heightAt(world.field, p1.gx, p1.gy) + p1.elevationPx;
-            const res = executeAttack(p1, creatures, projectiles, baseH, fxPool);
-            if (res.isRanged) audio.play('bow_shoot');
-            else if (res.hit) audio.play('hit_meat');
-            else audio.play('attack');
-            updateDomHud();
-          }
-        }
-      }
-    }
-    if (edges.p1Dig) {
-      const changed = digAtFacing(p1, world);
-      if (changed) {
-        audio.play('dig');
-        const targetTile = facingTile(p1);
-        const targetBaseH = heightAt(world.field, targetTile.gx, targetTile.gy);
-        spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0x795548ff);
-        input.setTerrain({ field: world.field, maxHeightPx: world.currentMaxHeightPx });
-      } else {
-        audio.play('deny');
-      }
-    }
-    if (edges.p1Raise) {
-      const changed = raiseAtFacing(p1, world);
-      if (changed) {
-        audio.play('raise');
-        const targetTile = facingTile(p1);
-        const targetBaseH = heightAt(world.field, targetTile.gx, targetTile.gy);
-        spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0x8d6e63ff);
-        input.setTerrain({ field: world.field, maxHeightPx: world.currentMaxHeightPx });
-      } else {
-        audio.play('deny');
-      }
-    }
-  }
-
-  // ── Player 2 Actions ──────────────────────────────────────────────────────────
-  // Skipped entirely while Player 2 is hidden — frozen where they stood until brought back.
+  // ── Player Actions ────────────────────────────────────────────────────────────
+  // Player 2 is skipped entirely while hidden — frozen where they stood until brought back.
+  runPlayerActions(p1, edges.p[0]);
   if (p2.active) {
-    if (edges.p2InvToggle) {
-      toggleInventory(p2);
-      audio.play('click');
-      updateDomHud();
-    }
-    if (p2.invOpen) {
-      if (edges.p2NavUp)    inventoryNav(p2, 0, -1);
-      if (edges.p2NavDown)  inventoryNav(p2, 0, 1);
-      if (edges.p2NavLeft)  inventoryNav(p2, -1, 0);
-      if (edges.p2NavRight) inventoryNav(p2, 1, 0);
-      if (edges.p2Attack) {
-        const res = activateInventorySelection(p2);
-        audio.play(res.ok ? (res.action === 'craft' ? 'craft' : 'click') : 'deny');
-        updateDomHud();
-      }
-    } else {
-      if (edges.p2Attack) {
-        if (p2.respawnTimer <= 0) {
-          if (p2.mode !== 'move') {
-            // A build kind is armed from the Inventory: N places it at the facing tile.
-            const placed = buildAtFacing(p2, world, buildings);
-            if (placed !== undefined) {
-              buildings.push(placed);
-              audio.play(placed.kind === 'campfire' ? 'ignite' : 'build');
-              updateDomHud();
-            } else {
-              audio.play('deny');
-            }
-          } else {
-            const targetTile = facingTile(p2);
-            const targetBaseH = heightAt(world.field, targetTile.gx, targetTile.gy);
-            const interact = interactAtFacing(p2, world, flora, buildings);
-            if (interact.type !== 'none') {
-              audio.play(interact.type);
-              if (interact.type === 'chop') spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0x8a6040ff);
-              else if (interact.type === 'mine') spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0x95a5a6ff);
-              else if (interact.type === 'forage') spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0x2ecc71ff);
-              else if (interact.type === 'repair') spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0xf39c12ff);
-              updateDomHud();
-            } else if (p2.attackCooldown <= 0) {
-              const baseH = heightAt(world.field, p2.gx, p2.gy) + p2.elevationPx;
-              const res = executeAttack(p2, creatures, projectiles, baseH, fxPool);
-              if (res.isRanged) audio.play('bow_shoot');
-              else if (res.hit) audio.play('hit_meat');
-              else audio.play('attack');
-              updateDomHud();
-            }
-          }
-        }
-      }
-      if (edges.p2Dig) {
-        const changed = digAtFacing(p2, world);
-        if (changed) {
-          audio.play('dig');
-          const targetTile = facingTile(p2);
-          const targetBaseH = heightAt(world.field, targetTile.gx, targetTile.gy);
-          spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0x795548ff);
-          input.setTerrain({ field: world.field, maxHeightPx: world.currentMaxHeightPx });
-        } else {
-          audio.play('deny');
-        }
-      }
-      if (edges.p2Raise) {
-        const changed = raiseAtFacing(p2, world);
-        if (changed) {
-          audio.play('raise');
-          const targetTile = facingTile(p2);
-          const targetBaseH = heightAt(world.field, targetTile.gx, targetTile.gy);
-          spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0x8d6e63ff);
-          input.setTerrain({ field: world.field, maxHeightPx: world.currentMaxHeightPx });
-        } else {
-          audio.play('deny');
-        }
-      }
-    }
+    runPlayerActions(p2, edges.p[1]);
   }
 
   // Snapshot held keys without heap allocations
@@ -476,7 +414,6 @@ loop.onUpdate((dt, tick) => {
   const projHits = stepProjectiles(projectiles, creatures, playersPair, world, dt, fxPool);
   if (projHits.length > 0) {
     audio.play('hit_meat');
-    updateDomHud();
   }
 
   // ── Combat and interaction FX particle simulation ───────────────────────────
@@ -547,6 +484,10 @@ loop.onUpdate((dt, tick) => {
     autosaveTimer = 0;
     store.save(extractSaveState(SEED, playersPair, buildings, world, flora));
   }
+
+  // Refreshes the DOM resource counters — cheap no-op when nothing changed (it diffs internally),
+  // so one unconditional call here is simpler and less error-prone than one after every mutation.
+  updateDomHud();
 });
 
 // ── Render (display rate) ─────────────────────────────────────────────────────

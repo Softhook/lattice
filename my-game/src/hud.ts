@@ -1,8 +1,11 @@
 /**
  * In-canvas HUD rendering for Verdant.
  *
- * Renders player stats, health bar, inventory counts, active mode/cost badges,
- * action toasts, and respawn banners.
+ * Deliberately minimal: the status card shows only what changes combat/build decisions right now
+ * — HP, equipped weapon, and (only while one is armed) what's about to get placed. Resource
+ * counts already live in the persistent DOM bar at the bottom of the screen (see `main.ts`'s
+ * `updateDomHud`), so the canvas card doesn't repeat them; biome flavor text was dropped
+ * entirely, and the grid coordinate shrank to a small top-left corner label.
  *
  * Uses scratch arrays to guarantee ZERO memory allocation per frame.
  */
@@ -25,8 +28,7 @@ import {
   INVENTORY_CRAFT_ORDER,
 } from './players.js';
 import { BUILDING_COSTS, BUILDING_REGISTRY, type BuildingKind } from './buildings.js';
-import { WEAPONS, type WeaponKind } from './combat.js';
-import { getBiomeAt, type WorldTerrain } from './world.js';
+import { WEAPONS } from './combat.js';
 import {
   P1_COLOR,
   P1_ACCENT,
@@ -40,9 +42,7 @@ import {
 const UI_HP_GOOD    = hex('#2ecc71');
 const UI_HP_BAD     = hex('#e74c3c');
 const UI_TOOL_GOLD  = hex('#f1c40f');
-const UI_WOOD_COL   = hex('#d4a373');
-const UI_STONE_COL  = hex('#b0bec5');
-const UI_FIBER_COL  = hex('#81c784');
+const UI_CORNER_DIM = hex('#4a6a58');
 
 // ── Static Scratch Arrays for Poly / Stroke Calls (Zero Allocation) ────────────
 
@@ -104,13 +104,14 @@ export function drawSplitDivider(pen: Pen): void {
   pen.surface.stroke(setLine(cx, 0, cx, viewH), 2, false, hex('#2d4020'), 2);
 }
 
-/** Draw the in-canvas player status HUD card. */
-export function drawPlayerHud(
-  pen: Pen,
-  player: Player,
-  world?: WorldTerrain,
-  seed = 42,
-): void {
+/**
+ * Draw the in-canvas player status card, plus the toast/respawn overlays anchored to it.
+ *
+ * The card itself has just three rows — header (name + HP), HP bar, equipped weapon — and grows
+ * a fourth only while a build kind is armed. Nothing here duplicates the DOM resource bar or
+ * repeats a hint the Inventory overlay already explains; see the module doc comment.
+ */
+export function drawPlayerHud(pen: Pen, player: Player): void {
   const viewW = pen.camera.viewW;
   const viewH = pen.camera.viewH;
 
@@ -118,175 +119,86 @@ export function drawPlayerHud(
   const pColor = pIdx === 0 ? P1_COLOR : P2_COLOR;
   const pAccent = pIdx === 0 ? P1_ACCENT : P2_ACCENT;
   const pLabel = pIdx === 0 ? 'PLAYER 1' : 'PLAYER 2';
+  const invKey = pIdx === 0 ? '[C/V] Inventory' : '[,/.] Inventory';
+  const placeKey = pIdx === 0 ? '[Space] Place' : '[N] Place';
 
   const padX = 14;
   const padY = 14;
-  const hudW = 280;
-  const hudH = 124;
+  const hudW = 224;
+  const rowH = 22;
+  const armed = player.mode !== 'move';
+  const hudH = 36 + rowH + (armed ? rowH + 4 : 0) + 8;
 
   const isHurt = player.hurtFlash > 0;
   const cardBorder = isHurt ? hex('#e74c3c') : pColor;
   const cardBg = isHurt ? hex('#280808') : hex('#0c160a');
 
-  // 1. HUD Background panel
+  // Tiny grid-coordinate label, tucked above the card in the exact corner of the viewport.
+  screenText(
+    pen,
+    padX,
+    6,
+    `${Math.floor(player.gx)}, ${Math.floor(player.gy)}`,
+    UI_CORNER_DIM,
+    textStyle(8, 600, -1, 0),
+  );
+
+  // 1. Card background
   pen.surface.poly(setBox(padX, padY, hudW, hudH), 4, cardBg);
   pen.surface.stroke(setBox(padX, padY, hudW, hudH), 4, true, cardBorder, isHurt ? 2.5 : 1.5);
 
-  // 2. Header row: Player Tag + HP number
-  screenText(
-    pen,
-    padX + 10,
-    padY + 12,
-    pLabel,
-    pAccent,
-    textStyle(12, 800, -1, 0),
-  );
+  // 2. Header row: Player tag + HP number
+  screenText(pen, padX + 10, padY + 12, pLabel, pAccent, textStyle(12, 800, -1, 0));
 
   const currentHp = Math.max(0, Math.ceil(player.hp));
   const hpRatio = player.hp / MAX_HP;
   const hpColor = isHurt ? hex('#ff6b6b') : (hpRatio > 0.3 ? UI_HP_GOOD : UI_HP_BAD);
-  screenText(
-    pen,
-    padX + hudW - 10,
-    padY + 12,
-    `${currentHp} / ${MAX_HP} HP`,
-    hpColor,
-    textStyle(11, 700, 1, 0),
-  );
+  screenText(pen, padX + hudW - 10, padY + 12, `${currentHp}/${MAX_HP}`, hpColor, textStyle(11, 700, 1, 0));
 
-  // 3. Health bar
+  // 3. HP bar
   const barX = padX + 10;
   const barY = padY + 24;
   const barW = hudW - 20;
-  const barH = 7;
+  const barH = 6;
 
   pen.surface.poly(setBox(barX, barY, barW, barH), 4, hex('#1a2414'));
   if (hpRatio > 0) {
     const fillW = Math.max(2, barW * clamp(hpRatio, 0, 1));
-    pen.surface.poly(
-      setBox(barX, barY, fillW, barH),
-      4,
-      isHurt ? hex('#ff7979') : (hpRatio > 0.3 ? UI_HP_GOOD : UI_HP_BAD),
-    );
+    pen.surface.poly(setBox(barX, barY, fillW, barH), 4, isHurt ? hex('#ff7979') : (hpRatio > 0.3 ? UI_HP_GOOD : UI_HP_BAD));
   }
 
-  // 4. Tool / Mode badge
-  const toolX = padX + 10;
-  const toolY = padY + 38;
-  const toolW = hudW - 20;
-  const toolH = 26;
-
-  pen.surface.poly(setBox(toolX, toolY, toolW, toolH), 4, hex('#132110'));
-
-  const invKey = pIdx === 0 ? '[C/V] Inventory' : '[,/.] Inventory';
-  const placeKey = pIdx === 0 ? '[Space] Place' : '[N] Place';
-
-  let modeText = '';
-  let modeAction = invKey;
-  let modeColor = hex('#bdc3c7');
-
-  if (player.mode === 'move') {
-    modeText = `EXPLORE`;
-    modeAction = invKey;
-  } else {
-    const cost = BUILDING_COSTS[player.mode];
-    const affordable = canAffordBuilding(player, player.mode);
-    const name = player.mode === 'campfire' ? 'CAMPFIRE 🔥' : player.mode.replace('_', ' ').toUpperCase();
-    const fiberCost = cost.fiber ? ` ${cost.fiber}🌿` : '';
-    modeText = `🔨 ${name} (${cost.wood}🪵 ${cost.stone}🪨${fiberCost})`;
-    modeAction = placeKey;
-    modeColor = affordable ? UI_TOOL_GOLD : hex('#e74c3c');
-  }
-
-  pen.surface.stroke(
-    setBox(toolX, toolY, toolW, toolH),
-    4,
-    true,
-    player.mode === 'move' ? hex('#34495e') : modeColor,
-    1,
-  );
-
-  screenText(
-    pen,
-    toolX + 8,
-    toolY + 13,
-    modeText,
-    modeColor,
-    textStyle(10, 700, -1, 0),
-  );
-
-  screenText(
-    pen,
-    toolX + toolW - 8,
-    toolY + 13,
-    modeAction,
-    hex('#8da882'),
-    textStyle(10, 600, 1, 0),
-  );
-
-  // 5. Weapon & Combat Bar
-  const wepX = padX + 10;
-  const wepY = padY + 68;
+  // 4. Weapon row — always the single place the Inventory hint is shown.
+  const wepY = padY + 36;
   const wepW = hudW - 20;
-  const wepH = 26;
 
-  pen.surface.poly(setBox(wepX, wepY, wepW, wepH), 4, hex('#181a24'));
-  pen.surface.stroke(setBox(wepX, wepY, wepW, wepH), 4, true, hex('#3d5a80'), 1);
+  pen.surface.poly(setBox(barX, wepY, wepW, rowH), 4, hex('#181a24'));
+  pen.surface.stroke(setBox(barX, wepY, wepW, rowH), 4, true, hex('#3d5a80'), 1);
+  screenText(pen, barX + 8, wepY + rowH * 0.5 + 1, `${WEAPONS[player.weapon].icon} ${player.weapon.toUpperCase()}`, hex('#90caf9'), textStyle(10, 800, -1, 0));
+  screenText(pen, barX + wepW - 8, wepY + rowH * 0.5 + 1, invKey, hex('#ffe082'), textStyle(9, 700, 1, 0));
 
-  const wepCycleKey = invKey;
-  const wName = player.weapon.toUpperCase();
+  // 5. Armed-build row — only while a build kind is actually armed (see `players.ts`'s
+  //    `buildAtFacing`, which disarms the instant it lands, so this row is inherently transient).
+  if (player.mode !== 'move') {
+    const modeY = wepY + rowH + 4;
+    const affordable = canAffordBuilding(player, player.mode);
+    const modeColor = affordable ? UI_TOOL_GOLD : hex('#e74c3c');
+    const name = player.mode.replace('_', ' ').toUpperCase();
 
-  screenText(
-    pen,
-    wepX + 8,
-    wepY + 13,
-    `⚔️ ${wName}`,
-    hex('#90caf9'),
-    textStyle(10, 800, -1, 0),
-  );
+    pen.surface.poly(setBox(barX, modeY, wepW, rowH), 4, hex('#132110'));
+    pen.surface.stroke(setBox(barX, modeY, wepW, rowH), 4, true, modeColor, 1);
+    screenText(pen, barX + 8, modeY + rowH * 0.5 + 1, `🔨 ${name}`, modeColor, textStyle(10, 700, -1, 0));
+    screenText(pen, barX + wepW - 8, modeY + rowH * 0.5 + 1, placeKey, hex('#8da882'), textStyle(10, 600, 1, 0));
+  }
 
-  screenText(
-    pen,
-    wepX + wepW - 8,
-    wepY + 13,
-    wepCycleKey,
-    hex('#ffe082'),
-    textStyle(9, 700, 1, 0),
-  );
-
-  // 6. Location & Biome Radar Strip
-  const gx = Math.floor(player.gx);
-  const gy = Math.floor(player.gy);
-  const elevation = world !== undefined ? world.heights.get(gx, gy) : 4;
-  const biome = getBiomeAt(gx, gy, seed, elevation);
-
-  screenText(
-    pen,
-    padX + 10,
-    padY + 102,
-    `${biome.icon} ${biome.name.toUpperCase()} · ${gx}, ${gy}`,
-    hex('#80cbc4'),
-    textStyle(9, 700, -1, 0),
-  );
-
-  // 8. Floating action notification if present
+  // 6. Floating action toast, directly under the card (its height already reflects row 5).
   if (player.lastActionMsg.length > 0 && player.msgTimer > 0) {
     const msgY = padY + hudH + 16;
     const alpha = Math.min(1, player.msgTimer * 2);
     const msgCol = player.lastActionMsg.startsWith('NEED')
       ? withAlpha(hex('#ff7675'), alpha)
       : withAlpha(hex('#55efc4'), alpha);
-
-    screenText(
-      pen,
-      padX + 10,
-      msgY,
-      player.lastActionMsg,
-      msgCol,
-      textStyle(12, 800, -1, 0),
-    );
+    screenText(pen, padX + 10, msgY, player.lastActionMsg, msgCol, textStyle(12, 800, -1, 0));
   }
-
 
   // 7. Respawn banner if knocked down
   if (player.respawnTimer > 0) {

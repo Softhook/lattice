@@ -2,11 +2,13 @@
  * Keyboard input for two players.
  *
  * Player movement is continuous (held-key), tracked in a set.
- * Actions (dig, raise, build, toggle inventory) use rising-edge detection so they fire once per press.
+ * Actions (dig, raise, attack/place, toggle inventory) use rising-edge detection so they fire
+ * once per press.
  *
  * Designed to allocate ZERO objects on the 60 Hz simulation tick:
  * - Movement writes into caller-supplied out-parameters.
- * - Action edge detection reuses a static ActionEdges struct.
+ * - Action edge detection reuses a static ActionEdges struct (one `PlayerActionEdges` per player,
+ *   never reallocated — see `edges.p[0]` / `edges.p[1]`).
  * - Key snapshotting copies into a reusable Set without allocations.
  *
  * Key layout:
@@ -24,8 +26,8 @@
  * otherwise it's interact-or-attack. What to build and which weapon to equip is chosen ahead of
  * time in the Inventory overlay (C/V, ,/.) — not by cycling through options in the world — so a
  * player is never mid-decision when a fight starts. While the Inventory is open, the movement
- * keys re-purpose as up/down/left/right navigation (see `pNavUp` etc. below) instead of moving
- * the player, and Space/N confirms the highlighted entry.
+ * keys re-purpose as up/down/left/right navigation (`navUp` etc. below) instead of moving the
+ * player, and Space/N confirms the highlighted entry.
  */
 
 export interface KeyState {
@@ -37,46 +39,42 @@ export interface Vec2Out {
   dy: number;
 }
 
-export interface ActionEdges {
-  p1Dig: boolean;
-  p1Raise: boolean;
-  p1Attack: boolean;
-  p1InvToggle: boolean;
-  p1NavUp: boolean;
-  p1NavDown: boolean;
-  p1NavLeft: boolean;
-  p1NavRight: boolean;
+/** Rising-edge action signals for one player. Both players share this shape — see `KEY_MAPS` —
+ *  so the dispatch logic that consumes it (`main.ts`) is written once and run twice. */
+export interface PlayerActionEdges {
+  dig: boolean;
+  raise: boolean;
+  /** Interact/attack when nothing is armed, or place the armed build kind — see the key layout
+   *  note above. Also confirms the highlighted row while the Inventory overlay is open. */
+  attack: boolean;
+  /** Open/close the Inventory overlay. Bound to two keys (C/V or ,/.) — either fires this. */
+  invToggle: boolean;
+  navUp: boolean;
+  navDown: boolean;
+  navLeft: boolean;
+  navRight: boolean;
+}
 
-  p2Dig: boolean;
-  p2Raise: boolean;
-  p2Attack: boolean;
-  p2InvToggle: boolean;
-  p2NavUp: boolean;
-  p2NavDown: boolean;
-  p2NavLeft: boolean;
-  p2NavRight: boolean;
+function createPlayerActionEdges(): PlayerActionEdges {
+  return {
+    dig: false,
+    raise: false,
+    attack: false,
+    invToggle: false,
+    navUp: false,
+    navDown: false,
+    navLeft: false,
+    navRight: false,
+  };
+}
+
+/** Rising-edge action signals for both players, indexed by player number (`p[0]` is Player 1). */
+export interface ActionEdges {
+  readonly p: readonly [PlayerActionEdges, PlayerActionEdges];
 }
 
 export function createActionEdges(): ActionEdges {
-  return {
-    p1Dig: false,
-    p1Raise: false,
-    p1Attack: false,
-    p1InvToggle: false,
-    p1NavUp: false,
-    p1NavDown: false,
-    p1NavLeft: false,
-    p1NavRight: false,
-
-    p2Dig: false,
-    p2Raise: false,
-    p2Attack: false,
-    p2InvToggle: false,
-    p2NavUp: false,
-    p2NavDown: false,
-    p2NavLeft: false,
-    p2NavRight: false,
-  };
+  return { p: [createPlayerActionEdges(), createPlayerActionEdges()] };
 }
 
 /** Create and attach keyboard listeners to the document. Returns a disposer. */
@@ -128,35 +126,59 @@ export function pollP2Movement(keys: ReadonlySet<string>, out: Vec2Out): void {
 
 // ── Action edge detection (Zero-allocation) ───────────────────────────────────
 
-/**
- * Compute rising-edge action signals into the reusable `out` struct.
- */
+/** The `KeyboardEvent.code`s bound to one player's actions — the single source of truth `Key
+ *  layout` above is generated from. */
+interface PlayerKeyMap {
+  readonly dig: string;
+  readonly raise: string;
+  readonly attack: string;
+  readonly invToggleA: string;
+  readonly invToggleB: string;
+  readonly navUp: string;
+  readonly navDown: string;
+  readonly navLeft: string;
+  readonly navRight: string;
+}
+
+const P1_KEYS: PlayerKeyMap = {
+  dig: 'KeyQ', raise: 'KeyR', attack: 'Space',
+  invToggleA: 'KeyC', invToggleB: 'KeyV',
+  navUp: 'KeyW', navDown: 'KeyS', navLeft: 'KeyA', navRight: 'KeyD',
+};
+
+const P2_KEYS: PlayerKeyMap = {
+  dig: 'KeyU', raise: 'KeyY', attack: 'KeyN',
+  invToggleA: 'Comma', invToggleB: 'Period',
+  navUp: 'KeyI', navDown: 'KeyK', navLeft: 'KeyJ', navRight: 'KeyL',
+};
+
+/** Compute one player's rising-edge action signals into the reusable `out` struct. */
+function pollPlayerActions(
+  prev: ReadonlySet<string>,
+  curr: ReadonlySet<string>,
+  keys: PlayerKeyMap,
+  out: PlayerActionEdges,
+): void {
+  out.dig    = curr.has(keys.dig) && !prev.has(keys.dig);
+  out.raise  = curr.has(keys.raise) && !prev.has(keys.raise);
+  out.attack = curr.has(keys.attack) && !prev.has(keys.attack);
+  out.invToggle =
+    (curr.has(keys.invToggleA) && !prev.has(keys.invToggleA)) ||
+    (curr.has(keys.invToggleB) && !prev.has(keys.invToggleB));
+  out.navUp    = curr.has(keys.navUp) && !prev.has(keys.navUp);
+  out.navDown  = curr.has(keys.navDown) && !prev.has(keys.navDown);
+  out.navLeft  = curr.has(keys.navLeft) && !prev.has(keys.navLeft);
+  out.navRight = curr.has(keys.navRight) && !prev.has(keys.navRight);
+}
+
+/** Compute rising-edge action signals for both players into the reusable `out` struct. */
 export function pollActions(
   prev: ReadonlySet<string>,
   curr: ReadonlySet<string>,
   out: ActionEdges,
 ): void {
-  out.p1Dig   = curr.has('KeyQ') && !prev.has('KeyQ');
-  out.p1Raise = curr.has('KeyR') && !prev.has('KeyR');
-  out.p1Attack = curr.has('Space') && !prev.has('Space');
-  out.p1InvToggle =
-    (curr.has('KeyC') && !prev.has('KeyC')) ||
-    (curr.has('KeyV') && !prev.has('KeyV'));
-  out.p1NavUp    = curr.has('KeyW') && !prev.has('KeyW');
-  out.p1NavDown  = curr.has('KeyS') && !prev.has('KeyS');
-  out.p1NavLeft  = curr.has('KeyA') && !prev.has('KeyA');
-  out.p1NavRight = curr.has('KeyD') && !prev.has('KeyD');
-
-  out.p2Dig   = curr.has('KeyU') && !prev.has('KeyU');
-  out.p2Raise = curr.has('KeyY') && !prev.has('KeyY');
-  out.p2Attack = curr.has('KeyN') && !prev.has('KeyN');
-  out.p2InvToggle =
-    (curr.has('Comma') && !prev.has('Comma')) ||
-    (curr.has('Period') && !prev.has('Period'));
-  out.p2NavUp    = curr.has('KeyI') && !prev.has('KeyI');
-  out.p2NavDown  = curr.has('KeyK') && !prev.has('KeyK');
-  out.p2NavLeft  = curr.has('KeyJ') && !prev.has('KeyJ');
-  out.p2NavRight = curr.has('KeyL') && !prev.has('KeyL');
+  pollPlayerActions(prev, curr, P1_KEYS, out.p[0]);
+  pollPlayerActions(prev, curr, P2_KEYS, out.p[1]);
 }
 
 /** Copy current held set into `target` Set in-place without reallocating. */
