@@ -293,9 +293,12 @@ loop.onUpdate((dt, tick) => {
 
   // ── Player movement ───────────────────────────────────────────────────────────
   pollP1Movement(curr, moveVec1);
-  pollP2Movement(curr, moveVec2);
   const p1Stepped = movePlayer(p1, moveVec1.dx, moveVec1.dy, world, buildings, dt);
-  const p2Stepped = movePlayer(p2, moveVec2.dx, moveVec2.dy, world, buildings, dt);
+  let p2Stepped = false;
+  if (p2.active) {
+    pollP2Movement(curr, moveVec2);
+    p2Stepped = movePlayer(p2, moveVec2.dx, moveVec2.dy, world, buildings, dt);
+  }
   if (p1Stepped || p2Stepped) {
     audio.play('step');
   }
@@ -378,78 +381,81 @@ loop.onUpdate((dt, tick) => {
   }
 
   // ── Player 2 Actions (Contextual KeyN Model) ─────────────────────────────────
-  if (edges.p2CycleWeapon) {
-    const res = craftNextAvailable(p2);
-    if (res.crafted) audio.play('craft');
-    else audio.play('click');
-    updateDomHud();
-  }
-  if (edges.p2CraftWeapon) {
-    const res = craftNextAvailable(p2);
-    if (res.crafted) audio.play('craft');
-    else audio.play('deny');
-    updateDomHud();
-  }
-  if (edges.p2Cycle || edges.p2Build) {
-    cycleBuildKind(p2);
-    audio.play('click');
-    updateDomHud();
-  }
-  if (edges.p2Attack) {
-    if (p2.respawnTimer <= 0) {
-      if (p2.mode !== 'move') {
-        const placed = buildAtFacing(p2, world, buildings);
-        if (placed !== undefined) {
-          buildings.push(placed);
-          audio.play(placed.kind === 'campfire' ? 'ignite' : 'build');
-          updateDomHud();
+  // Skipped entirely while Player 2 is hidden — frozen where they stood until brought back.
+  if (p2.active) {
+    if (edges.p2CycleWeapon) {
+      const res = craftNextAvailable(p2);
+      if (res.crafted) audio.play('craft');
+      else audio.play('click');
+      updateDomHud();
+    }
+    if (edges.p2CraftWeapon) {
+      const res = craftNextAvailable(p2);
+      if (res.crafted) audio.play('craft');
+      else audio.play('deny');
+      updateDomHud();
+    }
+    if (edges.p2Cycle || edges.p2Build) {
+      cycleBuildKind(p2);
+      audio.play('click');
+      updateDomHud();
+    }
+    if (edges.p2Attack) {
+      if (p2.respawnTimer <= 0) {
+        if (p2.mode !== 'move') {
+          const placed = buildAtFacing(p2, world, buildings);
+          if (placed !== undefined) {
+            buildings.push(placed);
+            audio.play(placed.kind === 'campfire' ? 'ignite' : 'build');
+            updateDomHud();
+          } else {
+            audio.play('deny');
+          }
         } else {
-          audio.play('deny');
-        }
-      } else {
-        const targetTile = facingTile(p2);
-        const targetBaseH = heightAt(world.field, targetTile.gx, targetTile.gy);
-        const interact = interactAtFacing(p2, world, flora, buildings);
-        if (interact.type !== 'none') {
-          audio.play(interact.type);
-          if (interact.type === 'chop') spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0x8a6040ff);
-          else if (interact.type === 'mine') spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0x95a5a6ff);
-          else if (interact.type === 'forage') spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0x2ecc71ff);
-          else if (interact.type === 'repair') spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0xf39c12ff);
-          updateDomHud();
-        } else if (p2.attackCooldown <= 0) {
-          const baseH = heightAt(world.field, p2.gx, p2.gy);
-          const res = executeAttack(p2, creatures, projectiles, baseH, fxPool);
-          if (res.isRanged) audio.play('bow_shoot');
-          else if (res.hit) audio.play('hit_meat');
-          else audio.play('attack');
-          updateDomHud();
+          const targetTile = facingTile(p2);
+          const targetBaseH = heightAt(world.field, targetTile.gx, targetTile.gy);
+          const interact = interactAtFacing(p2, world, flora, buildings);
+          if (interact.type !== 'none') {
+            audio.play(interact.type);
+            if (interact.type === 'chop') spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0x8a6040ff);
+            else if (interact.type === 'mine') spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0x95a5a6ff);
+            else if (interact.type === 'forage') spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0x2ecc71ff);
+            else if (interact.type === 'repair') spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0xf39c12ff);
+            updateDomHud();
+          } else if (p2.attackCooldown <= 0) {
+            const baseH = heightAt(world.field, p2.gx, p2.gy);
+            const res = executeAttack(p2, creatures, projectiles, baseH, fxPool);
+            if (res.isRanged) audio.play('bow_shoot');
+            else if (res.hit) audio.play('hit_meat');
+            else audio.play('attack');
+            updateDomHud();
+          }
         }
       }
     }
-  }
-  if (edges.p2Dig) {
-    const changed = digAtFacing(p2, world);
-    if (changed) {
-      audio.play('dig');
-      const targetTile = facingTile(p2);
-      const targetBaseH = heightAt(world.field, targetTile.gx, targetTile.gy);
-      spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0x795548ff);
-      input.setTerrain({ field: world.field, maxHeightPx: world.currentMaxHeightPx });
-    } else {
-      audio.play('deny');
+    if (edges.p2Dig) {
+      const changed = digAtFacing(p2, world);
+      if (changed) {
+        audio.play('dig');
+        const targetTile = facingTile(p2);
+        const targetBaseH = heightAt(world.field, targetTile.gx, targetTile.gy);
+        spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0x795548ff);
+        input.setTerrain({ field: world.field, maxHeightPx: world.currentMaxHeightPx });
+      } else {
+        audio.play('deny');
+      }
     }
-  }
-  if (edges.p2Raise) {
-    const changed = raiseAtFacing(p2, world);
-    if (changed) {
-      audio.play('raise');
-      const targetTile = facingTile(p2);
-      const targetBaseH = heightAt(world.field, targetTile.gx, targetTile.gy);
-      spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0x8d6e63ff);
-      input.setTerrain({ field: world.field, maxHeightPx: world.currentMaxHeightPx });
-    } else {
-      audio.play('deny');
+    if (edges.p2Raise) {
+      const changed = raiseAtFacing(p2, world);
+      if (changed) {
+        audio.play('raise');
+        const targetTile = facingTile(p2);
+        const targetBaseH = heightAt(world.field, targetTile.gx, targetTile.gy);
+        spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0x8d6e63ff);
+        input.setTerrain({ field: world.field, maxHeightPx: world.currentMaxHeightPx });
+      } else {
+        audio.play('deny');
+      }
     }
   }
 
@@ -520,7 +526,7 @@ loop.onUpdate((dt, tick) => {
 
   // ── Player regen & respawn ────────────────────────────────────────────────────
   const p1Respawned = tickPlayer(p1, dt);
-  const p2Respawned = tickPlayer(p2, dt);
+  const p2Respawned = p2.active && tickPlayer(p2, dt);
   if (p1Respawned || p2Respawned) {
     audio.play('respawn');
   }
@@ -608,6 +614,17 @@ function createNewWorld(): void {
   }
 }
 
+/**
+ * Toggle single-player view: hides Player 2 (frozen in place, keeping position/inventory/gear)
+ * and lets Player 1's camera fill the screen, or brings Player 2 back into the split view.
+ */
+function setSinglePlayerView(hidePlayer2: boolean): void {
+  if (p2.active === !hidePlayer2) return;
+  p2.active = !hidePlayer2;
+  document.getElementById('inventory-bar')?.classList.toggle('single-player', hidePlayer2);
+  fit();
+}
+
 const btnFullscreen = document.getElementById('btn-fullscreen');
 btnFullscreen?.addEventListener('click', toggleFullscreen);
 
@@ -621,6 +638,12 @@ window.addEventListener('keydown', (e) => {
   } else if (e.key === 'F2') {
     e.preventDefault();
     createNewWorld();
+  } else if (e.code === 'Digit1') {
+    e.preventDefault();
+    setSinglePlayerView(true);
+  } else if (e.code === 'Digit2') {
+    e.preventDefault();
+    setSinglePlayerView(false);
   }
 });
 
@@ -633,7 +656,7 @@ document.addEventListener('fullscreenchange', () => {
 function fit(): void {
   const w = canvasEl?.clientWidth || window.innerWidth;
   const h = canvasEl?.clientHeight || window.innerHeight;
-  resizeCameras(surface, camera1, camera2, w, h);
+  resizeCameras(surface, camera1, camera2, w, h, !p2.active);
 }
 window.addEventListener('resize', fit);
 if (window.visualViewport !== null) {

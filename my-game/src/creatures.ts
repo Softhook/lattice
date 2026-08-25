@@ -560,7 +560,7 @@ function updateOne(
   if (shouldFleeFromPlayers) {
     for (let i = 0; i < players.length; i++) {
       const p = players[i];
-      if (p === undefined || p.respawnTimer > 0) continue;
+      if (p === undefined || p.respawnTimer > 0 || !p.active) continue;
       const dx = p.gx - c.gx;
       const dy = p.gy - c.gy;
       const dSq = dx * dx + dy * dy;
@@ -671,7 +671,7 @@ function updateOne(
       const playerDetectRange = def.behavior === 'territorial' ? 5.5 : bestDist;
       for (let i = 0; i < players.length; i++) {
         const p = players[i];
-        if (p === undefined || p.respawnTimer > 0) continue;
+        if (p === undefined || p.respawnTimer > 0 || !p.active) continue;
         // Player protected inside campfire or beacon sanctuary is safe
         if (fearsFire && isNearActiveFireOrLight(p.gx, p.gy, buildings, darkness)) {
           continue;

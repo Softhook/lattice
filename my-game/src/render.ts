@@ -198,7 +198,9 @@ function getSubPenWithLight(
 
 /**
  * Draw one full split-screen frame: Player 1's camera on the left half of the canvas,
- * Player 2's on the right, each independently clipped and depth-sorted.
+ * Player 2's on the right, each independently clipped and depth-sorted. If Player 2 has been
+ * hidden (`players[1].active === false`), Player 1's camera fills the whole canvas instead and
+ * the second pass is skipped.
  *
  * Two `drawViewport` passes share every scratch buffer and the single `DepthSorter` — the
  * second pass reuses what the first already allocated rather than doubling the render state,
@@ -240,25 +242,30 @@ export function renderVerdant(
     return;
   }
 
-  const halfW = Math.max(1, Math.floor(surface.width / 2));
+  // Player 2 can be hidden (single-player view toggle) — in which case Player 1's camera fills
+  // the whole canvas and the second pass is skipped entirely rather than drawn to a zero-width clip.
+  const singlePlayer = !players[1].active;
+  const halfW = singlePlayer ? surface.width : Math.max(1, Math.floor(surface.width / 2));
 
   // ── Left viewport (Camera 1 / Player 1) ────────────────────────────────────────
   ctx.save();
   ctx.beginPath();
   ctx.rect(0, 0, halfW, surface.height);
   ctx.clip();
-  drawViewport(pen, camera1, world, flora, creatures, players, buildings, projectiles, fxPool, players[0], t, darkness, daylight, cycle, seed, light1, true);
+  drawViewport(pen, camera1, world, flora, creatures, players, buildings, projectiles, fxPool, players[0], t, darkness, daylight, cycle, seed, light1, !singlePlayer);
   ctx.restore();
 
-  // ── Right viewport (Camera 2 / Player 2) ───────────────────────────────────────
-  const pen2 = getSubPenWithLight(pen, surface, camera2, light2);
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(halfW, 0, halfW, surface.height);
-  ctx.clip();
-  ctx.translate(halfW, 0);
-  drawViewport(pen2, camera2, world, flora, creatures, players, buildings, projectiles, fxPool, players[1], t, darkness, daylight, cycle, seed, light2, false);
-  ctx.restore();
+  if (!singlePlayer) {
+    // ── Right viewport (Camera 2 / Player 2) ─────────────────────────────────────
+    const pen2 = getSubPenWithLight(pen, surface, camera2, light2);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(halfW, 0, halfW, surface.height);
+    ctx.clip();
+    ctx.translate(halfW, 0);
+    drawViewport(pen2, camera2, world, flora, creatures, players, buildings, projectiles, fxPool, players[1], t, darkness, daylight, cycle, seed, light2, false);
+    ctx.restore();
+  }
 
   endFrame(pen);
 }
@@ -281,7 +288,7 @@ function drawViewport(
   cycle: number,
   seed: number,
   light: LightField,
-  isLeft: boolean,
+  showDivider: boolean,
 ): void {
   ORDER.clear();
 
@@ -349,7 +356,7 @@ function drawViewport(
   const numPlayers = players.length;
   for (let i = 0; i < numPlayers; i++) {
     const p = players[i];
-    if (p === undefined || p.respawnTimer > 0) continue;
+    if (p === undefined || p.respawnTimer > 0 || !p.active) continue;
     const basePx = heightAt(world.field, p.gx, p.gy);
     ORDER.add(p.gx, p.gy, 1, 1, basePx + spriteHeightPx(PLAYER_SPRITES[p.index], playerVariant(p)));
   }
@@ -648,7 +655,7 @@ function drawViewport(
     },
 
     overlay(pen) {
-      if (isLeft) {
+      if (showDivider) {
         drawSplitDivider(pen);
       }
       drawPlayerHud(pen, activePlayer, world, seed);
@@ -702,20 +709,25 @@ function drawViewport(
   renderFrame(pen, passes, ORDER);
 }
 
-/** Resize both cameras and the surface to fill the viewport dimensions. */
+/**
+ * Resize both cameras and the surface to fill the viewport dimensions. When `singlePlayer` is
+ * true, Camera 1 is sized to the full width (Player 2's camera stays half-width and ready, so
+ * revealing Player 2 again looks right immediately, without waiting for a window resize).
+ */
 export function resizeCameras(
   surface: { resize(w: number, h: number, ratio: number): void; readonly pixelRatio: number },
   camera1: Camera,
   camera2: Camera,
   width?: number,
   height?: number,
+  singlePlayer = false,
 ): void {
   const w = Math.max(1, width ?? (typeof window !== 'undefined' ? window.innerWidth : 1280));
   const h = Math.max(1, height ?? (typeof window !== 'undefined' ? window.innerHeight : 720));
   surface.resize(w, h, surface.pixelRatio);
 
   const half = Math.max(1, Math.floor(w / 2));
-  camera1.resize(half, h);
+  camera1.resize(singlePlayer ? w : half, h);
   camera2.resize(half, h);
 }
 

@@ -96,6 +96,10 @@ export interface Player {
   lastActionMsg: string;
   /** Message display timer in seconds. */
   msgTimer: number;
+  /** Whether this player is present in the session. False while a co-op player has been hidden
+   *  (single-player view toggle) — frozen out of simulation, world rendering, and creature threat
+   *  perception until switched back on, but retains position/inventory/gear to resume with. */
+  active: boolean;
 }
 
 /** Trigger an articulated action or combat animation on a player. */
@@ -176,6 +180,7 @@ function makePlayer(index: 0 | 1, gx: number, gy: number): Player {
     isMoving: false,
     lastActionMsg: '',
     msgTimer: 0,
+    active: true,
   };
 }
 

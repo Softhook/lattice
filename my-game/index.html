@@ -114,6 +114,19 @@
         border-right: 1px solid #1c3018;
       }
 
+      /* Single-player view (Player 2 hidden, [2] brings them back) */
+      #inventory-bar.single-player {
+        grid-template-columns: 1fr;
+      }
+
+      #inventory-bar.single-player .p1-inv {
+        border-right: none;
+      }
+
+      #inventory-bar.single-player .p2-inv {
+        display: none;
+      }
+
       .inv-item {
         display: inline-flex;
         align-items: center;

@@ -1,10 +1,14 @@
-
-
 Improve the visual style of all the creatures. Crocodiles and Trolls are too small.
+
+In the center of the screen, when a user is above a particular item in the world, the text is too detailed. It currently gives the key to press. And the action to be performed when actually we just need the name of the item.
+
+
+Allow the player to use the mouse to click in the world and make a text bar pop up for naming locations in the world. This text label is then always attached to that location. It has a little red cross in the top right corner for deleting that name 
+
 
 Look again at all the attack opattern snad keep in my the z clipping needed
 
-The usability of the crafting and interacting doesn't kind of work right now. 
+The usability of the crafting and interacting doesn't kind of work right now. When in the middle of selecting options to build, it's impossible to go and attack. somehow the physical interaction method doesn't work very well 
 
 Think about the inventory system again that can show all the different things the player has collected and picked up. so the player can switch between different weapons and things to build 
 
