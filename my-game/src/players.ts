@@ -11,7 +11,7 @@
 
 import { clamp } from '@latticekit/core';
 import { heightAt } from '@latticekit/iso';
-import { hex, type Ink } from '@latticekit/draw';
+import { hex, type Rgba } from '@latticekit/draw';
 import type { WorldTerrain } from './world.js';
 import { dig, raise, isWalkable, W, H } from './world.js';
 import type { Building, BuildingKind } from './buildings.js';
@@ -552,7 +552,7 @@ export interface TargetContext {
   actionKey: string;
   actionLabel: string;
   subLabel: string;
-  color: Ink;
+  color: Rgba;
 }
 
 const TARGET_SCRATCH: TargetContext = {

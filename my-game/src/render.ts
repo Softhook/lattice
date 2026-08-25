@@ -364,7 +364,7 @@ function drawViewport(
         for (let gx = visible.gx0; gx < visible.gx1; gx++) {
           if (gx < 0 || gy < 0 || gx >= W || gy >= H) continue;
 
-          const baseColor = tileColors[rowOffset + gx];
+          const baseColor = tileColors[rowOffset + gx] ?? GRASS;
 
           if (baseColor === WATER || baseColor === SWAMP_WATER || baseColor === COASTAL_WATER) {
             isoTile(pen, gx, gy, baseColor);

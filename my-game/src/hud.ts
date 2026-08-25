@@ -92,7 +92,7 @@ export function drawPlayerHud(
   const padX = 14;
   const padY = 14;
   const hudW = 280;
-  const hudH = 152;
+  const hudH = 124;
 
   const isHurt = player.hurtFlash > 0;
   const cardBorder = isHurt ? hex('#e74c3c') : pColor;
@@ -140,39 +140,11 @@ export function drawPlayerHud(
     );
   }
 
-  // 4. Inventory Row
-  const invY = padY + 41;
-  const inv = player.inventory;
-  screenText(
-    pen,
-    padX + 10,
-    invY,
-    `WOOD: ${inv.wood}`,
-    UI_WOOD_COL,
-    { ...DEFAULT_TEXT, size: 11, weight: 700, align: -1, baseline: 0 },
-  );
-  screenText(
-    pen,
-    padX + 105,
-    invY,
-    `STONE: ${inv.stone}`,
-    UI_STONE_COL,
-    { ...DEFAULT_TEXT, size: 11, weight: 700, align: -1, baseline: 0 },
-  );
-  screenText(
-    pen,
-    padX + 200,
-    invY,
-    `FIBER: ${inv.fiber}`,
-    UI_FIBER_COL,
-    { ...DEFAULT_TEXT, size: 11, weight: 700, align: -1, baseline: 0 },
-  );
-
-  // 5. Tool / Mode badge
+  // 4. Tool / Mode badge
   const toolX = padX + 10;
-  const toolY = padY + 56;
+  const toolY = padY + 38;
   const toolW = hudW - 20;
-  const toolH = 28;
+  const toolH = 26;
 
   pen.surface.poly(setBox(toolX, toolY, toolW, toolH), 4, hex('#132110'));
 
@@ -180,16 +152,19 @@ export function drawPlayerHud(
   const cycleKey = pIdx === 0 ? '[E/F] Build' : '[O/H] Build';
 
   let modeText = '';
+  let modeAction = cycleKey;
   let modeColor = hex('#bdc3c7');
 
   if (player.mode === 'move') {
-    modeText = `EXPLORE / ACTION ${actKey}`;
+    modeText = `EXPLORE`;
+    modeAction = cycleKey;
   } else {
     const cost = BUILDING_COSTS[player.mode];
     const affordable = canAffordBuilding(player, player.mode);
     const name = player.mode === 'campfire' ? 'CAMPFIRE 🔥' : player.mode.replace('_', ' ').toUpperCase();
-    const fiberCost = cost.fiber ? ` ${cost.fiber}F` : '';
-    modeText = `${name} (${cost.wood}W ${cost.stone}S${fiberCost}) ${actKey}`;
+    const fiberCost = cost.fiber ? ` ${cost.fiber}🌿` : '';
+    modeText = `🔨 ${name} (${cost.wood}🪵 ${cost.stone}🪨${fiberCost})`;
+    modeAction = `${actKey} Place`;
     modeColor = affordable ? UI_TOOL_GOLD : hex('#e74c3c');
   }
 
@@ -204,7 +179,7 @@ export function drawPlayerHud(
   screenText(
     pen,
     toolX + 8,
-    toolY + 14,
+    toolY + 13,
     modeText,
     modeColor,
     { ...DEFAULT_TEXT, size: 10, weight: 700, align: -1, baseline: 0 },
@@ -213,29 +188,29 @@ export function drawPlayerHud(
   screenText(
     pen,
     toolX + toolW - 8,
-    toolY + 14,
-    cycleKey,
+    toolY + 13,
+    modeAction,
     hex('#8da882'),
     { ...DEFAULT_TEXT, size: 10, weight: 600, align: 1, baseline: 0 },
   );
 
-  // 6. Weapon & Combat Bar
+  // 5. Weapon & Combat Bar
   const wepX = padX + 10;
-  const wepY = padY + 88;
+  const wepY = padY + 68;
   const wepW = hudW - 20;
-  const wepH = 28;
+  const wepH = 26;
 
   pen.surface.poly(setBox(wepX, wepY, wepW, wepH), 4, hex('#181a24'));
   pen.surface.stroke(setBox(wepX, wepY, wepW, wepH), 4, true, hex('#3d5a80'), 1);
 
-  const wepCycleKey = pIdx === 0 ? '[C] Tool / Craft' : '[,] Tool / Craft';
+  const wepCycleKey = pIdx === 0 ? '[C] Craft' : '[,] Craft';
   const wName = player.weapon.toUpperCase();
 
   screenText(
     pen,
     wepX + 8,
-    wepY + 14,
-    `EQUIPPED: ${wName}`,
+    wepY + 13,
+    `⚔️ ${wName}`,
     hex('#90caf9'),
     { ...DEFAULT_TEXT, size: 10, weight: 800, align: -1, baseline: 0 },
   );
@@ -243,13 +218,13 @@ export function drawPlayerHud(
   screenText(
     pen,
     wepX + wepW - 8,
-    wepY + 14,
+    wepY + 13,
     wepCycleKey,
     hex('#ffe082'),
     { ...DEFAULT_TEXT, size: 9, weight: 700, align: 1, baseline: 0 },
   );
 
-  // 7. Location & Biome Radar Strip
+  // 6. Location & Biome Radar Strip
   const gx = Math.floor(player.gx);
   const gy = Math.floor(player.gy);
   const elevation = world !== undefined ? world.heights.get(gx, gy) : 4;
@@ -258,8 +233,8 @@ export function drawPlayerHud(
   screenText(
     pen,
     padX + 10,
-    padY + 124,
-    `${biome.icon} ${biome.name.toUpperCase()} (X:${gx}, Y:${gy})`,
+    padY + 102,
+    `${biome.icon} ${biome.name.toUpperCase()} · ${gx}, ${gy}`,
     hex('#80cbc4'),
     { ...DEFAULT_TEXT, size: 9, weight: 700, align: -1, baseline: 0 },
   );

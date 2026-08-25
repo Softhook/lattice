@@ -18,6 +18,7 @@ import {
   type Massing,
   type SolidWriter,
   type Variant,
+  type Ink,
   hex,
 } from '@latticekit/draw';
 import { Rng, createRng, fbm2, clamp } from '@latticekit/core';

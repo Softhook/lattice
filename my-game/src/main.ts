@@ -152,6 +152,49 @@ if (opened.source === 'save' && opened.state && opened.state.p1 && opened.state.
   }
 }
 
+// ── DOM Bottom Inventory Bar Helper ───────────────────────────────────────────
+
+let lastP1W = -1;
+let lastP1S = -1;
+let lastP1F = -1;
+let lastP2W = -1;
+let lastP2S = -1;
+let lastP2F = -1;
+
+const p1WoodEl = document.getElementById('p1-wood');
+const p1StoneEl = document.getElementById('p1-stone');
+const p1FiberEl = document.getElementById('p1-fiber');
+const p2WoodEl = document.getElementById('p2-wood');
+const p2StoneEl = document.getElementById('p2-stone');
+const p2FiberEl = document.getElementById('p2-fiber');
+
+function updateDomHud(): void {
+  if (p1.inventory.wood !== lastP1W && p1WoodEl) {
+    lastP1W = p1.inventory.wood;
+    p1WoodEl.textContent = String(lastP1W);
+  }
+  if (p1.inventory.stone !== lastP1S && p1StoneEl) {
+    lastP1S = p1.inventory.stone;
+    p1StoneEl.textContent = String(lastP1S);
+  }
+  if (p1.inventory.fiber !== lastP1F && p1FiberEl) {
+    lastP1F = p1.inventory.fiber;
+    p1FiberEl.textContent = String(lastP1F);
+  }
+  if (p2.inventory.wood !== lastP2W && p2WoodEl) {
+    lastP2W = p2.inventory.wood;
+    p2WoodEl.textContent = String(lastP2W);
+  }
+  if (p2.inventory.stone !== lastP2S && p2StoneEl) {
+    lastP2S = p2.inventory.stone;
+    p2StoneEl.textContent = String(lastP2S);
+  }
+  if (p2.inventory.fiber !== lastP2F && p2FiberEl) {
+    lastP2F = p2.inventory.fiber;
+    p2FiberEl.textContent = String(lastP2F);
+  }
+}
+
 updateDomHud();
 
 // ── Camera Locking ────────────────────────────────────────────────────────────
@@ -449,24 +492,6 @@ loop.onUpdate((dt, tick) => {
   }
 });
 
-
-// ── DOM Controls Bar Helper ───────────────────────────────────────────────────
-
-function updateDomHud(): void {
-  const p1ToolEl = document.getElementById('p1-tool');
-  const p2ToolEl = document.getElementById('p2-tool');
-  if (p1ToolEl) {
-    const m = p1.mode.replace('_', ' ').toUpperCase();
-    const w = p1.weapon.toUpperCase();
-    p1ToolEl.textContent = `${m} | ⚔️${w} [🪵${p1.inventory.wood} 🪨${p1.inventory.stone} 🌿${p1.inventory.fiber}]`;
-  }
-  if (p2ToolEl) {
-    const m = p2.mode.replace('_', ' ').toUpperCase();
-    const w = p2.weapon.toUpperCase();
-    p2ToolEl.textContent = `${m} | ⚔️${w} [🪵${p2.inventory.wood} 🪨${p2.inventory.stone} 🌿${p2.inventory.fiber}]`;
-  }
-}
-
 // ── Render (display rate) ─────────────────────────────────────────────────────
 
 loop.onRender((_alpha, t, nowMs) => {
@@ -541,22 +566,11 @@ function createNewWorld(): void {
   }
 }
 
-function toggleControls(): void {
-  const controlsEl = document.getElementById('controls');
-  if (controlsEl) {
-    controlsEl.classList.toggle('hidden');
-    fit();
-  }
-}
-
 const btnFullscreen = document.getElementById('btn-fullscreen');
 btnFullscreen?.addEventListener('click', toggleFullscreen);
 
 const btnNewWorld = document.getElementById('btn-new-world');
 btnNewWorld?.addEventListener('click', createNewWorld);
-
-const btnControlsToggle = document.getElementById('btn-controls-toggle');
-btnControlsToggle?.addEventListener('click', toggleControls);
 
 window.addEventListener('keydown', (e) => {
   if (e.key === 'F11') {
@@ -575,8 +589,8 @@ document.addEventListener('fullscreenchange', () => {
 // ── Resize ────────────────────────────────────────────────────────────────────
 
 function fit(): void {
-  const w = canvasEl.clientWidth || window.innerWidth;
-  const h = canvasEl.clientHeight || window.innerHeight;
+  const w = canvasEl?.clientWidth || window.innerWidth;
+  const h = canvasEl?.clientHeight || window.innerHeight;
   resizeCameras(surface, camera1, camera2, w, h);
 }
 window.addEventListener('resize', fit);
