@@ -13,8 +13,6 @@ export default defineConfig({
       '@latticekit/input':   fileURLToPath(new URL('../packages/input/src/index.ts', import.meta.url)),
       '@latticekit/audio':   fileURLToPath(new URL('../packages/audio/src/index.ts', import.meta.url)),
       '@latticekit/persist': fileURLToPath(new URL('../packages/persist/src/index.ts', import.meta.url)),
-      '@latticekit/sim':     fileURLToPath(new URL('../packages/sim/src/index.ts', import.meta.url)),
-      '@latticekit/ui':      fileURLToPath(new URL('../packages/ui/src/index.ts', import.meta.url)),
     },
   },
   server: {

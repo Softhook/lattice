@@ -13,8 +13,6 @@
     "@latticekit/input": "*",
     "@latticekit/iso": "*",
     "@latticekit/loop": "*",
-    "@latticekit/persist": "*",
-    "@latticekit/sim": "*",
-    "@latticekit/ui": "*"
+    "@latticekit/persist": "*"
   }
 }

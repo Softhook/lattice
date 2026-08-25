@@ -265,6 +265,8 @@ export interface Creature {
   attackAnimTimer: number;
   /** Damage reaction flinch timer in seconds. */
   hurtTimer: number;
+  /** Locked foraging target; kept until eaten or gone so the creature doesn't flicker between equidistant plants. */
+  forageTarget: FloraItem | undefined;
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -317,6 +319,7 @@ export function spawnCreature(
     eatTimer: 0,
     attackAnimTimer: 0,
     hurtTimer: 0,
+    forageTarget: undefined,
   };
 }
 
@@ -408,6 +411,13 @@ export interface CreatureEvents {
   wardOccurred?: boolean;
 }
 
+/** A fresh, all-false `CreatureEvents` bag. Call once and reuse it as `updateCreatures`'s
+ *  out-parameter — allocating one per tick would put a per-frame allocation back in the
+ *  hottest loop in the game. */
+export function createCreatureEvents(): CreatureEvents {
+  return { playerAttacked: false, roarOccurred: false, howlOccurred: false, wardOccurred: false };
+}
+
 /**
  * Update all creatures for one simulation tick.
  *
@@ -419,6 +429,9 @@ export interface CreatureEvents {
  * - Solid buildings (walls and towers) physically block and keep out animals.
  *
  * Accelerated via SpatialGrid to eliminate $O(N^2)$ brute-force distance checks.
+ *
+ * `out` is cleared and written in place — the caller owns it (see `createCreatureEvents`) so
+ * this, the top of the 60 Hz tick, allocates nothing.
  */
 export function updateCreatures(
   creatures: Creature[],
@@ -428,8 +441,12 @@ export function updateCreatures(
   buildings: Building[],
   darkness: number,
   dt: number,
-): CreatureEvents {
-  const events: CreatureEvents = { playerAttacked: false, roarOccurred: false, howlOccurred: false, wardOccurred: false };
+  out: CreatureEvents,
+): void {
+  out.playerAttacked = false;
+  out.roarOccurred = false;
+  out.howlOccurred = false;
+  out.wardOccurred = false;
 
   // 1. Build spatial index for live creatures
   CREATURE_SPATIAL.clear();
@@ -444,10 +461,8 @@ export function updateCreatures(
   for (let i = 0; i < creatures.length; i++) {
     const c = creatures[i];
     if (c === undefined || c.hp <= 0) continue;
-    updateOne(c, creatures, world, players, flora, buildings, darkness, dt, events);
+    updateOne(c, creatures, world, players, flora, buildings, darkness, dt, out);
   }
-
-  return events;
 }
 
 function updateOne(
@@ -709,7 +724,16 @@ function updateOne(
 
   // 3. Herbivore & Omnivore Plant Foraging
   if (def.diet !== 'carnivore') {
-    const edible = findClosestEdibleFlora(flora, c.gx, c.gy, 8, undefined, FLORA_SPATIAL);
+    // Keep pursuing a previously locked plant until it's eaten or gone, rather than
+    // re-picking the "closest" one every tick — that flip-flops rapidly between near-equidistant
+    // plants (especially with other creatures' separation nudges) and looks like jittery indecision.
+    if (c.forageTarget !== undefined && !isFloraStillPresent(c.forageTarget, flora)) {
+      c.forageTarget = undefined;
+    }
+    if (c.forageTarget === undefined) {
+      c.forageTarget = findClosestEdibleFlora(flora, c.gx, c.gy, 8, undefined, FLORA_SPATIAL);
+    }
+    const edible = c.forageTarget;
     if (edible !== undefined) {
       const dx = edible.gx - c.gx;
       const dy = edible.gy - c.gy;
@@ -728,6 +752,7 @@ function updateOne(
           c.eatTimer = 0;
           c.targetGx = NaN;
           c.targetGy = NaN;
+          c.forageTarget = undefined;
         }
 
         return;
@@ -760,6 +785,16 @@ function updateOne(
   } else {
     c.state = 'idle';
   }
+}
+
+/** Check whether a locked forage target is still a live entry in the flora array (i.e. not yet eaten). */
+function isFloraStillPresent(target: FloraItem, flora: readonly FloraItem[]): boolean {
+  const count = FLORA_SPATIAL.queryRadius(target.gx, target.gy, 0.1);
+  for (let i = 0; i < count; i++) {
+    const idx = FLORA_SPATIAL.queryBuffer[i];
+    if (idx !== undefined && flora[idx] === target) return true;
+  }
+  return false;
 }
 
 /** Move a creature with soft Boid separation, map margin avoidance, facing hysteresis, and solid barrier sliding. */

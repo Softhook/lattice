@@ -181,6 +181,8 @@ function makePlayer(index: 0 | 1, gx: number, gy: number): Player {
 
 // ── Weapon Crafting & Equipment ────────────────────────────────────────────────
 
+/** Whether `player`'s current inventory covers `kind`'s crafting cost — the check `craftWeapon`
+ *  and the HUD's afford-highlight both need before they touch inventory state. */
 export function canAffordWeapon(player: Player, kind: WeaponKind): boolean {
   const cost = WEAPONS[kind].cost;
   return (
@@ -190,6 +192,11 @@ export function canAffordWeapon(player: Player, kind: WeaponKind): boolean {
   );
 }
 
+/**
+ * Craft-or-equip: if `kind` is already unlocked this just re-equips it for free, otherwise it
+ * deducts the cost and unlocks it. One entry point for both cases so callers (the craft-key
+ * handler in `main.ts`) never have to branch on "have I already got this."
+ */
 export function craftWeapon(player: Player, kind: WeaponKind): boolean {
   if (player.respawnTimer > 0) return false;
   if (player.craftedWeapons.includes(kind)) {
@@ -214,6 +221,11 @@ export function craftWeapon(player: Player, kind: WeaponKind): boolean {
   return true;
 }
 
+/**
+ * The single craft-key action: unlock the next weapon in `CRAFTABLE_WEAPONS` the player
+ * doesn't have yet, or once every craftable is owned, fall back to cycling equipped weapons
+ * so the key never goes dead once a player has crafted everything.
+ */
 export function craftNextAvailable(player: Player): { crafted: boolean; kind?: WeaponKind } {
   for (const k of CRAFTABLE_WEAPONS) {
     if (!player.craftedWeapons.includes(k)) {
@@ -226,6 +238,8 @@ export function craftNextAvailable(player: Player): { crafted: boolean; kind?: W
   return { crafted: false };
 }
 
+/** Equip the next weapon in `player.craftedWeapons`, wrapping around. Only ever cycles among
+ *  weapons already unlocked — it never grants a new one. */
 export function cycleWeapon(player: Player): WeaponKind {
   const currentIdx = player.craftedWeapons.indexOf(player.weapon);
   const nextIdx = (currentIdx + 1) % player.craftedWeapons.length;

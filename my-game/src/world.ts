@@ -1,7 +1,7 @@
 /**
  * World state: the terrain heightfield, surface materials, and all mutations to them.
  *
- * The world is a 200×200 grid of tiles. Height lives on vertices (TileGrid W+1 × H+1),
+ * The world is a 640×640 grid of tiles. Height lives on vertices (TileGrid W+1 × H+1),
  * so adjacent tiles share corners exactly and the terrain never has seams.
  *
  * **Dig and raise mutate this module's state directly.** After any mutation that raises the

@@ -16,7 +16,7 @@ import {
   executeAttack,
   stepProjectiles,
 } from '../src/combat.js';
-import { spawnCreature, updateCreatures, type Creature } from '../src/creatures.js';
+import { spawnCreature, updateCreatures, createCreatureEvents, type Creature } from '../src/creatures.js';
 import { playerVariant, creatureVariant } from '../src/sprites.js';
 
 describe('Combat & Weapon Crafting System', () => {
@@ -186,7 +186,8 @@ describe('Combat & Weapon Crafting System', () => {
     const creatures = [wolf];
 
     // First update tick: wolf enters attack range, triggers attack animation (0.55s)
-    const events1 = updateCreatures(creatures, world, [p1, p2], [], [], 0, 1 / 60);
+    const events1 = createCreatureEvents();
+    updateCreatures(creatures, world, [p1, p2], [], [], 0, 1 / 60, events1);
     expect(wolf.state).toBe('attack');
     expect(wolf.attackAnimTimer).toBeGreaterThan(0.5);
     expect(events1.playerAttacked).toBe(true);
@@ -196,7 +197,7 @@ describe('Combat & Weapon Crafting System', () => {
     expect(stateCode1).toBe(4); // 4 = attack
 
     // Next tick: timer counts down smoothly and is NOT reset to 0.55
-    updateCreatures(creatures, world, [p1, p2], [], [], 0, 0.2);
+    updateCreatures(creatures, world, [p1, p2], [], [], 0, 0.2, createCreatureEvents());
     expect(wolf.attackAnimTimer).toBeLessThan(0.4);
     expect(wolf.attackAnimTimer).toBeGreaterThan(0);
 

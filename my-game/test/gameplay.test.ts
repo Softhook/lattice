@@ -3,7 +3,7 @@ import { createWorld, W, H, isWalkable, dig, raise, BIOME_REGISTRY } from '../sr
 import { createPlayers, movePlayer, interactAtFacing, cycleBuildKind, buildAtFacing, canAffordBuilding, tickPlayer, getTargetContext, facingTile, isInForwardCone } from '../src/players.js';
 import { populateFlora, FLORA_REGISTRY } from '../src/flora.js';
 import { BUILDING_COSTS, BUILDING_REGISTRY, type Building } from '../src/buildings.js';
-import { populateWorld, updateCreatures, SPECIES_REGISTRY, spawnCreature, isNearActiveFireOrLight, FIRE_WARD_RADIUS, FIRE_SAFE_ZONE_RADIUS, type CreatureState } from '../src/creatures.js';
+import { populateWorld, updateCreatures, createCreatureEvents, SPECIES_REGISTRY, spawnCreature, isNearActiveFireOrLight, FIRE_WARD_RADIUS, FIRE_SAFE_ZONE_RADIUS, type CreatureState } from '../src/creatures.js';
 
 describe('Verdant Gameplay Logic', () => {
   it('initializes world and terrain grid with bounds', () => {
@@ -137,7 +137,8 @@ describe('Verdant Gameplay Logic', () => {
     expect(speciesPresent.has('bear')).toBe(true);
     expect(speciesPresent.has('troll')).toBe(true);
 
-    const events = updateCreatures(creatures, world, [p1, p2], flora, [], 0, 1 / 60);
+    const events = createCreatureEvents();
+    updateCreatures(creatures, world, [p1, p2], flora, [], 0, 1 / 60, events);
     expect(typeof events.playerAttacked).toBe('boolean');
     for (const c of creatures) {
       expect(Number.isFinite(c.gx)).toBe(true);
@@ -402,7 +403,8 @@ describe('Verdant Gameplay Logic', () => {
     wolf.state = 'idle';
 
     const creatures = [wolf];
-    const events = updateCreatures(creatures, world, [p1, p2], [], buildings, 0.5, 0.1);
+    const events = createCreatureEvents();
+    updateCreatures(creatures, world, [p1, p2], [], buildings, 0.5, 0.1, events);
 
     // Wolf should be warded off by fire, flee south away from campfire, and record ward event
     expect(events.wardOccurred).toBe(true);
@@ -430,7 +432,7 @@ describe('Verdant Gameplay Logic', () => {
     expect(isNearActiveFireOrLight(p1.gx, p1.gy, buildings)).toBe(true);
 
     const creatures = [wolf];
-    updateCreatures(creatures, world, [p1, p2], [], buildings, 0.8, 0.1);
+    updateCreatures(creatures, world, [p1, p2], [], buildings, 0.8, 0.1, createCreatureEvents());
 
     // Wolf should NOT chase player 1 because player is within campfire sanctuary
     expect(wolf.state).not.toBe('chase');
@@ -457,7 +459,7 @@ describe('Verdant Gameplay Logic', () => {
     wolf.state = 'idle';
 
     const creatures = [wolf];
-    updateCreatures(creatures, world, [p1, p2], [], buildings, 0.5, 0.1);
+    updateCreatures(creatures, world, [p1, p2], [], buildings, 0.5, 0.1, createCreatureEvents());
 
     // With extinguished campfire, wolf aggressively targets player as normal
     const aggressiveStates: readonly CreatureState[] = ['chase', 'attack'];
@@ -483,7 +485,7 @@ describe('Verdant Gameplay Logic', () => {
     expect(SPECIES_REGISTRY.troll.fearsFire).toBe(false);
 
     const creatures = [troll];
-    updateCreatures(creatures, world, [p1, p2], [], buildings, 0.5, 0.1);
+    updateCreatures(creatures, world, [p1, p2], [], buildings, 0.5, 0.1, createCreatureEvents());
 
     // Troll does NOT flee from campfire; it sieges buildings or targets players
     expect(troll.state).not.toBe('flee');

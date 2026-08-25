@@ -268,10 +268,13 @@ export const BUILDING_REGISTRY: Record<BuildingKind, BuildingDefinition> = {
 
 // ── Building Lookup & Placement ────────────────────────────────────────────────
 
+/** The sprite that renders a building kind — the single lookup `render.ts` and `players.ts`
+ *  use instead of each keeping their own copy of the kind→def mapping. */
 export function defFor(kind: BuildingKind): SpriteDef {
   return BUILDING_REGISTRY[kind].spriteDef;
 }
 
+/** Max HP for a freshly placed building of this kind — what `placeBuilding` seeds `hp` from. */
 export function hpFor(kind: BuildingKind): number {
   return BUILDING_REGISTRY[kind].maxHp;
 }

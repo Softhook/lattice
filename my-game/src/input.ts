@@ -16,8 +16,13 @@
  *   A / D    → move W / E          J / L    → move W / E
  *   Q        → Dig ground          U        → Dig ground
  *   R        → Raise ground        Y        → Raise ground
- *   E        → Build / Harvest     O        → Build / Harvest
- *   F        → Cycle building      H        → Cycle building
+ *   E or F   → Cycle build mode    O or H   → Cycle build mode
+ *   Space    → Act (harvest/attack/place)  N → Act (harvest/attack/place)
+ *   C        → Cycle weapon        ,        → Cycle weapon
+ *   V        → Craft/equip weapon  .        → Craft/equip weapon
+ *
+ * `Build`/`Cycle` are two names for the same rising edge (E and F both fire
+ * `p1Cycle`'s handler in main.ts) — a deliberate redundant binding, not a bug.
  */
 
 export interface KeyState {

@@ -66,6 +66,28 @@ function setLine(x0: number, y0: number, x1: number, y1: number): Float64Array {
   return LINE_SCRATCH;
 }
 
+// ── Static Scratch TextStyle for screenText Calls (Zero Allocation) ────────────
+
+/** Mutable twin of `TextStyle`, on the same terms as `draw`'s own `text.ts` `SIZED` scratch:
+ *  `{ ...DEFAULT_TEXT, size, weight, ... }` would allocate a fresh style object on every one
+ *  of the ~10 `screenText` calls this module makes per player per frame. `screenText` reads
+ *  it synchronously and does not retain it, so one reused object is safe to mutate per call. */
+const TEXT_SCRATCH: { size: number; weight: number; family: string; align: -1 | 0 | 1; baseline: -1 | 0 | 1 } = {
+  size: DEFAULT_TEXT.size,
+  weight: DEFAULT_TEXT.weight,
+  family: DEFAULT_TEXT.family,
+  align: DEFAULT_TEXT.align,
+  baseline: DEFAULT_TEXT.baseline,
+};
+
+function textStyle(size: number, weight: number, align: -1 | 0 | 1, baseline: -1 | 0 | 1): typeof TEXT_SCRATCH {
+  TEXT_SCRATCH.size = size;
+  TEXT_SCRATCH.weight = weight;
+  TEXT_SCRATCH.align = align;
+  TEXT_SCRATCH.baseline = baseline;
+  return TEXT_SCRATCH;
+}
+
 /** Draw the split-screen divider line between viewports. */
 export function drawSplitDivider(pen: Pen): void {
   const fullW = pen.surface.width;
@@ -109,7 +131,7 @@ export function drawPlayerHud(
     padY + 12,
     pLabel,
     pAccent,
-    { ...DEFAULT_TEXT, size: 12, weight: 800, align: -1, baseline: 0 },
+    textStyle(12, 800, -1, 0),
   );
 
   const currentHp = Math.max(0, Math.ceil(player.hp));
@@ -121,7 +143,7 @@ export function drawPlayerHud(
     padY + 12,
     `${currentHp} / ${MAX_HP} HP`,
     hpColor,
-    { ...DEFAULT_TEXT, size: 11, weight: 700, align: 1, baseline: 0 },
+    textStyle(11, 700, 1, 0),
   );
 
   // 3. Health bar
@@ -182,7 +204,7 @@ export function drawPlayerHud(
     toolY + 13,
     modeText,
     modeColor,
-    { ...DEFAULT_TEXT, size: 10, weight: 700, align: -1, baseline: 0 },
+    textStyle(10, 700, -1, 0),
   );
 
   screenText(
@@ -191,7 +213,7 @@ export function drawPlayerHud(
     toolY + 13,
     modeAction,
     hex('#8da882'),
-    { ...DEFAULT_TEXT, size: 10, weight: 600, align: 1, baseline: 0 },
+    textStyle(10, 600, 1, 0),
   );
 
   // 5. Weapon & Combat Bar
@@ -212,7 +234,7 @@ export function drawPlayerHud(
     wepY + 13,
     `⚔️ ${wName}`,
     hex('#90caf9'),
-    { ...DEFAULT_TEXT, size: 10, weight: 800, align: -1, baseline: 0 },
+    textStyle(10, 800, -1, 0),
   );
 
   screenText(
@@ -221,7 +243,7 @@ export function drawPlayerHud(
     wepY + 13,
     wepCycleKey,
     hex('#ffe082'),
-    { ...DEFAULT_TEXT, size: 9, weight: 700, align: 1, baseline: 0 },
+    textStyle(9, 700, 1, 0),
   );
 
   // 6. Location & Biome Radar Strip
@@ -236,7 +258,7 @@ export function drawPlayerHud(
     padY + 102,
     `${biome.icon} ${biome.name.toUpperCase()} · ${gx}, ${gy}`,
     hex('#80cbc4'),
-    { ...DEFAULT_TEXT, size: 9, weight: 700, align: -1, baseline: 0 },
+    textStyle(9, 700, -1, 0),
   );
 
   // 8. Floating action notification if present
@@ -253,7 +275,7 @@ export function drawPlayerHud(
       msgY,
       player.lastActionMsg,
       msgCol,
-      { ...DEFAULT_TEXT, size: 12, weight: 800, align: -1, baseline: 0 },
+      textStyle(12, 800, -1, 0),
     );
   }
 
@@ -273,7 +295,7 @@ export function drawPlayerHud(
       bannerY + 22,
       `KNOCKED DOWN — RESPAWN IN ${respawnSec}s`,
       hex('#ffffff'),
-      { ...DEFAULT_TEXT, size: 12, weight: 800, align: 0, baseline: 0 },
+      textStyle(12, 800, 0, 0),
     );
   }
 }

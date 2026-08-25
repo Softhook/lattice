@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { createWorld } from '../src/world.js';
 import { createPlayers } from '../src/players.js';
 import { populateFlora } from '../src/flora.js';
-import { populateWorld, updateCreatures } from '../src/creatures.js';
+import { populateWorld, updateCreatures, createCreatureEvents } from '../src/creatures.js';
 import { createProjectilePool, stepProjectiles } from '../src/combat.js';
 
 describe('Performance & Regression Benchmarks', () => {
@@ -12,6 +12,7 @@ describe('Performance & Regression Benchmarks', () => {
     const flora = populateFlora(42, world);
     const creatures = populateWorld(42, world);
     const projectiles = createProjectilePool();
+    const events = createCreatureEvents();
 
     const dt = 1 / 60;
     const TICKS = 1200; // 20 seconds of full 60fps simulation (720,000 creature updates)
@@ -20,7 +21,7 @@ describe('Performance & Regression Benchmarks', () => {
     const startTime = performance.now();
 
     for (let i = 0; i < TICKS; i++) {
-      updateCreatures(creatures, world, players, flora, [], i * dt, dt);
+      updateCreatures(creatures, world, players, flora, [], i * dt, dt, events);
       stepProjectiles(projectiles, creatures, players, world, dt);
     }
 

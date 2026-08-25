@@ -76,6 +76,25 @@ const FX_BOX_SCRATCH = new Float64Array(8);
 const FX_ARC_SCRATCH = new Float64Array(6);
 const FX_RING_SCRATCH = new Float64Array(16);
 
+/** Mutable twin of `TextStyle` — same trick as `hud.ts`'s `TEXT_SCRATCH`: the target-cursor
+ *  prompt pill draws up to two `screenText` calls per viewport per frame, and `{ ...DEFAULT_TEXT,
+ *  ... }` would allocate a fresh style object each time. */
+const TEXT_SCRATCH: { size: number; weight: number; family: string; align: -1 | 0 | 1; baseline: -1 | 0 | 1 } = {
+  size: DEFAULT_TEXT.size,
+  weight: DEFAULT_TEXT.weight,
+  family: DEFAULT_TEXT.family,
+  align: DEFAULT_TEXT.align,
+  baseline: DEFAULT_TEXT.baseline,
+};
+
+function textStyle(size: number, weight: number, align: -1 | 0 | 1, baseline: -1 | 0 | 1): typeof TEXT_SCRATCH {
+  TEXT_SCRATCH.size = size;
+  TEXT_SCRATCH.weight = weight;
+  TEXT_SCRATCH.align = align;
+  TEXT_SCRATCH.baseline = baseline;
+  return TEXT_SCRATCH;
+}
+
 function setTargetBox(x: number, y: number, w: number, h: number): Float64Array {
   TARGET_BOX_SCRATCH[0] = x;     TARGET_BOX_SCRATCH[1] = y;
   TARGET_BOX_SCRATCH[2] = x + w; TARGET_BOX_SCRATCH[3] = y;
@@ -86,6 +105,9 @@ function setTargetBox(x: number, y: number, w: number, h: number): Float64Array 
 
 // ── Palette ────────────────────────────────────────────────────────────────────
 
+/** Verdant's role→color mapping for `draw`'s palette-driven surfaces (sky gradient, ok/bad
+ *  outline colors for placement ghosts and target highlights). Kept separate from the raw
+ *  hex constants in `palette.ts` so a future re-skin only has to touch this one function. */
 export function createVerdantPalette() {
   return createPalette({
     ...BASE_SLOTS,
@@ -173,6 +195,14 @@ function getSubPenWithLight(
 
 // ── Main render ────────────────────────────────────────────────────────────────
 
+/**
+ * Draw one full split-screen frame: Player 1's camera on the left half of the canvas,
+ * Player 2's on the right, each independently clipped and depth-sorted.
+ *
+ * Two `drawViewport` passes share every scratch buffer and the single `DepthSorter` — the
+ * second pass reuses what the first already allocated rather than doubling the render state,
+ * which is what keeps two simultaneous isometric viewports inside one frame budget.
+ */
 export function renderVerdant(
   surface: OffscreenSurface,
   light1: LightField,
@@ -643,7 +673,7 @@ function drawViewport(
             hasSub ? boxY + 10 : boxY + 10,
             mainText,
             target.color,
-            { ...DEFAULT_TEXT, size: 9, weight: 800, align: 0, baseline: 0 },
+            textStyle(9, 800, 0, 0),
           );
 
           if (hasSub) {
@@ -653,7 +683,7 @@ function drawViewport(
               boxY + 22,
               target.subLabel,
               hex('#bdc3c7'),
-              { ...DEFAULT_TEXT, size: 8, weight: 600, align: 0, baseline: 0 },
+              textStyle(8, 600, 0, 0),
             );
           }
         }

@@ -112,7 +112,6 @@ export const BOAR_TUSK    = hex('#f2efe9');
 export const BOAR_MANE    = hex('#362116');
 /** Marsh Crocodile — armored aquatic ambush predator. */
 export const CROC         = hex('#2d502a');
-export const CROC_BELLY   = hex('#58753a');
 export const CROC_RIDGE   = hex('#1f3a1d');
 export const CROC_TOOTH   = hex('#fdfefe');
 

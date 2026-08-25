@@ -28,6 +28,7 @@ import { populateFlora, tickFloraRegrowth, restoreFlora } from './flora.js';
 import {
   populateWorld,
   updateCreatures,
+  createCreatureEvents,
   evolveGeneration,
   GENERATION_TICKS,
 } from './creatures.js';
@@ -42,6 +43,7 @@ import {
   cycleBuildKind,
   tickPlayer,
   craftNextAvailable,
+  type Player,
 } from './players.js';
 import {
   damageBuildings,
@@ -106,11 +108,15 @@ tileBounds(0, 0, W, H, MAX_HEIGHT_PX, worldRect);
 // ── Players & Creatures ────────────────────────────────────────────────────────
 
 const [p1, p2] = createPlayers();
+// Hoisted once and reused everywhere: the identity of p1/p2 never changes, only their fields
+// do, so `[p1, p2]` re-literalized inside the 60 Hz update or the render loop would allocate
+// a fresh array every tick/frame for no reason (rule 7).
+const playersPair: readonly [Player, Player] = [p1, p2];
 const creatures = populateWorld(SEED, world);
 
 // ── Persistent Storage ────────────────────────────────────────────────────────
 
-const store = createVerdantStore(SEED, () => extractSaveState(SEED, [p1, p2], buildings, world, flora));
+const store = createVerdantStore(SEED, () => extractSaveState(SEED, playersPair, buildings, world, flora));
 const opened = store.open();
 if (opened.source === 'save' && opened.state && opened.state.p1 && opened.state.p2) {
   // Restore saved player inventories, positions & combat gear
@@ -277,6 +283,7 @@ let autosaveTimer = 0;
 let prevDaylight = 1.0;
 const projectiles = createProjectilePool();
 const fxPool = createFxPool();
+const creatureEvents = createCreatureEvents();
 
 loop.onUpdate((dt, tick) => {
   input.tick(tick);
@@ -450,7 +457,7 @@ loop.onUpdate((dt, tick) => {
   copyKeys(curr, prevKeys);
 
   // ── Projectile kinematics & collision ────────────────────────────────────────
-  const projHits = stepProjectiles(projectiles, creatures, [p1, p2], world, dt, fxPool);
+  const projHits = stepProjectiles(projectiles, creatures, playersPair, world, dt, fxPool);
   if (projHits.length > 0) {
     audio.play('hit_meat');
     updateDomHud();
@@ -460,14 +467,14 @@ loop.onUpdate((dt, tick) => {
   stepFx(fxPool, dt);
 
   // ── Creature & Flora Ecosystem ───────────────────────────────────────────────
-  const creEvents = updateCreatures(creatures, world, [p1, p2], flora, buildings, currentDarkness, dt);
-  if (creEvents.playerAttacked) {
+  updateCreatures(creatures, world, playersPair, flora, buildings, currentDarkness, dt, creatureEvents);
+  if (creatureEvents.playerAttacked) {
     audio.play('hurt');
   }
-  if (creEvents.roarOccurred) {
+  if (creatureEvents.roarOccurred) {
     audio.play('roar');
   }
-  if (creEvents.howlOccurred) {
+  if (creatureEvents.howlOccurred) {
     audio.play('howl');
   }
 
@@ -522,7 +529,7 @@ loop.onUpdate((dt, tick) => {
   autosaveTimer += dt;
   if (autosaveTimer >= 30.0) {
     autosaveTimer = 0;
-    store.save(extractSaveState(SEED, [p1, p2], buildings, world, flora));
+    store.save(extractSaveState(SEED, playersPair, buildings, world, flora));
   }
 });
 
@@ -569,7 +576,7 @@ loop.onRender((_alpha, t, nowMs) => {
     world,
     flora,
     creatures,
-    [p1, p2],
+    playersPair,
     buildings,
     projectiles,
     t,

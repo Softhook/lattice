@@ -1,12 +1,22 @@
+The fire looks very unrealistic. Unrealistic it pulses very quickly. It should be a much more subtle one. Also with the light circles. I'd like to remove the inner very bright circle and only use the outer subtle circle 
+
+
 Improve the visual style of all the creatures. Crocodiles and Trolls are too small.
 
 Look again at all the attack opattern snad keep in my the z clipping needed
 
 The usability of the crafting and interacting doesn't kind of work right now. 
 
+Think about the inventory system again that can show all the different things the player has collected and picked up. so the player can switch between different weapons and things to build 
+
+Remove the grid location and biome from the HUD at the top. Put the grid location. Very small and to the top left. corner of each view port 
+
+
+
+
 Timings of things being built or chopped down or mined is not right. Currently it's instant and it needs to take different amounts of time to Interact with different elements 
 
-Think about the inventory system again that can show all the different things the player has collected and picked up. so the player can switch between different weapons and things to build 
+
 
 make each plant unique variation on its type
 
