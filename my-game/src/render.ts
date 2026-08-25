@@ -38,6 +38,7 @@ import {
   type Camera,
   type Footprint,
 } from '@latticekit/iso';
+import { noise2 } from '@latticekit/core';
 import type { WorldTerrain } from './world.js';
 import { W, H } from './world.js';
 
@@ -454,25 +455,29 @@ function drawViewport(
           const def  = defFor(b.kind);
 
           if (b.kind === 'campfire') {
-            // Campfire has animated flame flickers driven by time
-            const v = setScratchVariant(b.id, 0, 0, (t * 3) % 1, '');
+            // Campfire has animated flame flickers driven by time — slowed to a gentle drift
+            const v = setScratchVariant(b.id, 0, 0, (t * 0.5) % 1, '');
             drawSprite(pen, def, b.gx, b.gy, v, b.basePx);
 
             // Campfire casts a massive warm light pool at night (14+ tile radius)
             if (darkness > 0) {
-              const flicker = Math.sin(t * 8 + b.id * 7) * 0.7; // @tier-b visual light flicker
-              light.add(b.gx + 0.5, b.gy + 0.5, b.basePx + 6, 14.0 + flicker, darkness * 1.15, hex('#ff9f43'));
+              // Slow, irregular flicker from layered noise rather than a fast sine — real
+              // firelight wavers gently, not on a metronome. @tier-b visual light flicker
+              const flicker = noise2(b.id * 17 + 1, t * 0.35, 0) * 0.6 + noise2(b.id * 31 + 5, t * 0.9, 0) * 0.4;
+              // falloff 1 = pure soft ramp, no hard bright inner disc — just the outer glow
+              light.add(b.gx + 0.5, b.gy + 0.5, b.basePx + 6, 14.0 + flicker * 0.5, darkness * (1.15 + flicker * 0.05), hex('#ff9f43'), 1);
             }
           } else {
             const v = setScratchVariant(b.id, 0, 0, 1, '');
             drawSprite(pen, def, b.gx, b.gy, v, b.basePx);
 
-            // Towers emit warm protective beacon light pools at night
+            // Towers emit warm protective beacon light pools at night — falloff 1 keeps every
+            // pool a soft glow with no hard bright inner disc
             if (darkness > 0) {
               if (b.kind === 'wood_tower') {
-                light.add(b.gx + 1, b.gy + 1, b.basePx + 48, 6.0, darkness * 0.95, LANTERN_GLOW);
+                light.add(b.gx + 1, b.gy + 1, b.basePx + 48, 6.0, darkness * 0.95, LANTERN_GLOW, 1);
               } else if (b.kind === 'stone_tower') {
-                light.add(b.gx + 1, b.gy + 1, b.basePx + 65, 7.5, darkness * 1.0, LANTERN_GLOW);
+                light.add(b.gx + 1, b.gy + 1, b.basePx + 65, 7.5, darkness * 1.0, LANTERN_GLOW, 1);
               }
             }
           }
@@ -496,12 +501,13 @@ function drawViewport(
           const basePx = heightAt(world.field, c.gx, c.gy);
           drawSprite(pen, def, c.gx, c.gy, v, basePx);
 
-          // Hostile predators emit subtle auras in darkness
+          // Hostile predators emit subtle auras in darkness — falloff 1: soft glow, no bright
+          // inner disc
           if (darkness > 0) {
             if (c.species === 'troll') {
-              light.add(c.gx, c.gy, basePx, 3.5, darkness * 0.55, hex('#e74c3c'));
+              light.add(c.gx, c.gy, basePx, 3.5, darkness * 0.55, hex('#e74c3c'), 1);
             } else if (c.species === 'wolf') {
-              light.add(c.gx, c.gy, basePx, 2.4, darkness * 0.4, hex('#e67e22'));
+              light.add(c.gx, c.gy, basePx, 2.4, darkness * 0.4, hex('#e67e22'), 1);
             }
           }
 
@@ -514,9 +520,10 @@ function drawViewport(
           const basePx = heightAt(world.field, p.gx, p.gy);
           drawSprite(pen, def, p.gx, p.gy, v, basePx);
 
-          // Player torchlight at night
+          // Player torchlight at night — falloff 1 removes the hard bright inner disc,
+          // leaving only the soft outer glow
           if (darkness > 0) {
-            light.add(p.gx, p.gy, basePx, 4.5, darkness * 0.95, TOOL_GOLD);
+            light.add(p.gx, p.gy, basePx, 4.5, darkness * 0.95, TOOL_GOLD, 1);
           }
 
         } else if (idx === ghostIndex && ghostDef !== undefined) {

@@ -9,7 +9,7 @@ The usability of the crafting and interacting doesn't kind of work right now.
 
 Think about the inventory system again that can show all the different things the player has collected and picked up. so the player can switch between different weapons and things to build 
 
-Remove the grid location and biome from the HUD at the top. Put the grid location. Very small and to the top left. corner of each view port 
+Remove the grid location text and biome name from the HUD. Put the grid location Very small and to the top left corner of each view port 
 
 
 
@@ -18,10 +18,12 @@ Timings of things being built or chopped down or mined is not right. Currently i
 
 
 
-make each plant unique variation on its type
+make each plant look like a unique variation on its general type
 
-dig down caves to excacte and find. Can we have a system whereby the player actually digs a cave and doesn't pull down the surface with it?
+Allow player to dig down much further into the ground. Investigate if we could let them build caves and tunnels that don't pull down the surface with it?
 
+
+underground aloow player to discover gold and gems
 
 weather pattners rain, lighting that can set forest on fire
 wind that can make trees sway

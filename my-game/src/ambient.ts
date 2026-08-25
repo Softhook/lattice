@@ -136,9 +136,10 @@ function fireflies(
     // Center bright dot
     s.ellipse(pt.x, pt.y, r, r, withAlpha(mix(WARM_GOLD, 0xffffffff, 0.5), a));
 
-    // Register into LightField for ground illumination
+    // Register into LightField for ground illumination — falloff 1: soft glow, no bright
+    // inner disc
     if (light !== undefined && daylight < 0.6) {
-      light.add(gx, gy, groundH, 1.6, (0.6 - daylight) * 0.4 * blink, WARM_GOLD);
+      light.add(gx, gy, groundH, 1.6, (0.6 - daylight) * 0.4 * blink, WARM_GOLD, 1);
     }
   }
 }

@@ -188,8 +188,13 @@ const campfireMassing: Massing = (w: SolidWriter, v: Variant, _rng: Rng) => {
   w.box(0.38, 0.20, 0.24, 0.60, { color: WALL_BEAM, h: 0.18, z: 0.18, outline: false });
   // Red glowing ember bed
   w.box(0.30, 0.30, 0.40, 0.40, { color: EMBER_RED, h: 0.20, z: 0.22 });
-  // Animated glowing flame flickers driven by progress / level (@tier-b visual)
-  const flameFlicker = Math.sin((v.progress || 0) * Math.PI * 6 + (v.seed % 100)) * 0.04;
+  // Animated glowing flame flickers driven by progress / level (@tier-b visual). Two slow,
+  // incommensurate harmonics (rather than one fast sine) read as a gentle organic waver
+  // instead of a mechanical pulse; the per-instance phase keeps campfires desynced.
+  const phase = (v.seed % 100) * 0.1;
+  const flameFlicker =
+    (Math.sin((v.progress || 0) * Math.PI * 2 + phase) * 0.6 +
+      Math.sin((v.progress || 0) * Math.PI * 4 + phase * 1.7) * 0.4) * 0.022;
   w.box(0.32 + flameFlicker, 0.32, 0.36, 0.36, { color: FIRE_ORANGE, h: 0.60 + flameFlicker * 2, z: 0.30 });
   w.box(0.38, 0.38 + flameFlicker, 0.24, 0.24, { color: FIRE_YELLOW, h: 0.52, z: 0.45 });
   w.box(0.42, 0.42, 0.16, 0.16, { color: FIRE_CORE, h: 0.38, z: 0.60 });
