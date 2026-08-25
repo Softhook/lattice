@@ -13,11 +13,19 @@ import {
   withAlpha,
   hex,
   type Pen,
+  type Rgba,
 } from '@latticekit/draw';
 import { clamp } from '@latticekit/core';
 import type { Player } from './players.js';
-import { MAX_HP, canAffordBuilding } from './players.js';
-import { BUILDING_COSTS } from './buildings.js';
+import {
+  MAX_HP,
+  canAffordBuilding,
+  canAffordWeapon,
+  INVENTORY_ITEMS_ORDER,
+  INVENTORY_CRAFT_ORDER,
+} from './players.js';
+import { BUILDING_COSTS, BUILDING_REGISTRY, type BuildingKind } from './buildings.js';
+import { WEAPONS, type WeaponKind } from './combat.js';
 import { getBiomeAt, type WorldTerrain } from './world.js';
 import {
   P1_COLOR,
@@ -170,23 +178,23 @@ export function drawPlayerHud(
 
   pen.surface.poly(setBox(toolX, toolY, toolW, toolH), 4, hex('#132110'));
 
-  const actKey = pIdx === 0 ? '[Space]' : '[N]';
-  const cycleKey = pIdx === 0 ? '[E/F] Build' : '[O/H] Build';
+  const invKey = pIdx === 0 ? '[C/V] Inventory' : '[,/.] Inventory';
+  const placeKey = pIdx === 0 ? '[Space] Place' : '[N] Place';
 
   let modeText = '';
-  let modeAction = cycleKey;
+  let modeAction = invKey;
   let modeColor = hex('#bdc3c7');
 
   if (player.mode === 'move') {
     modeText = `EXPLORE`;
-    modeAction = cycleKey;
+    modeAction = invKey;
   } else {
     const cost = BUILDING_COSTS[player.mode];
     const affordable = canAffordBuilding(player, player.mode);
     const name = player.mode === 'campfire' ? 'CAMPFIRE 🔥' : player.mode.replace('_', ' ').toUpperCase();
     const fiberCost = cost.fiber ? ` ${cost.fiber}🌿` : '';
     modeText = `🔨 ${name} (${cost.wood}🪵 ${cost.stone}🪨${fiberCost})`;
-    modeAction = `${actKey} Place`;
+    modeAction = placeKey;
     modeColor = affordable ? UI_TOOL_GOLD : hex('#e74c3c');
   }
 
@@ -225,7 +233,7 @@ export function drawPlayerHud(
   pen.surface.poly(setBox(wepX, wepY, wepW, wepH), 4, hex('#181a24'));
   pen.surface.stroke(setBox(wepX, wepY, wepW, wepH), 4, true, hex('#3d5a80'), 1);
 
-  const wepCycleKey = pIdx === 0 ? '[C] Craft' : '[,] Craft';
+  const wepCycleKey = invKey;
   const wName = player.weapon.toUpperCase();
 
   screenText(
@@ -297,5 +305,179 @@ export function drawPlayerHud(
       hex('#ffffff'),
       textStyle(12, 800, 0, 0),
     );
+  }
+}
+
+// ── Inventory Overlay ───────────────────────────────────────────────────────────
+
+/** Emoji shown per building kind in the Inventory's "craft" tab — `BuildingDefinition` carries
+ *  no icon field of its own since only this one screen needs one. */
+const BUILDING_ICONS: Record<BuildingKind, string> = {
+  campfire: '🔥',
+  wood_wall: '🪵',
+  stone_wall: '🧱',
+  wood_tower: '🗼',
+  stone_tower: '🏯',
+  floor: '🟫',
+  gate: '🚪',
+};
+
+const ROW_TEXT_OK    = hex('#8da882');
+const ROW_TEXT_DENY  = hex('#e74c3c');
+const ROW_EQUIPPED   = hex('#2ecc71');
+const ROW_OWNED      = hex('#90caf9');
+const ROW_ARMED      = hex('#f1c40f');
+const TAB_INACTIVE   = hex('#8da882');
+const TAB_BORDER_OFF = hex('#34495e');
+
+/** Draw one tab button (module-level, not a closure, so it allocates nothing per frame). */
+function drawTabButton(
+  pen: Pen,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  label: string,
+  active: boolean,
+  accent: Rgba,
+): void {
+  pen.surface.poly(setBox(x, y, w, h), 4, active ? withAlpha(accent, 0.22) : hex('#132110'));
+  pen.surface.stroke(setBox(x, y, w, h), 4, true, active ? accent : TAB_BORDER_OFF, active ? 1.5 : 1);
+  screenText(pen, x + w * 0.5, y + h * 0.5 + 1, label, active ? accent : TAB_INACTIVE, textStyle(11, 800, 0, 0));
+}
+
+/**
+ * Draw the full-viewport Inventory overlay (opened with C/V or ,/.): weapons to unlock/equip on
+ * the "items" tab, build kinds to arm on the "craft" tab. Covers most of the player's half of the
+ * split screen, leaving a margin so the world stays visible behind it.
+ */
+export function drawInventoryOverlay(pen: Pen, player: Player): void {
+  const viewW = pen.camera.viewW;
+  const viewH = pen.camera.viewH;
+  const pIdx = player.index;
+  const pColor = pIdx === 0 ? P1_COLOR : P2_COLOR;
+  const pAccent = pIdx === 0 ? P1_ACCENT : P2_ACCENT;
+  const invKey = pIdx === 0 ? '[C/V]' : '[,/.]';
+  const navKey = pIdx === 0 ? '[W/S/A/D]' : '[I/K/J/L]';
+  const selectKey = pIdx === 0 ? '[Space]' : '[N]';
+
+  const margin = Math.max(16, Math.min(viewW, viewH) * 0.05);
+  const panelX = margin;
+  const panelY = margin;
+  const panelW = viewW - margin * 2;
+  const panelH = viewH - margin * 2;
+
+  // Dim the world behind the overlay, then the panel itself.
+  pen.surface.poly(setBox(0, 0, viewW, viewH), 4, withAlpha(hex('#000000'), 0.55));
+  pen.surface.poly(setBox(panelX, panelY, panelW, panelH), 4, hex('#0c160a'));
+  pen.surface.stroke(setBox(panelX, panelY, panelW, panelH), 4, true, pColor, 2);
+
+  // Header
+  screenText(pen, panelX + 18, panelY + 24, `INVENTORY — PLAYER ${pIdx + 1}`, pAccent, textStyle(15, 800, -1, 0));
+  screenText(pen, panelX + panelW - 18, panelY + 24, `${navKey} Move   ${selectKey} Select   ${invKey} Close`, ROW_TEXT_OK, textStyle(10, 700, 1, 0));
+
+  // Tabs
+  const tabY = panelY + 42;
+  const tabW = Math.min(140, (panelW - 36) * 0.3);
+  const tabH = 28;
+  drawTabButton(pen, panelX + 18, tabY, tabW, tabH, 'ITEMS', player.invTab === 'items', pAccent);
+  drawTabButton(pen, panelX + 18 + tabW + 10, tabY, tabW, tabH, 'CRAFT', player.invTab === 'craft', pAccent);
+
+  // Resource strip (items tab only — what the crafting costs below are measured against)
+  let gridTop = tabY + tabH + 14;
+  if (player.invTab === 'items') {
+    screenText(
+      pen,
+      panelX + 18,
+      gridTop,
+      `🪵 ${player.inventory.wood}   🪨 ${player.inventory.stone}   🌿 ${player.inventory.fiber}`,
+      hex('#d4a373'),
+      textStyle(12, 700, -1, 0),
+    );
+    gridTop += 22;
+  }
+
+  // Row grid — scrolls to keep the cursor visible when the list overflows the panel.
+  const footerH = 20;
+  const rowH = 36;
+  const gridX = panelX + 18;
+  const gridW = panelW - 36;
+  const gridH = Math.max(rowH, panelY + panelH - footerH - 14 - gridTop);
+  const rowsVisible = Math.max(1, Math.floor(gridH / rowH));
+
+  const total = player.invTab === 'items' ? INVENTORY_ITEMS_ORDER.length : INVENTORY_CRAFT_ORDER.length;
+  let scroll = player.invCursor >= rowsVisible ? player.invCursor - rowsVisible + 1 : 0;
+  scroll = Math.min(scroll, Math.max(0, total - rowsVisible));
+
+  for (let i = scroll; i < Math.min(total, scroll + rowsVisible); i++) {
+    const rowY = gridTop + (i - scroll) * rowH;
+    const selected = i === player.invCursor;
+
+    let icon: string;
+    let name: string;
+    let status: string;
+    let statusColor: Rgba;
+    let highlight: Rgba;
+
+    if (player.invTab === 'items') {
+      const kind = INVENTORY_ITEMS_ORDER[i];
+      if (kind === undefined) continue;
+      const def = WEAPONS[kind];
+      const owned = player.craftedWeapons.includes(kind);
+      const equipped = player.weapon === kind;
+      icon = def.icon;
+      name = def.name.toUpperCase();
+      if (equipped) {
+        status = 'EQUIPPED';
+        statusColor = ROW_EQUIPPED;
+        highlight = ROW_EQUIPPED;
+      } else if (owned) {
+        status = 'OWNED — SELECT TO EQUIP';
+        statusColor = ROW_OWNED;
+        highlight = ROW_OWNED;
+      } else {
+        const fiberCost = def.cost.fiber ? ` ${def.cost.fiber}🌿` : '';
+        const affordable = canAffordWeapon(player, kind);
+        status = `${def.cost.wood}🪵 ${def.cost.stone}🪨${fiberCost}`;
+        statusColor = affordable ? UI_TOOL_GOLD : ROW_TEXT_DENY;
+        highlight = statusColor;
+      }
+    } else {
+      const kind = INVENTORY_CRAFT_ORDER[i];
+      if (kind === undefined) continue;
+      const def = BUILDING_REGISTRY[kind];
+      const cost = BUILDING_COSTS[kind];
+      const armed = player.mode === kind;
+      icon = BUILDING_ICONS[kind];
+      name = def.name.toUpperCase();
+      if (armed) {
+        status = 'ARMED — SELECT TO DISARM';
+        statusColor = ROW_ARMED;
+        highlight = ROW_ARMED;
+      } else {
+        const fiberCost = cost.fiber ? ` ${cost.fiber}🌿` : '';
+        const affordable = canAffordBuilding(player, kind);
+        status = `${cost.wood}🪵 ${cost.stone}🪨${fiberCost}`;
+        statusColor = affordable ? ROW_OWNED : ROW_TEXT_DENY;
+        highlight = statusColor;
+      }
+    }
+
+    pen.surface.poly(setBox(gridX, rowY, gridW, rowH - 4), 4, selected ? withAlpha(highlight, 0.18) : hex('#101c0c'));
+    pen.surface.stroke(setBox(gridX, rowY, gridW, rowH - 4), 4, true, selected ? highlight : hex('#20301c'), selected ? 1.5 : 1);
+
+    screenText(pen, gridX + 12, rowY + (rowH - 4) * 0.5 + 1, `${icon}  ${name}`, selected ? hex('#ffffff') : hex('#d2e8bf'), textStyle(12, selected ? 800 : 600, -1, 0));
+    screenText(pen, gridX + gridW - 12, rowY + (rowH - 4) * 0.5 + 1, status, statusColor, textStyle(10, 700, 1, 0));
+  }
+
+  // Scroll indicator
+  if (total > rowsVisible) {
+    const trackX = gridX + gridW + 6;
+    const trackY = gridTop;
+    const trackH = rowsVisible * rowH - 4;
+    pen.surface.stroke(setLine(trackX, trackY, trackX, trackY + trackH), 2, false, hex('#20301c'), 3);
+    const thumbH = Math.max(14, trackH * (rowsVisible / total));
+    const thumbY = trackY + (trackH - thumbH) * (scroll / Math.max(1, total - rowsVisible));
+    pen.surface.stroke(setLine(trackX, thumbY, trackX, thumbY + thumbH), 2, false, pAccent, 3);
   }
 }

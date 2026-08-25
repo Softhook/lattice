@@ -105,6 +105,14 @@ export interface Player {
    *  (single-player view toggle) — frozen out of simulation, world rendering, and creature threat
    *  perception until switched back on, but retains position/inventory/gear to resume with. */
   active: boolean;
+  /** Whether the full-viewport Inventory overlay is open. While open, movement input is ignored
+   *  (see `main.ts`) and the movement keys instead navigate the overlay — see `inventoryNav`. */
+  invOpen: boolean;
+  /** Which half of the Inventory overlay is showing: unlockable/equippable weapons, or armable
+   *  build kinds. */
+  invTab: 'items' | 'craft';
+  /** Index of the highlighted row within the active tab's list. Clamped by `inventoryNav`. */
+  invCursor: number;
 }
 
 /** Trigger an articulated action or combat animation on a player. */
@@ -188,6 +196,9 @@ function makePlayer(index: 0 | 1, gx: number, gy: number): Player {
     lastActionMsg: '',
     msgTimer: 0,
     active: true,
+    invOpen: false,
+    invTab: 'items',
+    invCursor: 0,
   };
 }
 
@@ -259,6 +270,115 @@ export function cycleWeapon(player: Player): WeaponKind {
   player.lastActionMsg = `EQUIPPED ${WEAPONS[player.weapon].name.toUpperCase()}`;
   player.msgTimer = 1.8;
   return player.weapon;
+}
+
+// ── Inventory Overlay ──────────────────────────────────────────────────────────
+//
+// The full-viewport Inventory (opened with C/V or ,/.) is the single place weapon and build-kind
+// selection happen, so that Space/N never has to double as "place" and stays free to always mean
+// interact-or-attack — see the key layout note atop `input.ts`.
+
+/** Selectable rows of the Inventory's "items" tab, in display order — fists first (always owned,
+ *  free to re-equip), then every craftable weapon. */
+export const INVENTORY_ITEMS_ORDER: readonly WeaponKind[] = ['hands', ...CRAFTABLE_WEAPONS];
+
+/** Selectable rows of the Inventory's "craft" tab, in display order. */
+export const INVENTORY_CRAFT_ORDER: readonly BuildingKind[] = PLAYER_MODES.filter(
+  (m): m is BuildingKind => m !== 'move',
+);
+
+/** Open (or close) the Inventory overlay. On open, the cursor jumps to whatever is currently
+ *  equipped/armed on the active tab, so re-opening it lands on where the player left off. */
+export function toggleInventory(player: Player): void {
+  player.invOpen = !player.invOpen;
+  if (!player.invOpen) return;
+  if (player.invTab === 'items') {
+    const idx = INVENTORY_ITEMS_ORDER.indexOf(player.weapon);
+    player.invCursor = idx >= 0 ? idx : 0;
+  } else {
+    const idx = INVENTORY_CRAFT_ORDER.indexOf(player.mode as BuildingKind);
+    player.invCursor = idx >= 0 ? idx : 0;
+  }
+}
+
+/** Number of selectable rows in the Inventory's currently active tab. */
+export function inventoryTabLength(player: Player): number {
+  return player.invTab === 'items' ? INVENTORY_ITEMS_ORDER.length : INVENTORY_CRAFT_ORDER.length;
+}
+
+/**
+ * Navigate the open Inventory overlay: `dx` switches tabs (left/right), `dy` moves the row
+ * cursor (up/down). Only one axis is expected to be non-zero per call — callers feed this from
+ * edge-triggered movement-key presses one direction at a time.
+ */
+export function inventoryNav(player: Player, dx: number, dy: number): void {
+  if (dx !== 0) {
+    player.invTab = player.invTab === 'items' ? 'craft' : 'items';
+    player.invCursor = 0;
+    return;
+  }
+  if (dy !== 0) {
+    const len = inventoryTabLength(player);
+    player.invCursor = clamp(player.invCursor + dy, 0, Math.max(0, len - 1));
+  }
+}
+
+/** What activating the Inventory's highlighted row actually did — drives the sound effect and
+ *  whether the overlay auto-closes. */
+export interface InventoryActivateResult {
+  ok: boolean;
+  action: 'equip' | 'craft' | 'arm' | 'disarm' | 'deny';
+}
+
+/**
+ * Activate (Space/N) the currently highlighted Inventory row: on the items tab, equips an
+ * already-unlocked weapon or crafts-and-equips a new one; on the craft tab, arms the highlighted
+ * build kind (or disarms it if it's already armed). Once armed, Space/N places it at the
+ * player's facing tile instead of interacting/attacking — see `main.ts` and `buildAtFacing`,
+ * which disarms back to 'move' the instant it lands so Space/N is immediately interact-or-attack
+ * again; building a second one means a deliberate trip back to the Inventory. Closes the overlay
+ * on any successful selection so the player lands straight back in the world; stays open on a
+ * denied (unaffordable) pick.
+ */
+export function activateInventorySelection(player: Player): InventoryActivateResult {
+  if (player.respawnTimer > 0) return { ok: false, action: 'deny' };
+
+  if (player.invTab === 'items') {
+    const kind = INVENTORY_ITEMS_ORDER[player.invCursor];
+    if (kind === undefined) return { ok: false, action: 'deny' };
+    const wasAlreadyOwned = player.craftedWeapons.includes(kind);
+    const ok = craftWeapon(player, kind);
+    if (!ok) return { ok: false, action: 'deny' };
+    player.invOpen = false;
+    return { ok: true, action: wasAlreadyOwned ? 'equip' : 'craft' };
+  }
+
+  const kind = INVENTORY_CRAFT_ORDER[player.invCursor];
+  if (kind === undefined) return { ok: false, action: 'deny' };
+
+  if (player.mode === kind) {
+    player.mode = 'move';
+    player.lastActionMsg = 'BUILD MODE OFF';
+    player.msgTimer = 1.5;
+    player.invOpen = false;
+    return { ok: true, action: 'disarm' };
+  }
+
+  if (!canAffordBuilding(player, kind)) {
+    const cost = BUILDING_COSTS[kind];
+    const fiberCost = cost.fiber ? ` ${cost.fiber}F` : '';
+    player.lastActionMsg = `NEED ${cost.wood}W ${cost.stone}S${fiberCost}`;
+    player.msgTimer = 2.0;
+    return { ok: false, action: 'deny' };
+  }
+
+  player.mode = kind;
+  player.buildKind = kind;
+  const placeKey = player.index === 0 ? '[Space]' : '[N]';
+  player.lastActionMsg = `ARMED ${kind.replace('_', ' ').toUpperCase()} — ${placeKey} TO PLACE`;
+  player.msgTimer = 2.5;
+  player.invOpen = false;
+  return { ok: true, action: 'arm' };
 }
 
 // ── Affordability Check ────────────────────────────────────────────────────────
@@ -458,6 +578,10 @@ export function buildAtFacing(
     player.inventory.wood -= cost.wood;
     player.inventory.stone -= cost.stone;
     if (cost.fiber !== undefined) player.inventory.fiber -= cost.fiber;
+
+    // Placing is one-shot: disarm back to 'move' so Space/N is immediately interact-or-attack
+    // again, and building a second one is a deliberate trip back to the Inventory.
+    player.mode = 'move';
 
     player.lastActionMsg = `PLACED ${kind.replace('_', ' ').toUpperCase()}!`;
     player.msgTimer = 2.0;

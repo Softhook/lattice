@@ -63,7 +63,7 @@ import {
 
 import { drawSky, farRanges } from './sky.js';
 import { drawAmbientEffects } from './ambient.js';
-import { drawPlayerHud, drawSplitDivider } from './hud.js';
+import { drawPlayerHud, drawSplitDivider, drawInventoryOverlay } from './hud.js';
 import type { Projectile, VisualFx } from './combat.js';
 import { getTargetContext } from './players.js';
 import { screenText, DEFAULT_TEXT } from '@latticekit/draw';
@@ -143,6 +143,10 @@ const GHOST_TILE_SCRATCH: TileCoord = { gx: -1, gy: -1 };
 const BLD_INDEX_BUFFER = new Int32Array(4096);
 const FLORA_INDEX_BUFFER = new Int32Array(8192);
 const CRE_INDEX_BUFFER = new Int32Array(4096);
+/** Maps a live-player DepthSorter insertion slot back to its index in `players` — needed because
+ *  a knocked-down or hidden player skips its `ORDER.add` call, so `players.length` overcounts how
+ *  many player slots actually landed in the sorted order (see the ghost-index note below). */
+const PLAYER_INDEX_BUFFER = new Int32Array(2);
 const TILE_RANGE_SCRATCH = { gx0: 0, gy0: 0, gx1: 0, gy1: 0 };
 
 
@@ -364,13 +368,15 @@ function drawViewport(
   // matching (gx, gy, w, d) exactly forces the tie the sorter's insertion-order rule then
   // always breaks the same way: buildings are added before players every frame, so the earlier
   // insertion index paints first (behind) and the player paints after (in front) on every side.
-  const numPlayers = players.length;
-  for (let i = 0; i < numPlayers; i++) {
+  let livePlayerCount = 0;
+  for (let i = 0; i < players.length; i++) {
     const p = players[i];
     if (p === undefined || p.respawnTimer > 0 || !p.active) continue;
     const basePx = heightAt(world.field, p.gx, p.gy) + p.elevationPx;
     const topPx = basePx + spriteHeightPx(PLAYER_SPRITES[p.index], playerVariant(p));
     const tower = p.elevationPx > 0 ? findTowerAt(Math.floor(p.gx), Math.floor(p.gy), buildings) : undefined;
+    PLAYER_INDEX_BUFFER[livePlayerCount] = i;
+    livePlayerCount++;
     if (tower !== undefined) {
       ORDER.add(tower.gx, tower.gy, tower.w, tower.d, topPx);
     } else {
@@ -403,7 +409,7 @@ function drawViewport(
     ORDER.add(ghostTile.gx, ghostTile.gy, ghostDef.w, ghostDef.d, ghostBasePx + spriteHeightPx(ghostDef, VARIANT_ZERO));
   }
 
-  const ghostIndex = ghostDef !== undefined ? liveBldCount + liveFloraCount + liveCreCount + numPlayers : -1;
+  const ghostIndex = ghostDef !== undefined ? liveBldCount + liveFloraCount + liveCreCount + livePlayerCount : -1;
 
   // 6. Compute contextual target under the player's focus
   const target = getTargetContext(activePlayer, world, flora, creatures, buildings);
@@ -536,10 +542,11 @@ function drawViewport(
             }
           }
 
-        } else if (idx < liveBldCount + liveFloraCount + liveCreCount + numPlayers) {
+        } else if (idx < liveBldCount + liveFloraCount + liveCreCount + livePlayerCount) {
           // Players
-          const p = players[idx - liveBldCount - liveFloraCount - liveCreCount];
-          if (p === undefined || p.respawnTimer > 0) continue;
+          const realPlayerIdx = PLAYER_INDEX_BUFFER[idx - liveBldCount - liveFloraCount - liveCreCount] ?? -1;
+          const p = realPlayerIdx >= 0 ? players[realPlayerIdx] : undefined;
+          if (p === undefined) continue;
           const def    = PLAYER_SPRITES[p.index];
           const v      = playerVariant(p);
           const basePx = heightAt(world.field, p.gx, p.gy) + p.elevationPx;
@@ -725,6 +732,10 @@ function drawViewport(
             );
           }
         }
+      }
+
+      if (activePlayer.invOpen) {
+        drawInventoryOverlay(pen, activePlayer);
       }
     },
 

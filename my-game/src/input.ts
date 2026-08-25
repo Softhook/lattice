@@ -2,7 +2,7 @@
  * Keyboard input for two players.
  *
  * Player movement is continuous (held-key), tracked in a set.
- * Actions (dig, raise, build, cycle tool) use rising-edge detection so they fire once per press.
+ * Actions (dig, raise, build, toggle inventory) use rising-edge detection so they fire once per press.
  *
  * Designed to allocate ZERO objects on the 60 Hz simulation tick:
  * - Movement writes into caller-supplied out-parameters.
@@ -11,18 +11,21 @@
  *
  * Key layout:
  *
- *   Player 1 (Left Viewport)       Player 2 (Right Viewport)
- *   W / S    → move N / S          I / K    → move N / S
- *   A / D    → move W / E          J / L    → move W / E
- *   Q        → Dig ground          U        → Dig ground
- *   R        → Raise ground        Y        → Raise ground
- *   E or F   → Cycle build mode    O or H   → Cycle build mode
- *   Space    → Act (harvest/attack/place)  N → Act (harvest/attack/place)
- *   C        → Cycle weapon        ,        → Cycle weapon
- *   V        → Craft/equip weapon  .        → Craft/equip weapon
+ *   Player 1 (Left Viewport)         Player 2 (Right Viewport)
+ *   W / S    → move N / S            I / K    → move N / S
+ *   A / D    → move W / E            J / L    → move W / E
+ *   Q        → Dig ground            U        → Dig ground
+ *   R        → Raise ground          Y        → Raise ground
+ *   Space    → Interact / Attack /   N        → Interact / Attack /
+ *              Place armed building             Place armed building
+ *   C or V   → Open/close Inventory  , or .   → Open/close Inventory
  *
- * `Build`/`Cycle` are two names for the same rising edge (E and F both fire
- * `p1Cycle`'s handler in main.ts) — a deliberate redundant binding, not a bug.
+ * Space/N is one contextual button: it places the currently armed build kind if one is armed,
+ * otherwise it's interact-or-attack. What to build and which weapon to equip is chosen ahead of
+ * time in the Inventory overlay (C/V, ,/.) — not by cycling through options in the world — so a
+ * player is never mid-decision when a fight starts. While the Inventory is open, the movement
+ * keys re-purpose as up/down/left/right navigation (see `pNavUp` etc. below) instead of moving
+ * the player, and Space/N confirms the highlighted entry.
  */
 
 export interface KeyState {
@@ -37,38 +40,42 @@ export interface Vec2Out {
 export interface ActionEdges {
   p1Dig: boolean;
   p1Raise: boolean;
-  p1Build: boolean;
-  p1Cycle: boolean;
   p1Attack: boolean;
-  p1CycleWeapon: boolean;
-  p1CraftWeapon: boolean;
+  p1InvToggle: boolean;
+  p1NavUp: boolean;
+  p1NavDown: boolean;
+  p1NavLeft: boolean;
+  p1NavRight: boolean;
 
   p2Dig: boolean;
   p2Raise: boolean;
-  p2Build: boolean;
-  p2Cycle: boolean;
   p2Attack: boolean;
-  p2CycleWeapon: boolean;
-  p2CraftWeapon: boolean;
+  p2InvToggle: boolean;
+  p2NavUp: boolean;
+  p2NavDown: boolean;
+  p2NavLeft: boolean;
+  p2NavRight: boolean;
 }
 
 export function createActionEdges(): ActionEdges {
   return {
     p1Dig: false,
     p1Raise: false,
-    p1Build: false,
-    p1Cycle: false,
     p1Attack: false,
-    p1CycleWeapon: false,
-    p1CraftWeapon: false,
+    p1InvToggle: false,
+    p1NavUp: false,
+    p1NavDown: false,
+    p1NavLeft: false,
+    p1NavRight: false,
 
     p2Dig: false,
     p2Raise: false,
-    p2Build: false,
-    p2Cycle: false,
     p2Attack: false,
-    p2CycleWeapon: false,
-    p2CraftWeapon: false,
+    p2InvToggle: false,
+    p2NavUp: false,
+    p2NavDown: false,
+    p2NavLeft: false,
+    p2NavRight: false,
   };
 }
 
@@ -131,19 +138,25 @@ export function pollActions(
 ): void {
   out.p1Dig   = curr.has('KeyQ') && !prev.has('KeyQ');
   out.p1Raise = curr.has('KeyR') && !prev.has('KeyR');
-  out.p1Build = curr.has('KeyE') && !prev.has('KeyE');
-  out.p1Cycle = curr.has('KeyF') && !prev.has('KeyF');
   out.p1Attack = curr.has('Space') && !prev.has('Space');
-  out.p1CycleWeapon = curr.has('KeyC') && !prev.has('KeyC');
-  out.p1CraftWeapon = curr.has('KeyV') && !prev.has('KeyV');
+  out.p1InvToggle =
+    (curr.has('KeyC') && !prev.has('KeyC')) ||
+    (curr.has('KeyV') && !prev.has('KeyV'));
+  out.p1NavUp    = curr.has('KeyW') && !prev.has('KeyW');
+  out.p1NavDown  = curr.has('KeyS') && !prev.has('KeyS');
+  out.p1NavLeft  = curr.has('KeyA') && !prev.has('KeyA');
+  out.p1NavRight = curr.has('KeyD') && !prev.has('KeyD');
 
   out.p2Dig   = curr.has('KeyU') && !prev.has('KeyU');
   out.p2Raise = curr.has('KeyY') && !prev.has('KeyY');
-  out.p2Build = curr.has('KeyO') && !prev.has('KeyO');
-  out.p2Cycle = curr.has('KeyH') && !prev.has('KeyH');
   out.p2Attack = curr.has('KeyN') && !prev.has('KeyN');
-  out.p2CycleWeapon = curr.has('Comma') && !prev.has('Comma');
-  out.p2CraftWeapon = curr.has('Period') && !prev.has('Period');
+  out.p2InvToggle =
+    (curr.has('Comma') && !prev.has('Comma')) ||
+    (curr.has('Period') && !prev.has('Period'));
+  out.p2NavUp    = curr.has('KeyI') && !prev.has('KeyI');
+  out.p2NavDown  = curr.has('KeyK') && !prev.has('KeyK');
+  out.p2NavLeft  = curr.has('KeyJ') && !prev.has('KeyJ');
+  out.p2NavRight = curr.has('KeyL') && !prev.has('KeyL');
 }
 
 /** Copy current held set into `target` Set in-place without reallocating. */

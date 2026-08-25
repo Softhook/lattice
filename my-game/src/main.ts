@@ -40,9 +40,10 @@ import {
   interactAtFacing,
   digAtFacing,
   raiseAtFacing,
-  cycleBuildKind,
   tickPlayer,
-  craftNextAvailable,
+  toggleInventory,
+  inventoryNav,
+  activateInventorySelection,
   type Player,
 } from './players.js';
 import {
@@ -292,118 +293,46 @@ loop.onUpdate((dt, tick) => {
   pollActions(prevKeys, curr, edges);
 
   // ── Player movement ───────────────────────────────────────────────────────────
+  // Movement keys double as Inventory-overlay navigation while it's open, so the player stands
+  // still (rather than walking off) instead of actually moving — see the p*Nav* edges below.
   pollP1Movement(curr, moveVec1);
+  if (p1.invOpen) { moveVec1.dx = 0; moveVec1.dy = 0; }
   const p1Stepped = movePlayer(p1, moveVec1.dx, moveVec1.dy, world, buildings, dt);
   let p2Stepped = false;
   if (p2.active) {
     pollP2Movement(curr, moveVec2);
+    if (p2.invOpen) { moveVec2.dx = 0; moveVec2.dy = 0; }
     p2Stepped = movePlayer(p2, moveVec2.dx, moveVec2.dy, world, buildings, dt);
   }
   if (p1Stepped || p2Stepped) {
     audio.play('step');
   }
 
-  // ── Player 1 Actions (Contextual Spacebar Model) ─────────────────────────────
-  if (edges.p1CycleWeapon) {
-    const res = craftNextAvailable(p1);
-    if (res.crafted) audio.play('craft');
-    else audio.play('click');
-    updateDomHud();
-  }
-  if (edges.p1CraftWeapon) {
-    const res = craftNextAvailable(p1);
-    if (res.crafted) audio.play('craft');
-    else audio.play('deny');
-    updateDomHud();
-  }
-  if (edges.p1Cycle || edges.p1Build) {
-    cycleBuildKind(p1);
+  // ── Player 1 Actions ──────────────────────────────────────────────────────────
+  if (edges.p1InvToggle) {
+    toggleInventory(p1);
     audio.play('click');
     updateDomHud();
   }
-  if (edges.p1Attack) {
-    if (p1.respawnTimer <= 0) {
-      if (p1.mode !== 'move') {
-        const placed = buildAtFacing(p1, world, buildings);
-        if (placed !== undefined) {
-          buildings.push(placed);
-          audio.play(placed.kind === 'campfire' ? 'ignite' : 'build');
-          updateDomHud();
-        } else {
-          audio.play('deny');
-        }
-      } else {
-        // Contextual: Interact (Flora harvest, building repair, campfire stoke) or Combat Attack
-        const targetTile = facingTile(p1);
-        const targetBaseH = heightAt(world.field, targetTile.gx, targetTile.gy);
-        const interact = interactAtFacing(p1, world, flora, buildings);
-        if (interact.type !== 'none') {
-          audio.play(interact.type);
-          if (interact.type === 'chop') spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0x8a6040ff);
-          else if (interact.type === 'mine') spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0x95a5a6ff);
-          else if (interact.type === 'forage') spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0x2ecc71ff);
-          else if (interact.type === 'repair') spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0xf39c12ff);
-          updateDomHud();
-        } else if (p1.attackCooldown <= 0) {
-          const baseH = heightAt(world.field, p1.gx, p1.gy) + p1.elevationPx;
-          const res = executeAttack(p1, creatures, projectiles, baseH, fxPool);
-          if (res.isRanged) audio.play('bow_shoot');
-          else if (res.hit) audio.play('hit_meat');
-          else audio.play('attack');
-          updateDomHud();
-        }
-      }
-    }
-  }
-  if (edges.p1Dig) {
-    const changed = digAtFacing(p1, world);
-    if (changed) {
-      audio.play('dig');
-      const targetTile = facingTile(p1);
-      const targetBaseH = heightAt(world.field, targetTile.gx, targetTile.gy);
-      spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0x795548ff);
-      input.setTerrain({ field: world.field, maxHeightPx: world.currentMaxHeightPx });
-    } else {
-      audio.play('deny');
-    }
-  }
-  if (edges.p1Raise) {
-    const changed = raiseAtFacing(p1, world);
-    if (changed) {
-      audio.play('raise');
-      const targetTile = facingTile(p1);
-      const targetBaseH = heightAt(world.field, targetTile.gx, targetTile.gy);
-      spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0x8d6e63ff);
-      input.setTerrain({ field: world.field, maxHeightPx: world.currentMaxHeightPx });
-    } else {
-      audio.play('deny');
-    }
-  }
 
-  // ── Player 2 Actions (Contextual KeyN Model) ─────────────────────────────────
-  // Skipped entirely while Player 2 is hidden — frozen where they stood until brought back.
-  if (p2.active) {
-    if (edges.p2CycleWeapon) {
-      const res = craftNextAvailable(p2);
-      if (res.crafted) audio.play('craft');
-      else audio.play('click');
+  if (p1.invOpen) {
+    // Inventory open: movement-key edges navigate it instead of moving the player, and
+    // Space activates the highlighted row (equip/craft weapon, or arm/disarm a build kind).
+    if (edges.p1NavUp)    inventoryNav(p1, 0, -1);
+    if (edges.p1NavDown)  inventoryNav(p1, 0, 1);
+    if (edges.p1NavLeft)  inventoryNav(p1, -1, 0);
+    if (edges.p1NavRight) inventoryNav(p1, 1, 0);
+    if (edges.p1Attack) {
+      const res = activateInventorySelection(p1);
+      audio.play(res.ok ? (res.action === 'craft' ? 'craft' : 'click') : 'deny');
       updateDomHud();
     }
-    if (edges.p2CraftWeapon) {
-      const res = craftNextAvailable(p2);
-      if (res.crafted) audio.play('craft');
-      else audio.play('deny');
-      updateDomHud();
-    }
-    if (edges.p2Cycle || edges.p2Build) {
-      cycleBuildKind(p2);
-      audio.play('click');
-      updateDomHud();
-    }
-    if (edges.p2Attack) {
-      if (p2.respawnTimer <= 0) {
-        if (p2.mode !== 'move') {
-          const placed = buildAtFacing(p2, world, buildings);
+  } else {
+    if (edges.p1Attack) {
+      if (p1.respawnTimer <= 0) {
+        if (p1.mode !== 'move') {
+          // A build kind is armed from the Inventory: Space places it at the facing tile.
+          const placed = buildAtFacing(p1, world, buildings);
           if (placed !== undefined) {
             buildings.push(placed);
             audio.play(placed.kind === 'campfire' ? 'ignite' : 'build');
@@ -412,9 +341,10 @@ loop.onUpdate((dt, tick) => {
             audio.play('deny');
           }
         } else {
-          const targetTile = facingTile(p2);
+          // Contextual Interact (Flora harvest, building repair, campfire stoke) or Combat Attack.
+          const targetTile = facingTile(p1);
           const targetBaseH = heightAt(world.field, targetTile.gx, targetTile.gy);
-          const interact = interactAtFacing(p2, world, flora, buildings);
+          const interact = interactAtFacing(p1, world, flora, buildings);
           if (interact.type !== 'none') {
             audio.play(interact.type);
             if (interact.type === 'chop') spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0x8a6040ff);
@@ -422,9 +352,9 @@ loop.onUpdate((dt, tick) => {
             else if (interact.type === 'forage') spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0x2ecc71ff);
             else if (interact.type === 'repair') spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0xf39c12ff);
             updateDomHud();
-          } else if (p2.attackCooldown <= 0) {
-            const baseH = heightAt(world.field, p2.gx, p2.gy) + p2.elevationPx;
-            const res = executeAttack(p2, creatures, projectiles, baseH, fxPool);
+          } else if (p1.attackCooldown <= 0) {
+            const baseH = heightAt(world.field, p1.gx, p1.gy) + p1.elevationPx;
+            const res = executeAttack(p1, creatures, projectiles, baseH, fxPool);
             if (res.isRanged) audio.play('bow_shoot');
             else if (res.hit) audio.play('hit_meat');
             else audio.play('attack');
@@ -433,11 +363,11 @@ loop.onUpdate((dt, tick) => {
         }
       }
     }
-    if (edges.p2Dig) {
-      const changed = digAtFacing(p2, world);
+    if (edges.p1Dig) {
+      const changed = digAtFacing(p1, world);
       if (changed) {
         audio.play('dig');
-        const targetTile = facingTile(p2);
+        const targetTile = facingTile(p1);
         const targetBaseH = heightAt(world.field, targetTile.gx, targetTile.gy);
         spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0x795548ff);
         input.setTerrain({ field: world.field, maxHeightPx: world.currentMaxHeightPx });
@@ -445,16 +375,96 @@ loop.onUpdate((dt, tick) => {
         audio.play('deny');
       }
     }
-    if (edges.p2Raise) {
-      const changed = raiseAtFacing(p2, world);
+    if (edges.p1Raise) {
+      const changed = raiseAtFacing(p1, world);
       if (changed) {
         audio.play('raise');
-        const targetTile = facingTile(p2);
+        const targetTile = facingTile(p1);
         const targetBaseH = heightAt(world.field, targetTile.gx, targetTile.gy);
         spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0x8d6e63ff);
         input.setTerrain({ field: world.field, maxHeightPx: world.currentMaxHeightPx });
       } else {
         audio.play('deny');
+      }
+    }
+  }
+
+  // ── Player 2 Actions ──────────────────────────────────────────────────────────
+  // Skipped entirely while Player 2 is hidden — frozen where they stood until brought back.
+  if (p2.active) {
+    if (edges.p2InvToggle) {
+      toggleInventory(p2);
+      audio.play('click');
+      updateDomHud();
+    }
+    if (p2.invOpen) {
+      if (edges.p2NavUp)    inventoryNav(p2, 0, -1);
+      if (edges.p2NavDown)  inventoryNav(p2, 0, 1);
+      if (edges.p2NavLeft)  inventoryNav(p2, -1, 0);
+      if (edges.p2NavRight) inventoryNav(p2, 1, 0);
+      if (edges.p2Attack) {
+        const res = activateInventorySelection(p2);
+        audio.play(res.ok ? (res.action === 'craft' ? 'craft' : 'click') : 'deny');
+        updateDomHud();
+      }
+    } else {
+      if (edges.p2Attack) {
+        if (p2.respawnTimer <= 0) {
+          if (p2.mode !== 'move') {
+            // A build kind is armed from the Inventory: N places it at the facing tile.
+            const placed = buildAtFacing(p2, world, buildings);
+            if (placed !== undefined) {
+              buildings.push(placed);
+              audio.play(placed.kind === 'campfire' ? 'ignite' : 'build');
+              updateDomHud();
+            } else {
+              audio.play('deny');
+            }
+          } else {
+            const targetTile = facingTile(p2);
+            const targetBaseH = heightAt(world.field, targetTile.gx, targetTile.gy);
+            const interact = interactAtFacing(p2, world, flora, buildings);
+            if (interact.type !== 'none') {
+              audio.play(interact.type);
+              if (interact.type === 'chop') spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0x8a6040ff);
+              else if (interact.type === 'mine') spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0x95a5a6ff);
+              else if (interact.type === 'forage') spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0x2ecc71ff);
+              else if (interact.type === 'repair') spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0xf39c12ff);
+              updateDomHud();
+            } else if (p2.attackCooldown <= 0) {
+              const baseH = heightAt(world.field, p2.gx, p2.gy) + p2.elevationPx;
+              const res = executeAttack(p2, creatures, projectiles, baseH, fxPool);
+              if (res.isRanged) audio.play('bow_shoot');
+              else if (res.hit) audio.play('hit_meat');
+              else audio.play('attack');
+              updateDomHud();
+            }
+          }
+        }
+      }
+      if (edges.p2Dig) {
+        const changed = digAtFacing(p2, world);
+        if (changed) {
+          audio.play('dig');
+          const targetTile = facingTile(p2);
+          const targetBaseH = heightAt(world.field, targetTile.gx, targetTile.gy);
+          spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0x795548ff);
+          input.setTerrain({ field: world.field, maxHeightPx: world.currentMaxHeightPx });
+        } else {
+          audio.play('deny');
+        }
+      }
+      if (edges.p2Raise) {
+        const changed = raiseAtFacing(p2, world);
+        if (changed) {
+          audio.play('raise');
+          const targetTile = facingTile(p2);
+          const targetBaseH = heightAt(world.field, targetTile.gx, targetTile.gy);
+          spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0x8d6e63ff);
+          input.setTerrain({ field: world.field, maxHeightPx: world.currentMaxHeightPx });
+        } else {
+          audio.play('deny');
+        }
       }
     }
   }

@@ -9,11 +9,13 @@ Allow the player to use the mouse to click in the world and make a text bar pop 
 
 
 
-The usability of the crafting and interacting doesn't work well work right now. When in the middle of selecting options to build, it's impossible to attack.  
-
-I'm thinking about a two-button system. One which is the generic interact button, the spacebar right now, and the second is the open inventory button. 
-
-Think about an inventory system that covers most of the viewport and shows the different things the player has collected and Selecting them and clicking on them uses them . The other part of the inventory is used for crafting things. That need to be built. So this is the system that is used to switch between different weapons. If there are more things in the inventory than can be displayed, then the inventory can scroll. Use the normal movement keys to scroll through the inventory and use the spacebar to select it 
+DONE: Weapon and build-kind selection moved into a full-viewport Inventory overlay (C/V for P1,
+,/. for P2) with ITEMS and CRAFT tabs — movement keys navigate/scroll it, Space/N selects, and it
+auto-closes on a successful pick, so a player is never mid-decision when a fight starts. Space/N
+is one contextual button: places the armed build kind at the facing tile, or interacts/attacks
+when nothing is armed. Placing is one-shot — it disarms back to explore mode immediately, so
+Space/N goes straight back to interact-or-attack and building a second copy means a deliberate
+trip back to the Inventory.
 
 
 
