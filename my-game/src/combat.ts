@@ -428,7 +428,7 @@ export function executeAttack(
     if (c === undefined || c.hp <= 0) continue;
     const dx = c.gx - player.gx;
     const dy = c.gy - player.gy;
-    const dist = Math.sqrt(dx * dx + dy * dy); // @tier-b — melee hit-check distance
+    const dist = Math.sqrt(dx * dx + dy * dy); // Tier A: sqrt is exact per spec — melee hit-check distance
     if (dist <= weapon.reach) {
       // Check facing alignment
       let inCone = false;
@@ -554,7 +554,7 @@ export function stepProjectiles(
         c.hp -= p.damage;
         c.hurtTimer = 0.25; // Trigger hit flinch
         // Knockback along projectile vector
-        const mag = Math.sqrt(p.vx * p.vx + p.vy * p.vy) || 1; // @tier-b
+        const mag = Math.sqrt(p.vx * p.vx + p.vy * p.vy) || 1; // Tier A: sqrt is exact per spec
         c.gx = clamp(c.gx + (p.vx / mag) * 0.6, 2, W - 3);
         c.gy = clamp(c.gy + (p.vy / mag) * 0.6, 2, H - 3);
         c.idleTimer = 0.3;

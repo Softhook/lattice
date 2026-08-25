@@ -145,7 +145,12 @@ export const VERDANT_MIGRATIONS = migrations(1, recognizeVerdantSaveV1).seal();
 
 export type VerdantStore = Store<VerdantSaveV1>;
 
-/** Initialize the persistent store. */
+/**
+ * Open (or create) the save slot for `seed`. The slot key is derived from the seed, so
+ * loading with a different seed than the one a save was written under silently opens an
+ * empty/fresh store instead of the player's progress — callers must pass the same seed the
+ * world was generated with, not just any seed.
+ */
 export function createVerdantStore(seed: number, defaultSave: () => VerdantSaveV1): VerdantStore {
   return createStore<1, VerdantSaveV1>({
     key: `verdant-save-${seed}`,

@@ -233,7 +233,7 @@ export const SPECIES_REGISTRY: Record<Species, SpeciesDefinition> = {
   },
 };
 
-/** AI behaviour state. */
+/** AI behavior state. */
 export type CreatureState = 'idle' | 'wander' | 'flee' | 'chase' | 'attack' | 'forage' | 'eat';
 
 export interface Creature {
@@ -538,7 +538,7 @@ function updateOne(
         const dy = fireY - c.gy;
         const dSq = dx * dx + dy * dy;
         if (dSq < wardRadius * wardRadius) {
-          const d = Math.sqrt(dSq); // @tier-b — distance to fire, pixels only
+          const d = Math.sqrt(dSq); // Tier A: sqrt is exact per spec — distance to fire, pixels only
           const weight = (wardRadius - d) / wardRadius * 2.5;
           if (d > 0.01) {
             threatDx += (dx / d) * weight;
@@ -604,14 +604,14 @@ function updateOne(
   if (threatCount > 0) {
     const avgThreatDx = threatDx / threatCount;
     const avgThreatDy = threatDy / threatCount;
-    const threatDist = Math.sqrt(avgThreatDx * avgThreatDx + avgThreatDy * avgThreatDy); // @tier-b
+    const threatDist = Math.sqrt(avgThreatDx * avgThreatDx + avgThreatDy * avgThreatDy); // Tier A: sqrt is exact per spec
     if (threatDist > 0.01) {
       const rawFleeDx = -avgThreatDx / threatDist;
       const rawFleeDy = -avgThreatDy / threatDist;
       const turn = Math.min(1, FLEE_TURN_RATE * dt);
       c.fleeDirX += (rawFleeDx - c.fleeDirX) * turn;
       c.fleeDirY += (rawFleeDy - c.fleeDirY) * turn;
-      const len = Math.sqrt(c.fleeDirX * c.fleeDirX + c.fleeDirY * c.fleeDirY); // @tier-b
+      const len = Math.sqrt(c.fleeDirX * c.fleeDirX + c.fleeDirY * c.fleeDirY); // Tier A: sqrt is exact per spec
       if (len > 0.01) {
         c.fleeDirX /= len;
         c.fleeDirY /= len;
@@ -654,7 +654,7 @@ function updateOne(
           }
           const dx = other.gx - c.gx;
           const dy = other.gy - c.gy;
-          const d = Math.sqrt(dx * dx + dy * dy); // @tier-b — hunt distance check, pixels only
+          const d = Math.sqrt(dx * dx + dy * dy); // Tier A: sqrt is exact per spec — hunt distance check, pixels only
           if (d < bestDist) {
             bestDist = d;
             bestTargetGx = other.gx;
@@ -681,7 +681,7 @@ function updateOne(
         }
         const dx = p.gx - c.gx;
         const dy = p.gy - c.gy;
-        const d = Math.sqrt(dx * dx + dy * dy); // @tier-b — player chase distance, pixels only
+        const d = Math.sqrt(dx * dx + dy * dy); // Tier A: sqrt is exact per spec — player chase distance, pixels only
         if (d < playerDetectRange && d < bestDist) {
           bestDist = d;
           bestTargetGx = p.gx;
@@ -700,7 +700,7 @@ function updateOne(
           const by = b.gy + b.d * 0.5;
           const dx = bx - c.gx;
           const dy = by - c.gy;
-          const d = Math.sqrt(dx * dx + dy * dy); // @tier-b
+          const d = Math.sqrt(dx * dx + dy * dy); // Tier A: sqrt is exact per spec
           if (d < bestDist) {
             bestDist = d;
             bestTargetGx = bx;
@@ -775,7 +775,7 @@ function updateOne(
     if (edible !== undefined) {
       const dx = edible.gx - c.gx;
       const dy = edible.gy - c.gy;
-      const dist = Math.sqrt(dx * dx + dy * dy); // @tier-b — flora forage distance, pixels only
+      const dist = Math.sqrt(dx * dx + dy * dy); // Tier A: sqrt is exact per spec — flora forage distance, pixels only
 
       if (dist < 0.9) {
         c.state = 'eat';
@@ -848,7 +848,7 @@ function moveWithSeparation(
 ): void {
   let dx = tx - c.gx;
   let dy = ty - c.gy;
-  const d = Math.sqrt(dx * dx + dy * dy); // @tier-b — movement distance, pixels only
+  const d = Math.sqrt(dx * dx + dy * dy); // Tier A: sqrt is exact per spec — movement distance, pixels only
   if (d > 0.01) {
     dx /= d;
     dy /= d;
@@ -867,7 +867,7 @@ function moveWithSeparation(
     const oy = c.gy - other.gy;
     const distSq = ox * ox + oy * oy;
     if (distSq < 1.44 && distSq > 0.0001) {
-      const dist = Math.sqrt(distSq); // @tier-b
+      const dist = Math.sqrt(distSq); // Tier A: sqrt is exact per spec
       const strength = (1.2 - dist) / 1.2;
       sepX += (ox / dist) * strength * 0.35;
       sepY += (oy / dist) * strength * 0.35;
@@ -883,7 +883,7 @@ function moveWithSeparation(
 
   const moveX = dx + sepX;
   const moveY = dy + sepY;
-  const moveLen = Math.sqrt(moveX * moveX + moveY * moveY); // @tier-b
+  const moveLen = Math.sqrt(moveX * moveX + moveY * moveY); // Tier A: sqrt is exact per spec
   if (moveLen < 0.01) return;
 
   const dirX = moveX / moveLen;

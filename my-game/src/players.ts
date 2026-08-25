@@ -454,7 +454,7 @@ export function movePlayer(
   if (Math.abs(player.vx) < 0.01 && inputDx === 0) player.vx = 0;
   if (Math.abs(player.vy) < 0.01 && inputDy === 0) player.vy = 0;
 
-  // @tier-b — speed magnitude, drives isMoving/walkCycle only; position integration below is Tier A
+  // Tier A: sqrt is exact per spec — speed magnitude, drives isMoving/walkCycle only; position integration below is Tier A
   const currentSpeed = Math.sqrt(player.vx * player.vx + player.vy * player.vy);
   player.isMoving = currentSpeed > 0.08;
 
@@ -797,7 +797,7 @@ function resolveCreatureTarget(
     if (c === undefined || c.hp <= 0) continue;
     const dx = c.gx - player.gx;
     const dy = c.gy - player.gy;
-    const dist = Math.sqrt(dx * dx + dy * dy); // @tier-b — melee target-lock distance
+    const dist = Math.sqrt(dx * dx + dy * dy); // Tier A: sqrt is exact per spec — melee target-lock distance
     if (dist <= weapon.reach && isInForwardCone(player.facing, dx, dy, 1.1)) {
       TARGET_SCRATCH.kind = 'creature';
       TARGET_SCRATCH.gx = Math.round(c.gx);
@@ -840,7 +840,7 @@ function resolveFloraTarget(
       if (f === undefined) continue;
       const dx = f.gx - player.gx;
       const dy = f.gy - player.gy;
-      const dist = Math.sqrt(dx * dx + dy * dy); // @tier-b — soft-lock focus distance
+      const dist = Math.sqrt(dx * dx + dy * dy); // Tier A: sqrt is exact per spec — soft-lock focus distance
       if (dist <= closestDist && isInForwardCone(player.facing, dx, dy, 1.25)) {
         closestDist = dist;
         targetFlora = f;
@@ -894,7 +894,7 @@ function resolveBuildingTarget(
       const bcy = b.gy + b.d * 0.5;
       const dx = bcx - player.gx;
       const dy = bcy - player.gy;
-      const dist = Math.sqrt(dx * dx + dy * dy); // @tier-b — building soft-lock distance
+      const dist = Math.sqrt(dx * dx + dy * dy); // Tier A: sqrt is exact per spec — building soft-lock distance
       if (dist <= closestDist && isInForwardCone(player.facing, dx, dy, 1.25)) {
         closestDist = dist;
         targetBuilding = b;

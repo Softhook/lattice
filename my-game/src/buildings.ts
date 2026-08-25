@@ -66,13 +66,13 @@ export interface Building {
   readonly id: number;
   readonly kind: BuildingKind;
   /** Tile position — the north corner of the building's footprint. */
-  gx: number;
-  gy: number;
+  readonly gx: number;
+  readonly gy: number;
   /** Footprint in tiles. */
   readonly w: number;
   readonly d: number;
   /** Ground height under footprint in world pixels. Set at placement. */
-  basePx: number;
+  readonly basePx: number;
   /** Hit points — hostile trolls reduce this over time. */
   hp: number;
   readonly maxHp: number;

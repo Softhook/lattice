@@ -36,7 +36,6 @@ import {
   footprintBase,
   heightAt,
   type Camera,
-  type Footprint,
 } from '@latticekit/iso';
 import { noise2 } from '@latticekit/core';
 import type { WorldTerrain } from './world.js';
@@ -334,7 +333,7 @@ function drawViewport(
     liveFloraCount++;
     const def = defForFlora(f.kind);
     FP_SCRATCH.gx = f.gx; FP_SCRATCH.gy = f.gy; FP_SCRATCH.w = def.w; FP_SCRATCH.d = def.d;
-    f.basePx = footprintBase(world.field, FP_SCRATCH as unknown as Footprint);
+    f.basePx = footprintBase(world.field, FP_SCRATCH);
     ORDER.add(f.gx, f.gy, def.w, def.d, f.basePx + spriteHeightPx(def, floraVariant(f)));
   }
 
@@ -405,7 +404,7 @@ function drawViewport(
     isLegal = canPlace && canAfford;
 
     FP_SCRATCH.gx = ghostTile.gx; FP_SCRATCH.gy = ghostTile.gy; FP_SCRATCH.w = ghostDef.w; FP_SCRATCH.d = ghostDef.d;
-    ghostBasePx = footprintBase(world.field, FP_SCRATCH as unknown as Footprint);
+    ghostBasePx = footprintBase(world.field, FP_SCRATCH);
     ORDER.add(ghostTile.gx, ghostTile.gy, ghostDef.w, ghostDef.d, ghostBasePx + spriteHeightPx(ghostDef, VARIANT_ZERO));
   }
 
@@ -457,7 +456,7 @@ function drawViewport(
         const cgx = target.gx;
         const cgy = target.gy;
         FP_SCRATCH.gx = cgx; FP_SCRATCH.gy = cgy; FP_SCRATCH.w = 1; FP_SCRATCH.d = 1;
-        const cH = footprintBase(world.field, FP_SCRATCH as unknown as Footprint);
+        const cH = footprintBase(world.field, FP_SCRATCH);
         drawFootprint(
           pen,
           cgx,

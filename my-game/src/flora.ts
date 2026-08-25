@@ -700,8 +700,8 @@ export interface FloraItem {
   readonly kind: FloraKind;
   gx: number;
   gy: number;
-  w: number;
-  d: number;
+  readonly w: number;
+  readonly d: number;
   basePx: number;
   scale: number;
   subType: number;
