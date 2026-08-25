@@ -66,15 +66,18 @@ import {
 import { drawSky, farRanges } from './sky.js';
 import { drawAmbientEffects } from './ambient.js';
 import { drawPlayerHud, drawSplitDivider } from './hud.js';
-import type { Projectile } from './combat.js';
+import type { Projectile, VisualFx } from './combat.js';
 import { getTargetContext } from './players.js';
 import { screenText, DEFAULT_TEXT } from '@latticekit/draw';
 
-// ── Scratch for Projectiles and Target Cursor (Zero Allocation) ────────────────
+// ── Scratch for Projectiles, Combat FX, and Target Cursor (Zero Allocation) ───
 
 const ARROW_LINE_SCRATCH = new Float64Array(4);
 const SHADOW_BOX_SCRATCH = new Float64Array(8);
 const TARGET_BOX_SCRATCH = new Float64Array(8);
+const FX_BOX_SCRATCH = new Float64Array(8);
+const FX_ARC_SCRATCH = new Float64Array(6);
+const FX_RING_SCRATCH = new Float64Array(16);
 
 function setTargetBox(x: number, y: number, w: number, h: number): Float64Array {
   TARGET_BOX_SCRATCH[0] = x;     TARGET_BOX_SCRATCH[1] = y;
@@ -188,6 +191,7 @@ export function renderVerdant(
   daylight: number,
   cycle: number,
   seed: number,
+  fxPool?: readonly VisualFx[],
 ): void {
   // Open the frame — clears canvas and builds pen with camera1 and light1.
   const pen = beginFrame({
@@ -212,7 +216,7 @@ export function renderVerdant(
   ctx.beginPath();
   ctx.rect(0, 0, halfW, surface.height);
   ctx.clip();
-  drawViewport(pen, camera1, world, flora, creatures, players, buildings, projectiles, players[0], t, darkness, daylight, cycle, seed, light1, true);
+  drawViewport(pen, camera1, world, flora, creatures, players, buildings, projectiles, fxPool, players[0], t, darkness, daylight, cycle, seed, light1, true);
   ctx.restore();
 
   // ── Right viewport (Camera 2 / Player 2) ───────────────────────────────────────
@@ -222,7 +226,7 @@ export function renderVerdant(
   ctx.rect(halfW, 0, halfW, surface.height);
   ctx.clip();
   ctx.translate(halfW, 0);
-  drawViewport(pen2, camera2, world, flora, creatures, players, buildings, projectiles, players[1], t, darkness, daylight, cycle, seed, light2, false);
+  drawViewport(pen2, camera2, world, flora, creatures, players, buildings, projectiles, fxPool, players[1], t, darkness, daylight, cycle, seed, light2, false);
   ctx.restore();
 
   endFrame(pen);
@@ -238,6 +242,7 @@ function drawViewport(
   players: readonly [Player, Player],
   buildings: readonly Building[],
   projectiles: readonly Projectile[],
+  fxPool: readonly VisualFx[] | undefined,
   activePlayer: Player,
   t: number,
   darkness: number,
@@ -382,9 +387,10 @@ function drawViewport(
       if (ghostDef !== undefined) {
         drawFootprint(pen, ghostTile.gx, ghostTile.gy, ghostDef.w, ghostDef.d, isLegal ? 'ok' : 'bad', SELECT_LIFT, ghostBasePx);
       } else if (target.kind !== 'none') {
-        const cgx = Math.round(activePlayer.cursorGx);
-        const cgy = Math.round(activePlayer.cursorGy);
-        const cH = heightAt(world.field, cgx, cgy);
+        const cgx = target.gx;
+        const cgy = target.gy;
+        FP_SCRATCH.gx = cgx; FP_SCRATCH.gy = cgy; FP_SCRATCH.w = 1; FP_SCRATCH.d = 1;
+        const cH = footprintBase(world.field, FP_SCRATCH as unknown as Footprint);
         drawFootprint(
           pen,
           cgx,
@@ -526,6 +532,76 @@ function drawViewport(
         ARROW_LINE_SCRATCH[3] = sy;
         pen.surface.stroke(ARROW_LINE_SCRATCH, 2, false, hex('#ffd54f'), 2);
       }
+
+      // Render combat and harvest FX particles (slashes, sparks, ground shockwaves, debris)
+      if (fxPool !== undefined) {
+        const numFx = fxPool.length;
+        for (let fi = 0; fi < numFx; fi++) {
+          const fx = fxPool[fi];
+          if (fx === undefined || !fx.live) continue;
+
+          const wx = (fx.gx - fx.gy) * 32;
+          const wy = (fx.gx + fx.gy) * 16 - fx.z;
+          const sx = (wx - camera.x) * camera.zoom + camera.viewW * 0.5;
+          const sy = (wy - camera.y) * camera.zoom + camera.viewH * 0.5;
+
+          if (sx < -60 || sx > camera.viewW + 60 || sy < -60 || sy > camera.viewH + 60) continue;
+
+          const progress = 1.0 - fx.lifeSec / fx.maxLifeSec; // 0..1
+
+          if (fx.kind === 'slash') {
+            // Curved sweeping blade slash arc
+            const arcRadius = fx.size * (12 + progress * 8) * camera.zoom;
+            const arcAngle = fx.facing === 's' ? Math.PI * 0.5 : fx.facing === 'n' ? -Math.PI * 0.5 : fx.facing === 'e' ? 0 : Math.PI;
+            const arcSpan = 1.2;
+            const startA = arcAngle - arcSpan * 0.5;
+            const endA = arcAngle + arcSpan * 0.5;
+            const midA = arcAngle;
+
+            // @tier-b — slash arc rendering
+            const p0x = sx + Math.cos(startA) * arcRadius * 0.4;
+            const p0y = sy + Math.sin(startA) * arcRadius * 0.2;
+            const p1x = sx + Math.cos(midA) * arcRadius;
+            const p1y = sy + Math.sin(midA) * arcRadius * 0.5;
+            const p2x = sx + Math.cos(endA) * arcRadius * 0.4;
+            const p2y = sy + Math.sin(endA) * arcRadius * 0.2;
+
+            FX_ARC_SCRATCH[0] = p0x; FX_ARC_SCRATCH[1] = p0y;
+            FX_ARC_SCRATCH[2] = p1x; FX_ARC_SCRATCH[3] = p1y;
+            FX_ARC_SCRATCH[4] = p2x; FX_ARC_SCRATCH[5] = p2y;
+
+            pen.surface.stroke(FX_ARC_SCRATCH, 3, false, withAlpha(fx.color, (1.0 - progress) * 0.9), 3 * camera.zoom);
+
+          } else if (fx.kind === 'shockwave') {
+            // Isometric expanding ground ring
+            const radius = (fx.size * 18 * progress + 4) * camera.zoom;
+            const alpha = (1.0 - progress) * 0.75;
+            const strokeCol = withAlpha(fx.color, alpha);
+
+            // 8-point isometric circle
+            for (let k = 0; k < 8; k++) {
+              // @tier-b
+              const ang = (k / 8) * Math.PI * 2;
+              FX_RING_SCRATCH[k * 2] = sx + Math.cos(ang) * radius;
+              FX_RING_SCRATCH[k * 2 + 1] = sy + Math.sin(ang) * radius * 0.5;
+            }
+            pen.surface.stroke(FX_RING_SCRATCH, 8, true, strokeCol, 2 * camera.zoom);
+
+          } else if (fx.kind === 'spark' || fx.kind === 'debris') {
+            // Dynamic diamond particle with gravity drop
+            const sz = Math.max(1, fx.size * (1.0 - progress * 0.4) * camera.zoom);
+            const alpha = (1.0 - progress);
+            const fillCol = withAlpha(fx.color, alpha);
+
+            FX_BOX_SCRATCH[0] = sx;            FX_BOX_SCRATCH[1] = sy - sz;
+            FX_BOX_SCRATCH[2] = sx + sz * 1.4; FX_BOX_SCRATCH[3] = sy;
+            FX_BOX_SCRATCH[4] = sx;            FX_BOX_SCRATCH[5] = sy + sz;
+            FX_BOX_SCRATCH[6] = sx - sz * 1.4; FX_BOX_SCRATCH[7] = sy;
+
+            pen.surface.poly(FX_BOX_SCRATCH, 4, fillCol);
+          }
+        }
+      }
     },
 
     overlay(pen) {
@@ -537,8 +613,8 @@ function drawViewport(
       // In-world contextual action prompt pill floating over targeted object
       // ONLY shown when an actual interaction/action is available (harvest, stoke, attack, repair)
       if (target.kind !== 'none' && target.kind !== 'build' && target.kind !== 'terrain' && target.actionLabel.length > 0) {
-        const cx = activePlayer.cursorGx;
-        const cy = activePlayer.cursorGy;
+        const cx = target.gx;
+        const cy = target.gy;
         const twx = (cx + 0.5 - (cy + 0.5)) * 32;
         const twy = (cx + 0.5 + (cy + 0.5)) * 16 - target.basePx - 26;
         const tsx = (twx - pen.camera.x) * pen.camera.zoom + pen.camera.viewW * 0.5;

@@ -28,6 +28,19 @@ export type Facing = 'n' | 's' | 'e' | 'w';
 
 export type PlayerMode = 'move' | BuildingKind;
 
+export type PlayerActionType =
+  | 'none'
+  | 'sword_slash'
+  | 'axe_chop'
+  | 'fist_punch'
+  | 'bow_draw'
+  | 'chop'
+  | 'mine'
+  | 'forage'
+  | 'repair'
+  | 'dig'
+  | 'raise';
+
 export interface Inventory {
   wood: number;
   stone: number;
@@ -42,7 +55,7 @@ export interface Player {
   /** Current smoothed velocity vector for tactile physics momentum. */
   vx: number;
   vy: number;
-  /** Smoothed visual cursor tile position (eliminates jitter on rapid turns). */
+  /** Integer isometric tile coordinate targeted directly in front of player on the grid. */
   cursorGx: number;
   cursorGy: number;
   /** Which grid direction the player is facing. Affects action target tile. */
@@ -57,6 +70,12 @@ export interface Player {
   craftedWeapons: WeaponKind[];
   /** Seconds remaining before next attack is ready. */
   attackCooldown: number;
+  /** Active combat or interaction animation type. */
+  actionType: PlayerActionType;
+  /** Seconds remaining in the current active action animation. */
+  actionTimer: number;
+  /** Total duration in seconds of the current action animation for normalized phase calculations. */
+  actionDuration: number;
   /** Resource inventory: wood, stone, fiber. */
   inventory: Inventory;
   /** Hit points. 0 → player is knocked down (respawns after 3 s). */
@@ -77,6 +96,13 @@ export interface Player {
   lastActionMsg: string;
   /** Message display timer in seconds. */
   msgTimer: number;
+}
+
+/** Trigger an articulated action or combat animation on a player. */
+export function triggerPlayerAction(player: Player, type: PlayerActionType, durationSec = 0.25): void {
+  player.actionType = type;
+  player.actionTimer = durationSec;
+  player.actionDuration = durationSec;
 }
 
 /** Max tiles per second at normal walk speed. */
@@ -142,6 +168,9 @@ function makePlayer(index: 0 | 1, gx: number, gy: number): Player {
     weapon: 'hands',
     craftedWeapons: ['hands'],
     attackCooldown: 0,
+    actionType: 'none',
+    actionTimer: 0,
+    actionDuration: 0.25,
     inventory: {
       wood: 12,
       stone: 8,
@@ -336,29 +365,32 @@ export function movePlayer(
     }
   }
 
-  // Smooth cursor tracking with exponential damp (eliminates snappy cursor glitches)
+  // Cursor position directly tracks the facing tile on the integer isometric grid
   const targetTilePos = facingTile(player);
-  player.cursorGx += (targetTilePos.gx - player.cursorGx) * Math.min(1.0, dt * 18.0);
-  player.cursorGy += (targetTilePos.gy - player.cursorGy) * Math.min(1.0, dt * 18.0);
+  player.cursorGx = targetTilePos.gx;
+  player.cursorGy = targetTilePos.gy;
 
   return stepped;
 }
 
 // ── Actions ────────────────────────────────────────────────────────────────────
 
-/** The tile immediately in front of the player (an additional square ahead so it is clearly in front of the character model). */
-export function facingTile(player: Player, dist = 1.6): { gx: number; gy: number } {
-  let targetGx = player.gx;
-  let targetGy = player.gy;
+/** The exact tile immediately in front of the player on the isometric grid. */
+export function facingTile(player: Player): { gx: number; gy: number } {
+  // Use the tile the player is centered over to prevent off-to-the-side cursor parallax
+  const curGx = Math.round(player.gx);
+  const curGy = Math.round(player.gy);
+  let targetGx = curGx;
+  let targetGy = curGy;
   switch (player.facing) {
-    case 'n': targetGy -= dist; break;
-    case 's': targetGy += dist; break;
-    case 'e': targetGx += dist; break;
-    case 'w': targetGx -= dist; break;
+    case 'n': targetGy -= 1; break;
+    case 's': targetGy += 1; break;
+    case 'e': targetGx += 1; break;
+    case 'w': targetGx -= 1; break;
   }
   return {
-    gx: clamp(Math.round(targetGx), 0, W - 1),
-    gy: clamp(Math.round(targetGy), 0, H - 1),
+    gx: clamp(targetGx, 0, W - 1),
+    gy: clamp(targetGy, 0, H - 1),
   };
 }
 
@@ -402,13 +434,8 @@ export interface InteractResult {
 }
 
 /**
-  * Interact / Harvest / Mine / Repair / Stoke at the player's facing tile.
-  *
-  * - Chops down trees (yields Wood)
-  * - Mines boulders (yields Stone)
-  * - Gathers bushes & flowers (yields Wood / Fiber)
-  * - Stokes campfire with wood (+40s fuel)
-  * - Repairs damaged buildings
+  * Interact / Harvest / Mine / Repair / Stoke at the player's focused target.
+  * Uses the unified `getTargetContext` system so the action executed matches the visual highlight.
   */
 export function interactAtFacing(
   player: Player,
@@ -418,17 +445,11 @@ export function interactAtFacing(
 ): InteractResult {
   if (player.respawnTimer > 0) return { type: 'none', label: '' };
 
-  const primary = facingTile(player, 1.6);
-  const close = facingTile(player, 0.9);
-  const candidates = [primary, close];
+  const target = getTargetContext(player, world, flora, [], buildings);
 
-  for (let ci = 0; ci < candidates.length; ci++) {
-    const tile = candidates[ci];
-    if (tile === undefined) continue;
-    const { gx, gy } = tile;
-
-    // 1. Check for flora at the tile to harvest
-    const harvest = harvestFloraAt(flora, gx, gy);
+  // 1. Harvest flora
+  if (target.kind === 'flora') {
+    const harvest = harvestFloraAt(flora, target.gx, target.gy);
     if (harvest !== undefined) {
       const def = FLORA_REGISTRY[harvest.item.kind];
       const isTree = def.category === 'tree';
@@ -440,57 +461,59 @@ export function interactAtFacing(
       player.inventory.stone += harvest.stone;
       player.inventory.fiber += harvest.fiber;
 
+      triggerPlayerAction(player, isTree ? 'chop' : isRock ? 'mine' : 'forage', isTree ? 0.32 : isRock ? 0.35 : 0.28);
+
       const label = axeBonus > 0 ? `${harvest.label} (+2 AXE BONUS)` : harvest.label;
       player.lastActionMsg = label;
       player.msgTimer = 2.2;
 
-      const soundType: InteractType =
-        isTree ? 'chop' :
-        isRock ? 'mine' : 'forage';
-
+      const soundType: InteractType = isTree ? 'chop' : isRock ? 'mine' : 'forage';
       return { type: soundType, label };
     }
+  }
 
-    // 2. Check for buildings / campfires at the tile to repair / stoke
+  // 2. Campfire stoking
+  if (target.kind === 'campfire') {
     for (let i = 0; i < buildings.length; i++) {
       const b = buildings[i];
-      if (b === undefined || b.hp <= 0) continue;
-      if (gx >= b.gx && gx < b.gx + b.w && gy >= b.gy && gy < b.gy + b.d) {
-        if (b.kind === 'campfire') {
-          if (player.inventory.wood > 0 && b.hp < b.maxHp) {
-            player.inventory.wood -= 1;
-            b.hp = Math.min(b.maxHp, b.hp + 40);
-            player.hurtFlash = 0.08;
-            const msg = 'STOKED FIRE (+40s FUEL)';
-            player.lastActionMsg = msg;
-            player.msgTimer = 2.0;
-            return { type: 'stoke', label: msg };
-          }
-          const statusMsg = `CAMPFIRE (${Math.round(b.hp)}s FUEL)`;
-          player.lastActionMsg = statusMsg;
-          player.msgTimer = 1.5;
-          return { type: 'none', label: statusMsg };
+      if (b !== undefined && b.kind === 'campfire' && target.gx >= b.gx && target.gx < b.gx + b.w && target.gy >= b.gy && target.gy < b.gy + b.d) {
+        if (player.inventory.wood > 0 && b.hp < b.maxHp) {
+          player.inventory.wood -= 1;
+          b.hp = Math.min(b.maxHp, b.hp + 40);
+          player.hurtFlash = 0.08;
+          triggerPlayerAction(player, 'repair', 0.28);
+          const msg = 'STOKED FIRE (+40s FUEL)';
+          player.lastActionMsg = msg;
+          player.msgTimer = 2.0;
+          return { type: 'stoke', label: msg };
         }
-
-        if (b.hp < b.maxHp) {
-          if (player.inventory.wood > 0 || player.inventory.stone > 0) {
-            if (b.kind.includes('stone') && player.inventory.stone > 0) {
-              player.inventory.stone -= 1;
-            } else if (player.inventory.wood > 0) {
-              player.inventory.wood -= 1;
-            }
-            b.hp = Math.min(b.maxHp, b.hp + 40);
-            player.hurtFlash = 0.1;
-            const msg = `REPAIRED ${b.kind.replace('_', ' ').toUpperCase()} (+40 HP)`;
-            player.lastActionMsg = msg;
-            player.msgTimer = 2.0;
-            return { type: 'repair', label: msg };
-          }
-        }
-        const statusMsg = `${b.kind.replace('_', ' ').toUpperCase()} (HP: ${Math.round(b.hp)}/${b.maxHp})`;
+        const statusMsg = `CAMPFIRE (${Math.round(b.hp)}s FUEL)`;
         player.lastActionMsg = statusMsg;
         player.msgTimer = 1.5;
         return { type: 'none', label: statusMsg };
+      }
+    }
+  }
+
+  // 3. Building repair
+  if (target.kind === 'repair') {
+    for (let i = 0; i < buildings.length; i++) {
+      const b = buildings[i];
+      if (b !== undefined && b.hp > 0 && b.hp < b.maxHp && target.gx >= b.gx && target.gx < b.gx + b.w && target.gy >= b.gy && target.gy < b.gy + b.d) {
+        if (player.inventory.wood > 0 || player.inventory.stone > 0) {
+          if (b.kind.includes('stone') && player.inventory.stone > 0) {
+            player.inventory.stone -= 1;
+          } else if (player.inventory.wood > 0) {
+            player.inventory.wood -= 1;
+          }
+          b.hp = Math.min(b.maxHp, b.hp + 40);
+          player.hurtFlash = 0.1;
+          triggerPlayerAction(player, 'repair', 0.3);
+          const msg = `REPAIRED ${b.kind.replace('_', ' ').toUpperCase()} (+40 HP)`;
+          player.lastActionMsg = msg;
+          player.msgTimer = 2.0;
+          return { type: 'repair', label: msg };
+        }
       }
     }
   }
@@ -502,14 +525,22 @@ export function interactAtFacing(
 export function digAtFacing(player: Player, world: WorldTerrain): boolean {
   if (player.respawnTimer > 0) return false;
   const { gx, gy } = facingTile(player);
-  return dig(world, gx, gy);
+  const ok = dig(world, gx, gy);
+  if (ok) {
+    triggerPlayerAction(player, 'dig', 0.32);
+  }
+  return ok;
 }
 
 /** Raise (mound ground) at the player's facing tile. */
 export function raiseAtFacing(player: Player, world: WorldTerrain): boolean {
   if (player.respawnTimer > 0) return false;
   const { gx, gy } = facingTile(player);
-  return raise(world, gx, gy);
+  const ok = raise(world, gx, gy);
+  if (ok) {
+    triggerPlayerAction(player, 'raise', 0.32);
+  }
+  return ok;
 }
 
 /**
@@ -567,8 +598,183 @@ const TARGET_SCRATCH: TargetContext = {
 };
 
 /**
+ * Evaluates if relative delta (dx, dy) falls within the player's forward interaction cone.
+ * `spreadRatio` controls the lateral tolerance (1.0 = strict 45 deg, 1.25 = generous forward arc).
+ */
+export function isInForwardCone(
+  facing: Direction,
+  dx: number,
+  dy: number,
+  spreadRatio = 1.25,
+): boolean {
+  switch (facing) {
+    case 'n': return dy < 0 && Math.abs(dx) <= -dy * spreadRatio;
+    case 's': return dy > 0 && Math.abs(dx) <= dy * spreadRatio;
+    case 'e': return dx > 0 && Math.abs(dy) <= dx * spreadRatio;
+    case 'w': return dx < 0 && Math.abs(dy) <= -dx * spreadRatio;
+  }
+}
+
+/** Resolves melee combat targets within the weapon's strike arc. Returns true if acquired. */
+function resolveCreatureTarget(
+  player: Player,
+  creatures: readonly Creature[],
+  world: WorldTerrain,
+  actKey: string,
+): boolean {
+  const weapon = WEAPONS[player.weapon];
+  if (weapon.isRanged) return false;
+
+  for (let i = 0; i < creatures.length; i++) {
+    const c = creatures[i];
+    if (c === undefined || c.hp <= 0) continue;
+    const dx = c.gx - player.gx;
+    const dy = c.gy - player.gy;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist <= weapon.reach && isInForwardCone(player.facing, dx, dy, 1.1)) {
+      TARGET_SCRATCH.kind = 'creature';
+      TARGET_SCRATCH.gx = Math.round(c.gx);
+      TARGET_SCRATCH.gy = Math.round(c.gy);
+      TARGET_SCRATCH.basePx = heightAt(world.field, TARGET_SCRATCH.gx, TARGET_SCRATCH.gy);
+      TARGET_SCRATCH.actionKey = actKey;
+      TARGET_SCRATCH.actionLabel = `ATTACK ${c.species.toUpperCase()}`;
+      TARGET_SCRATCH.subLabel = `HP: ${Math.round(c.hp)}`;
+      TARGET_SCRATCH.color = hex('#e74c3c');
+      return true;
+    }
+  }
+  return false;
+}
+
+/** Resolves harvestable flora, checking the direct facing tile first and soft-locking adjacent forward plants. */
+function resolveFloraTarget(
+  player: Player,
+  targetTile: { gx: number; gy: number },
+  flora: readonly FloraItem[],
+  world: WorldTerrain,
+  actKey: string,
+): boolean {
+  let targetFlora: FloraItem | undefined;
+
+  // Direct facing tile has first priority
+  for (let i = 0; i < flora.length; i++) {
+    const f = flora[i];
+    if (f !== undefined && f.gx === targetTile.gx && f.gy === targetTile.gy) {
+      targetFlora = f;
+      break;
+    }
+  }
+
+  // Forward-cone magnetic soft-lock when direct tile is clear
+  if (targetFlora === undefined) {
+    let closestDist = 1.6;
+    for (let i = 0; i < flora.length; i++) {
+      const f = flora[i];
+      if (f === undefined) continue;
+      const dx = f.gx - player.gx;
+      const dy = f.gy - player.gy;
+      const dist = Math.sqrt(dx * dx + dy * dy); // @tier-b — soft-lock focus distance
+      if (dist <= closestDist && isInForwardCone(player.facing, dx, dy, 1.25)) {
+        closestDist = dist;
+        targetFlora = f;
+      }
+    }
+  }
+
+  if (targetFlora !== undefined) {
+    const fDef = FLORA_REGISTRY[targetFlora.kind];
+    const isTree = fDef.category === 'tree';
+    const isRock = fDef.category === 'rock';
+    TARGET_SCRATCH.kind = 'flora';
+    TARGET_SCRATCH.gx = targetFlora.gx;
+    TARGET_SCRATCH.gy = targetFlora.gy;
+    TARGET_SCRATCH.basePx = heightAt(world.field, targetFlora.gx, targetFlora.gy);
+    TARGET_SCRATCH.actionKey = actKey;
+    TARGET_SCRATCH.actionLabel = isTree ? 'CHOP' : isRock ? 'MINE' : 'FORAGE';
+    TARGET_SCRATCH.subLabel = fDef.name.toUpperCase();
+    TARGET_SCRATCH.color = isTree ? hex('#d4a373') : isRock ? hex('#b0bec5') : hex('#2ecc71');
+    return true;
+  }
+  return false;
+}
+
+/** Resolves interactive buildings (campfires, repairs, static structures). Returns true if acquired. */
+function resolveBuildingTarget(
+  player: Player,
+  targetTile: { gx: number; gy: number },
+  buildings: readonly Building[],
+  actKey: string,
+): boolean {
+  let targetBuilding: Building | undefined;
+
+  // Direct tile match
+  for (let i = 0; i < buildings.length; i++) {
+    const b = buildings[i];
+    if (b === undefined || b.hp <= 0) continue;
+    if (targetTile.gx >= b.gx && targetTile.gx < b.gx + b.w && targetTile.gy >= b.gy && targetTile.gy < b.gy + b.d) {
+      targetBuilding = b;
+      break;
+    }
+  }
+
+  // Forward-cone soft-lock
+  if (targetBuilding === undefined) {
+    let closestDist = 1.6;
+    for (let i = 0; i < buildings.length; i++) {
+      const b = buildings[i];
+      if (b === undefined || b.hp <= 0) continue;
+      const bcx = b.gx + b.w * 0.5;
+      const bcy = b.gy + b.d * 0.5;
+      const dx = bcx - player.gx;
+      const dy = bcy - player.gy;
+      const dist = Math.sqrt(dx * dx + dy * dy); // @tier-b — building soft-lock distance
+      if (dist <= closestDist && isInForwardCone(player.facing, dx, dy, 1.25)) {
+        closestDist = dist;
+        targetBuilding = b;
+      }
+    }
+  }
+
+  if (targetBuilding !== undefined) {
+    const b = targetBuilding;
+    if (b.kind === 'campfire') {
+      TARGET_SCRATCH.kind = 'campfire';
+      TARGET_SCRATCH.gx = b.gx;
+      TARGET_SCRATCH.gy = b.gy;
+      TARGET_SCRATCH.basePx = b.basePx;
+      TARGET_SCRATCH.actionKey = actKey;
+      TARGET_SCRATCH.actionLabel = player.inventory.wood > 0 && b.hp < b.maxHp ? 'STOKE FIRE' : 'CAMPFIRE';
+      TARGET_SCRATCH.subLabel = `${Math.round(b.hp)}s FUEL`;
+      TARGET_SCRATCH.color = hex('#ff9f43');
+      return true;
+    }
+    if (b.hp < b.maxHp) {
+      TARGET_SCRATCH.kind = 'repair';
+      TARGET_SCRATCH.gx = b.gx;
+      TARGET_SCRATCH.gy = b.gy;
+      TARGET_SCRATCH.basePx = b.basePx;
+      TARGET_SCRATCH.actionKey = actKey;
+      TARGET_SCRATCH.actionLabel = `REPAIR (+40 HP)`;
+      TARGET_SCRATCH.subLabel = `${b.kind.replace('_', ' ').toUpperCase()} (${Math.round(b.hp)}/${b.maxHp})`;
+      TARGET_SCRATCH.color = hex('#3498db');
+      return true;
+    }
+    // Full-health structures (static landmarks)
+    TARGET_SCRATCH.kind = 'building';
+    TARGET_SCRATCH.gx = b.gx;
+    TARGET_SCRATCH.gy = b.gy;
+    TARGET_SCRATCH.basePx = b.basePx;
+    TARGET_SCRATCH.actionKey = actKey;
+    TARGET_SCRATCH.actionLabel = '';
+    TARGET_SCRATCH.subLabel = '';
+    TARGET_SCRATCH.color = hex('#78909c');
+    return true;
+  }
+  return false;
+}
+
+/**
  * Compute what the player is currently facing and targeting in the world.
- * Checks target tile situated an additional square ahead in front of character model.
  * Zero heap allocations on the 60 Hz frame path.
  */
 export function getTargetContext(
@@ -587,16 +793,14 @@ export function getTargetContext(
     return TARGET_SCRATCH;
   }
 
-  const primary = facingTile(player, 1.6);
-  const close = facingTile(player, 0.9);
-  const candidates = [primary, close];
+  const targetTile = facingTile(player);
 
-  // 1. Build mode active: target is the placement ghost tile (visual ghost rendered without redundant text)
+  // 1. Build mode active: target is the placement ghost tile
   if (player.mode !== 'move') {
     TARGET_SCRATCH.kind = 'build';
-    TARGET_SCRATCH.gx = primary.gx;
-    TARGET_SCRATCH.gy = primary.gy;
-    TARGET_SCRATCH.basePx = heightAt(world.field, primary.gx, primary.gy);
+    TARGET_SCRATCH.gx = targetTile.gx;
+    TARGET_SCRATCH.gy = targetTile.gy;
+    TARGET_SCRATCH.basePx = heightAt(world.field, targetTile.gx, targetTile.gy);
     TARGET_SCRATCH.actionKey = actKey;
     TARGET_SCRATCH.actionLabel = '';
     TARGET_SCRATCH.subLabel = '';
@@ -604,110 +808,26 @@ export function getTargetContext(
     return TARGET_SCRATCH;
   }
 
-  // 2. Combat: check if a living creature is in melee attack reach & facing cone
-  const weapon = WEAPONS[player.weapon];
-  if (!weapon.isRanged) {
-    for (let i = 0; i < creatures.length; i++) {
-      const c = creatures[i];
-      if (c === undefined || c.hp <= 0) continue;
-      const dx = c.gx - player.gx;
-      const dy = c.gy - player.gy;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist <= weapon.reach) {
-        let inCone = false;
-        switch (player.facing) {
-          case 'n': inCone = dy < 0 && Math.abs(dx) < 1.1; break;
-          case 's': inCone = dy > 0 && Math.abs(dx) < 1.1; break;
-          case 'e': inCone = dx > 0 && Math.abs(dy) < 1.1; break;
-          case 'w': inCone = dx < 0 && Math.abs(dy) < 1.1; break;
-        }
-        if (inCone) {
-          TARGET_SCRATCH.kind = 'creature';
-          TARGET_SCRATCH.gx = c.gx;
-          TARGET_SCRATCH.gy = c.gy;
-          TARGET_SCRATCH.basePx = heightAt(world.field, c.gx, c.gy);
-          TARGET_SCRATCH.actionKey = actKey;
-          TARGET_SCRATCH.actionLabel = `ATTACK ${c.species.toUpperCase()}`;
-          TARGET_SCRATCH.subLabel = `HP: ${Math.round(c.hp)}`;
-          TARGET_SCRATCH.color = hex('#e74c3c');
-          return TARGET_SCRATCH;
-        }
-      }
-    }
+  // 2. Creature melee combat
+  if (resolveCreatureTarget(player, creatures, world, actKey)) {
+    return TARGET_SCRATCH;
   }
 
-  // 3. Flora at target or adjacent tile
-  for (let ci = 0; ci < candidates.length; ci++) {
-    const tile = candidates[ci];
-    if (tile === undefined) continue;
-    for (let i = 0; i < flora.length; i++) {
-      const f = flora[i];
-      if (f !== undefined && f.gx === tile.gx && f.gy === tile.gy) {
-        const fDef = FLORA_REGISTRY[f.kind];
-        const isTree = fDef.category === 'tree';
-        const isRock = fDef.category === 'rock';
-        TARGET_SCRATCH.kind = 'flora';
-        TARGET_SCRATCH.gx = tile.gx;
-        TARGET_SCRATCH.gy = tile.gy;
-        TARGET_SCRATCH.basePx = heightAt(world.field, tile.gx, tile.gy);
-        TARGET_SCRATCH.actionKey = actKey;
-        TARGET_SCRATCH.actionLabel = isTree ? 'CHOP' : isRock ? 'MINE' : 'FORAGE';
-        TARGET_SCRATCH.subLabel = fDef.name.toUpperCase();
-        TARGET_SCRATCH.color = isTree ? hex('#d4a373') : isRock ? hex('#b0bec5') : hex('#2ecc71');
-        return TARGET_SCRATCH;
-      }
-    }
+  // 3. Flora harvesting / foraging
+  if (resolveFloraTarget(player, targetTile, flora, world, actKey)) {
+    return TARGET_SCRATCH;
   }
 
-  // 4. Buildings at target or adjacent tile
-  for (let ci = 0; ci < candidates.length; ci++) {
-    const tile = candidates[ci];
-    if (tile === undefined) continue;
-    for (let i = 0; i < buildings.length; i++) {
-      const b = buildings[i];
-      if (b === undefined || b.hp <= 0) continue;
-      if (tile.gx >= b.gx && tile.gx < b.gx + b.w && tile.gy >= b.gy && tile.gy < b.gy + b.d) {
-        if (b.kind === 'campfire') {
-          TARGET_SCRATCH.kind = 'campfire';
-          TARGET_SCRATCH.gx = b.gx;
-          TARGET_SCRATCH.gy = b.gy;
-          TARGET_SCRATCH.basePx = b.basePx;
-          TARGET_SCRATCH.actionKey = actKey;
-          TARGET_SCRATCH.actionLabel = player.inventory.wood > 0 && b.hp < b.maxHp ? 'STOKE FIRE' : 'CAMPFIRE';
-          TARGET_SCRATCH.subLabel = `${Math.round(b.hp)}s FUEL`;
-          TARGET_SCRATCH.color = hex('#ff9f43');
-          return TARGET_SCRATCH;
-        }
-        if (b.hp < b.maxHp) {
-          TARGET_SCRATCH.kind = 'repair';
-          TARGET_SCRATCH.gx = b.gx;
-          TARGET_SCRATCH.gy = b.gy;
-          TARGET_SCRATCH.basePx = b.basePx;
-          TARGET_SCRATCH.actionKey = actKey;
-          TARGET_SCRATCH.actionLabel = `REPAIR (+40 HP)`;
-          TARGET_SCRATCH.subLabel = `${b.kind.replace('_', ' ').toUpperCase()} (${Math.round(b.hp)}/${b.maxHp})`;
-          TARGET_SCRATCH.color = hex('#3498db');
-          return TARGET_SCRATCH;
-        }
-        // Full health buildings are static props (not interactable with action key)
-        TARGET_SCRATCH.kind = 'building';
-        TARGET_SCRATCH.gx = b.gx;
-        TARGET_SCRATCH.gy = b.gy;
-        TARGET_SCRATCH.basePx = b.basePx;
-        TARGET_SCRATCH.actionKey = actKey;
-        TARGET_SCRATCH.actionLabel = '';
-        TARGET_SCRATCH.subLabel = '';
-        TARGET_SCRATCH.color = hex('#78909c');
-        return TARGET_SCRATCH;
-      }
-    }
+  // 4. Buildings & Campfires
+  if (resolveBuildingTarget(player, targetTile, buildings, actKey)) {
+    return TARGET_SCRATCH;
   }
 
-  // 5. Open ground / Terrain (no interactive object under focus)
+  // 5. Open ground / Terrain (default when no entity or structure is focused)
   TARGET_SCRATCH.kind = 'terrain';
-  TARGET_SCRATCH.gx = primary.gx;
-  TARGET_SCRATCH.gy = primary.gy;
-  TARGET_SCRATCH.basePx = heightAt(world.field, primary.gx, primary.gy);
+  TARGET_SCRATCH.gx = targetTile.gx;
+  TARGET_SCRATCH.gy = targetTile.gy;
+  TARGET_SCRATCH.basePx = heightAt(world.field, targetTile.gx, targetTile.gy);
   TARGET_SCRATCH.actionKey = actKey;
   TARGET_SCRATCH.actionLabel = '';
   TARGET_SCRATCH.subLabel = '';
@@ -717,8 +837,14 @@ export function getTargetContext(
 
 // ── HP and respawn ─────────────────────────────────────────────────────────────
 
-/** Update HP regen, damage flash, message timer, and respawn timer. Returns true if player just respawned. */
+/** Update HP regen, damage flash, message timer, action animation timer, and respawn timer. Returns true if player just respawned. */
 export function tickPlayer(player: Player, dt: number): boolean {
+  if (player.actionTimer > 0) {
+    player.actionTimer = Math.max(0, player.actionTimer - dt);
+    if (player.actionTimer <= 0) {
+      player.actionType = 'none';
+    }
+  }
   if (player.attackCooldown > 0) {
     player.attackCooldown = Math.max(0, player.attackCooldown - dt);
   }
@@ -736,6 +862,8 @@ export function tickPlayer(player: Player, dt: number): boolean {
       player.respawnTimer = 0;
       player.combatCooldown = 0;
       player.hurtFlash = 0;
+      player.actionType = 'none';
+      player.actionTimer = 0;
       return true; // Respawned!
     }
     return false;

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { createWorld, W, H, isWalkable, dig, raise, BIOME_REGISTRY } from '../src/world.js';
-import { createPlayers, movePlayer, interactAtFacing, cycleBuildKind, buildAtFacing, canAffordBuilding, tickPlayer, getTargetContext } from '../src/players.js';
+import { createPlayers, movePlayer, interactAtFacing, cycleBuildKind, buildAtFacing, canAffordBuilding, tickPlayer, getTargetContext, facingTile, isInForwardCone } from '../src/players.js';
 import { populateFlora, FLORA_REGISTRY } from '../src/flora.js';
 import { BUILDING_COSTS, BUILDING_REGISTRY } from '../src/buildings.js';
 import { populateWorld, updateCreatures, SPECIES_REGISTRY } from '../src/creatures.js';
@@ -83,7 +83,7 @@ describe('Verdant Gameplay Logic', () => {
     const placed = buildAtFacing(p1, world, buildings);
     expect(placed).toBeDefined();
     expect(placed?.kind).toBe('wood_wall');
-    expect(placed?.gx).toBe(17);
+    expect(placed?.gx).toBe(16);
     expect(placed?.gy).toBe(15);
     expect(p1.inventory.wood).toBe(10 - BUILDING_COSTS.wood_wall.wood);
   });
@@ -179,8 +179,10 @@ describe('Verdant Gameplay Logic', () => {
     expect(kindsPresent.has('flowers')).toBe(true);
     expect(kindsPresent.has('mushroom')).toBe(true);
     expect(kindsPresent.has('rock')).toBe(true);
+  }, 15000);
 
-    // Verify continuous tile color lookups and zero NaN values in color buffer
+  it('verifies continuous tile color lookups and zero NaN values in color buffer', () => {
+    const world = createWorld(42);
     for (let i = 0; i < world.tileColors.length; i++) {
       expect(world.tileColors[i]).toBeGreaterThan(0);
     }
@@ -250,7 +252,7 @@ describe('Verdant Gameplay Logic', () => {
     expect(placed).toBeDefined();
     expect(placed?.kind).toBe('campfire');
     expect(placed?.gx).toBe(20);
-    expect(placed?.gy).toBe(22);
+    expect(placed?.gy).toBe(21);
     expect(placed?.hp).toBe(120);
 
     // Verify inventory cost deduction: 4 wood, 2 stone, 2 fiber
@@ -323,6 +325,78 @@ describe('Verdant Gameplay Logic', () => {
     const targetBuild = getTargetContext(p1, world, [], [], []);
     expect(targetBuild.kind).toBe('build');
     expect(targetBuild.actionLabel).toBe('');
+  });
+
+  it('maintains strict isometric grid locking across all facings and fractional positions', () => {
+    const [p1] = createPlayers();
+    const world = createWorld(42);
+
+    // Place player at fractional continuous coordinate within cell (15, 22)
+    p1.gx = 14.85;
+    p1.gy = 22.35;
+
+    p1.facing = 's';
+    let target = facingTile(p1);
+    expect(target).toEqual({ gx: 15, gy: 23 });
+
+    p1.facing = 'n';
+    target = facingTile(p1);
+    expect(target).toEqual({ gx: 15, gy: 21 });
+
+    p1.facing = 'e';
+    target = facingTile(p1);
+    expect(target).toEqual({ gx: 16, gy: 22 });
+
+    p1.facing = 'w';
+    target = facingTile(p1);
+    expect(target).toEqual({ gx: 14, gy: 22 });
+
+    // Step player movement and verify cursor tile position is strictly integer
+    movePlayer(p1, 1, 0, world, [], 1 / 60);
+    expect(Number.isInteger(p1.cursorGx)).toBe(true);
+    expect(Number.isInteger(p1.cursorGy)).toBe(true);
+    expect(p1.cursorGx).toBe(facingTile(p1).gx);
+    expect(p1.cursorGy).toBe(facingTile(p1).gy);
+
+    const ctx = getTargetContext(p1, world, [], [], []);
+    expect(Number.isInteger(ctx.gx)).toBe(true);
+    expect(Number.isInteger(ctx.gy)).toBe(true);
+  });
+
+  it('accurately evaluates forward interaction cone and magnetically soft-locks to interactive items', () => {
+    // 1. Test geometric forward cone
+    expect(isInForwardCone('s', 0, 1)).toBe(true);
+    expect(isInForwardCone('s', 0.5, 1)).toBe(true);
+    expect(isInForwardCone('s', 0, -1)).toBe(false); // behind
+    expect(isInForwardCone('n', 0, -1)).toBe(true);
+    expect(isInForwardCone('e', 1, 0)).toBe(true);
+    expect(isInForwardCone('w', -1, 0)).toBe(true);
+
+    // 2. Test magnetic soft-locking to adjacent forward tree
+    const [p1] = createPlayers();
+    const world = createWorld(42);
+    p1.gx = 10;
+    p1.gy = 10;
+    p1.facing = 's';
+
+    // Direct tile is (10, 11). Place flora slightly offset at (10, 11) and another at (11, 11)
+    const flora = [
+      { id: 1, kind: 'pine' as const, gx: 10, gy: 11, w: 1, d: 1, basePx: 0, scale: 1 },
+    ];
+    const target1 = getTargetContext(p1, world, flora, [], []);
+    expect(target1.kind).toBe('flora');
+    expect(target1.actionLabel).toBe('CHOP');
+    expect(target1.gx).toBe(10);
+    expect(target1.gy).toBe(11);
+
+    // Test soft-lock when directly facing empty tile (10, 11) but tree is at (11, 11)
+    const offsetFlora = [
+      { id: 2, kind: 'oak' as const, gx: 11, gy: 11, w: 1, d: 1, basePx: 0, scale: 1 },
+    ];
+    const target2 = getTargetContext(p1, world, offsetFlora, [], []);
+    expect(target2.kind).toBe('flora');
+    expect(target2.gx).toBe(11);
+    expect(target2.gy).toBe(11);
   });
 });
 

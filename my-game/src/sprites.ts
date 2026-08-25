@@ -62,7 +62,7 @@ import {
 
 // ── Player Sprite ─────────────────────────────────────────────────────────────
 
-/** Player adventurer — detailed outfit, articulated walking legs, weapon in hand, and backpack. */
+/** Player adventurer — detailed outfit, articulated walking legs, weapon in hand, backpack, and combat/interaction kinematics. */
 function makePlayerMassing(bodyColor: Ink): Massing {
   const visorColor = 0xffe066ff; // Bright gold visor
   const packColor  = BACKPACK_COL;
@@ -77,141 +77,242 @@ function makePlayerMassing(bodyColor: Ink): Massing {
     const facing = v.flags & 3; // 0: 'n', 1: 's', 2: 'e', 3: 'w'
     const isMoving = (v.flags & 4) !== 0;
     const weaponCode = (v.flags >> 4) & 3; // 0: hands, 1: axe, 2: sword, 3: bow
+    const actionCode = (v.flags >> 6) & 15; // 0: none, 1: sword, 2: axe, 3: punch, 4: bow, 5: chop, 6: mine, 7: forage, 8: repair, 9: dig, 10: raise
+    const isHurt = ((v.flags >> 10) & 1) !== 0;
+
+    const actionPhase = (v.level % 1000) / 1000; // 0..1 action progress
     const walkPhase = v.progress; // 0..1 stride cycle
 
-    // @tier-b — smooth, natural leg stride and body bob kinematics
+    // @tier-b — smooth, natural leg stride, body bob, and action kinematics
     const swing = isMoving ? Math.sin(walkPhase * Math.PI * 2) * 0.08 : 0;
     const armSwing = isMoving ? Math.sin(walkPhase * Math.PI * 2) * 0.05 : 0;
     const bob = isMoving ? Math.abs(Math.sin(walkPhase * Math.PI * 2)) * 0.03 : 0;
-    const zBase = bob;
+
+    // Action animation interpolation
+    const slashSin = Math.sin(actionPhase * Math.PI);
+    const chopSin = Math.sin(actionPhase * Math.PI);
+    const punchSin = Math.sin(actionPhase * Math.PI);
+    const bowDrawSin = Math.sin(Math.min(1.0, actionPhase * 1.5) * Math.PI * 0.5);
+    const forageSin = Math.sin(actionPhase * Math.PI);
+    const digSin = Math.sin(actionPhase * Math.PI);
+    const hammerSin = Math.sin(actionPhase * Math.PI * 4);
+    const hurtStagger = isHurt ? Math.sin(actionPhase * Math.PI * 8) * 0.05 : 0;
+
+    // Body posture adjustments during actions
+    const forwardLean =
+      actionCode === 1 ? slashSin * 0.06 :
+      (actionCode === 2 || actionCode === 5) ? chopSin * 0.08 :
+      actionCode === 3 ? punchSin * 0.08 :
+      actionCode === 7 ? forageSin * 0.12 :
+      (actionCode === 9 || actionCode === 10) ? digSin * 0.10 : 0;
+
+    const zBase = bob + (actionCode === 7 ? -forageSin * 0.10 : 0) + hurtStagger;
 
     if (facing === 1) {
       // ── Facing South (S key / toward camera) ──
       // 1. Far/North elements draw FIRST in painter's order:
       // Backpack on north face
-      w.box(0.32, 0.16, 0.36, 0.14, { color: packColor, h: 0.55, z: 0.5 + zBase });
-      w.box(0.44, 0.14, 0.12, 0.04, { color: hiltGold, h: 0.12, z: 0.7 + zBase });
+      w.box(0.32, 0.16 - forwardLean * 0.5, 0.36, 0.14, { color: packColor, h: 0.55, z: 0.5 + zBase });
+      w.box(0.44, 0.14 - forwardLean * 0.5, 0.12, 0.04, { color: hiltGold, h: 0.12, z: 0.7 + zBase });
 
-      // Far Arm (Left Arm on north-west shoulder) — drawn BEFORE torso so torso naturally clips it
-      w.box(0.14, 0.32 - armSwing, 0.12, 0.20, { color: bodyColor, h: 0.55, z: 0.68 + zBase });
-      w.box(0.14, 0.38 - armSwing, 0.12, 0.12, { color: SKIN_TONE, h: 0.14, z: 0.56 + zBase });
+      // Far Arm (Left Arm on north-west shoulder)
+      let farArmY = 0.32 - armSwing + forwardLean;
+      let farArmZ = 0.68 + zBase;
+      if (actionCode === 4) {
+        // Holding bow forward
+        farArmY = 0.48;
+        farArmZ = 0.78 + zBase;
+      } else if (actionCode === 7) {
+        farArmZ = 0.42 + zBase;
+        farArmY = 0.48;
+      }
+      w.box(0.14, farArmY, 0.12, 0.20, { color: bodyColor, h: 0.55, z: farArmZ });
+      w.box(0.14, farArmY + 0.06, 0.12, 0.12, { color: SKIN_TONE, h: 0.14, z: farArmZ - 0.12 });
+
+      if (actionCode === 4) {
+        // Bow in left hand
+        w.box(0.12, farArmY + 0.08, 0.04, 0.26, { color: woodShaft, h: 0.95, z: farArmZ - 0.25 });
+        w.post(0.14, farArmY + 0.08, farArmZ - 0.20, 0.85, 0xffffffff, 0.02);
+      }
 
       // 2. Legs:
       w.box(0.26, 0.36 + swing, 0.18, 0.24, { color: BOOTS_DARK, h: 0.45 });
       w.box(0.54, 0.36 - swing, 0.18, 0.24, { color: BOOTS_DARK, h: 0.45 });
 
-      // 3. Torso & Belt (cleanly occludes far arm):
-      w.box(0.24, 0.24, 0.52, 0.52, { color: bodyColor, h: 0.4, z: 0.45 + zBase });
-      w.box(0.23, 0.23, 0.54, 0.54, { color: 0x1a252fff, h: 0.1, z: 0.48 + zBase });
-      w.box(0.25, 0.25, 0.50, 0.50, { color: bodyColor, h: 0.5, z: 0.85 + zBase });
+      // 3. Torso & Belt:
+      w.box(0.24, 0.24 + forwardLean, 0.52, 0.52, { color: bodyColor, h: 0.4, z: 0.45 + zBase });
+      w.box(0.23, 0.23 + forwardLean, 0.54, 0.54, { color: 0x1a252fff, h: 0.1, z: 0.48 + zBase });
+      w.box(0.25, 0.25 + forwardLean, 0.50, 0.50, { color: bodyColor, h: 0.5, z: 0.85 + zBase });
 
       // 4. Head, Hair & Visor on south face:
-      w.box(0.28, 0.28, 0.44, 0.44, { color: SKIN_TONE, h: 0.44, z: 1.35 + zBase });
-      w.box(0.26, 0.26, 0.48, 0.48, { color: HAIR_DARK, h: 0.18, z: 1.68 + zBase });
-      w.box(0.34, 0.70, 0.32, 0.04, { color: visorColor, h: 0.14, z: 1.48 + zBase });
+      w.box(0.28, 0.28 + forwardLean * 1.2, 0.44, 0.44, { color: SKIN_TONE, h: 0.44, z: 1.35 + zBase });
+      w.box(0.26, 0.26 + forwardLean * 1.2, 0.48, 0.48, { color: HAIR_DARK, h: 0.18, z: 1.68 + zBase });
+      w.box(0.34, 0.70 + forwardLean * 1.2, 0.32, 0.04, { color: visorColor, h: 0.14, z: 1.48 + zBase });
 
-      // 5. Near Arm (Right Arm on south-east side) — drawn AFTER torso in foreground:
-      w.box(0.74, 0.32 + armSwing, 0.14, 0.20, { color: bodyColor, h: 0.55, z: 0.7 + zBase });
-      w.box(0.74, 0.40 + armSwing, 0.14, 0.14, { color: SKIN_TONE, h: 0.16, z: 0.58 + zBase });
+      // 5. Near Arm (Right Arm on south-east side) — articulated for combat & harvesting:
+      let nearArmX = 0.74;
+      let nearArmY = 0.32 + armSwing + forwardLean;
+      let nearArmZ = 0.70 + zBase;
 
-      // 6. Weapon in near hand:
-      if (weaponCode === 1) {
+      if (actionCode === 1) {
+        // Sword slash: arm sweeps forward and across
+        nearArmX = 0.74 - slashSin * 0.22;
+        nearArmY = 0.32 + slashSin * 0.30;
+        nearArmZ = 0.70 + zBase - slashSin * 0.12;
+      } else if (actionCode === 2 || actionCode === 5) {
+        // Axe chop / Tree harvest: raises high and slams down
+        nearArmY = 0.32 + chopSin * 0.28;
+        nearArmZ = 0.70 + zBase + (1 - chopSin) * 0.32 - chopSin * 0.24;
+      } else if (actionCode === 3) {
+        // Fist punch jab
+        nearArmY = 0.32 + punchSin * 0.38;
+      } else if (actionCode === 4) {
+        // Bow draw string back
+        nearArmX = 0.64;
+        nearArmY = 0.24 - bowDrawSin * 0.14;
+        nearArmZ = 0.78 + zBase;
+      } else if (actionCode === 6) {
+        // Mining strike
+        nearArmY = 0.32 + chopSin * 0.24;
+        nearArmZ = 0.70 + zBase + (1 - chopSin) * 0.28 - chopSin * 0.26;
+      } else if (actionCode === 7) {
+        // Foraging gather
+        nearArmY = 0.48;
+        nearArmZ = 0.42 + zBase;
+      } else if (actionCode === 8) {
+        // Repair hammer
+        nearArmY = 0.38 + hammerSin * 0.08;
+        nearArmZ = 0.70 + zBase + hammerSin * 0.10;
+      } else if (actionCode === 9 || actionCode === 10) {
+        // Dig / Raise shovel scoop
+        nearArmY = 0.36 + digSin * 0.24;
+        nearArmZ = 0.70 + zBase - digSin * 0.32;
+      }
+
+      w.box(nearArmX, nearArmY, 0.14, 0.20, { color: bodyColor, h: 0.55, z: nearArmZ });
+      w.box(nearArmX, nearArmY + 0.08, 0.14, 0.14, { color: SKIN_TONE, h: 0.16, z: nearArmZ - 0.12 });
+
+      // 6. Weapon in near hand (synchronized with arm kinematics):
+      if (weaponCode === 1 || actionCode === 5) {
         // Woodsman Axe
-        w.post(0.79, 0.46, 0.3 + zBase, 0.85, woodShaft, 0.05);
-        w.box(0.75, 0.48, 0.22, 0.12, { color: bladeSteel, h: 0.28, z: 0.95 + zBase });
-      } else if (weaponCode === 2) {
+        const axeZ = nearArmZ - 0.40;
+        w.post(nearArmX + 0.05, nearArmY + 0.14, axeZ, 0.85, woodShaft, 0.05);
+        w.box(nearArmX + 0.01, nearArmY + 0.16, 0.22, 0.12, { color: bladeSteel, h: 0.28, z: axeZ + 0.65 });
+      } else if (weaponCode === 2 || actionCode === 1) {
         // Stone Blade (Sword)
-        w.box(0.77, 0.45, 0.06, 0.14, { color: bladeSteel, h: 0.95, z: 0.4 + zBase });
-        w.box(0.72, 0.44, 0.16, 0.16, { color: hiltGold, h: 0.08, z: 0.65 + zBase });
-      } else if (weaponCode === 3) {
-        // Hunting Bow
+        const swordZ = nearArmZ - 0.30;
+        w.box(nearArmX + 0.03, nearArmY + 0.13, 0.06, 0.14, { color: bladeSteel, h: 0.95, z: swordZ });
+        w.box(nearArmX - 0.02, nearArmY + 0.12, 0.16, 0.16, { color: hiltGold, h: 0.08, z: swordZ + 0.25 });
+      } else if (weaponCode === 3 && actionCode !== 4) {
+        // Hunting Bow (idle at side)
         w.box(0.74, 0.48, 0.04, 0.22, { color: woodShaft, h: 0.85, z: 0.5 + zBase });
         w.post(0.75, 0.48, 0.55 + zBase, 0.75, 0xffffffff, 0.02);
       }
 
     } else if (facing === 0) {
       // ── Facing North (W key / away from camera) ──
-      // 1. Visor on North face (draw first)
-      w.box(0.34, 0.26, 0.32, 0.04, { color: visorColor, h: 0.14, z: 1.48 + zBase });
+      // 1. Visor on North face
+      w.box(0.34, 0.26 - forwardLean * 1.2, 0.32, 0.04, { color: visorColor, h: 0.14, z: 1.48 + zBase });
 
-      // 2. Far Arm (Left Arm) — drawn BEFORE torso so torso naturally clips it
-      w.box(0.14, 0.32 + armSwing, 0.12, 0.20, { color: bodyColor, h: 0.55, z: 0.68 + zBase });
-      w.box(0.14, 0.26 + armSwing, 0.12, 0.12, { color: SKIN_TONE, h: 0.14, z: 0.56 + zBase });
+      // 2. Far Arm (Left Arm)
+      w.box(0.14, 0.32 + armSwing - forwardLean, 0.12, 0.20, { color: bodyColor, h: 0.55, z: 0.68 + zBase });
+      w.box(0.14, 0.26 + armSwing - forwardLean, 0.12, 0.12, { color: SKIN_TONE, h: 0.14, z: 0.56 + zBase });
 
       // 3. Legs
       w.box(0.26, 0.36 - swing, 0.18, 0.24, { color: BOOTS_DARK, h: 0.45 });
       w.box(0.54, 0.36 + swing, 0.18, 0.24, { color: BOOTS_DARK, h: 0.45 });
 
-      // 4. Torso (covers far arm)
-      w.box(0.24, 0.24, 0.52, 0.52, { color: bodyColor, h: 0.4, z: 0.45 + zBase });
-      w.box(0.25, 0.25, 0.50, 0.50, { color: bodyColor, h: 0.5, z: 0.85 + zBase });
+      // 4. Torso
+      w.box(0.24, 0.24 - forwardLean, 0.52, 0.52, { color: bodyColor, h: 0.4, z: 0.45 + zBase });
+      w.box(0.25, 0.25 - forwardLean, 0.50, 0.50, { color: bodyColor, h: 0.5, z: 0.85 + zBase });
 
       // 5. Head & Hair
-      w.box(0.28, 0.28, 0.44, 0.44, { color: HAIR_DARK, h: 0.44, z: 1.35 + zBase });
+      w.box(0.28, 0.28 - forwardLean * 1.2, 0.44, 0.44, { color: HAIR_DARK, h: 0.44, z: 1.35 + zBase });
 
-      // 6. Near Arm (Right Arm)
-      w.box(0.74, 0.32 - armSwing, 0.14, 0.20, { color: bodyColor, h: 0.55, z: 0.7 + zBase });
-      w.box(0.74, 0.26 - armSwing, 0.14, 0.14, { color: SKIN_TONE, h: 0.16, z: 0.58 + zBase });
+      // 6. Near Arm (Right Arm) with attack offsets
+      let nArmY = 0.32 - armSwing - forwardLean;
+      let nArmZ = 0.70 + zBase;
+      if (actionCode === 1) nArmY -= slashSin * 0.28;
+      else if (actionCode === 2 || actionCode === 5) nArmZ += (1 - chopSin) * 0.32 - chopSin * 0.24;
+      else if (actionCode === 3) nArmY -= punchSin * 0.35;
+
+      w.box(0.74, nArmY, 0.14, 0.20, { color: bodyColor, h: 0.55, z: nArmZ });
+      w.box(0.74, nArmY - 0.06, 0.14, 0.14, { color: SKIN_TONE, h: 0.16, z: nArmZ - 0.12 });
 
       // 7. Backpack on South face (facing camera, draw last)
-      w.box(0.32, 0.70, 0.36, 0.14, { color: packColor, h: 0.55, z: 0.5 + zBase });
-      w.box(0.44, 0.82, 0.12, 0.04, { color: hiltGold, h: 0.12, z: 0.7 + zBase });
+      w.box(0.32, 0.70 - forwardLean * 0.5, 0.36, 0.14, { color: packColor, h: 0.55, z: 0.5 + zBase });
+      w.box(0.44, 0.82 - forwardLean * 0.5, 0.12, 0.04, { color: hiltGold, h: 0.12, z: 0.7 + zBase });
 
     } else if (facing === 2) {
       // ── Facing East (D key / +gx) ──
       // Backpack on West side
-      w.box(0.16, 0.32, 0.14, 0.36, { color: packColor, h: 0.55, z: 0.5 + zBase });
+      w.box(0.16 - forwardLean * 0.5, 0.32, 0.14, 0.36, { color: packColor, h: 0.55, z: 0.5 + zBase });
 
-      // Far Arm (north side) — draw BEFORE torso
-      w.box(0.32 + armSwing, 0.14, 0.20, 0.12, { color: bodyColor, h: 0.55, z: 0.68 + zBase });
+      // Far Arm (north side)
+      w.box(0.32 + armSwing + forwardLean, 0.14, 0.20, 0.12, { color: bodyColor, h: 0.55, z: 0.68 + zBase });
 
       // Legs
       w.box(0.36 + swing, 0.26, 0.24, 0.18, { color: BOOTS_DARK, h: 0.45 });
       w.box(0.36 - swing, 0.54, 0.24, 0.18, { color: BOOTS_DARK, h: 0.45 });
 
-      // Torso (covers far arm)
-      w.box(0.24, 0.24, 0.52, 0.52, { color: bodyColor, h: 0.4, z: 0.45 + zBase });
-      w.box(0.25, 0.25, 0.50, 0.50, { color: bodyColor, h: 0.5, z: 0.85 + zBase });
+      // Torso
+      w.box(0.24 + forwardLean, 0.24, 0.52, 0.52, { color: bodyColor, h: 0.4, z: 0.45 + zBase });
+      w.box(0.25 + forwardLean, 0.25, 0.50, 0.50, { color: bodyColor, h: 0.5, z: 0.85 + zBase });
 
       // Head & Visor
-      w.box(0.28, 0.28, 0.44, 0.44, { color: SKIN_TONE, h: 0.44, z: 1.35 + zBase });
-      w.box(0.26, 0.26, 0.48, 0.48, { color: HAIR_DARK, h: 0.18, z: 1.68 + zBase });
-      w.box(0.70, 0.34, 0.04, 0.32, { color: visorColor, h: 0.14, z: 1.48 + zBase });
+      w.box(0.28 + forwardLean * 1.2, 0.28, 0.44, 0.44, { color: SKIN_TONE, h: 0.44, z: 1.35 + zBase });
+      w.box(0.26 + forwardLean * 1.2, 0.26, 0.48, 0.48, { color: HAIR_DARK, h: 0.18, z: 1.68 + zBase });
+      w.box(0.70 + forwardLean * 1.2, 0.34, 0.04, 0.32, { color: visorColor, h: 0.14, z: 1.48 + zBase });
 
-      // Near Arm (south side) — draw AFTER torso
-      w.box(0.32 - armSwing, 0.74, 0.20, 0.14, { color: bodyColor, h: 0.55, z: 0.7 + zBase });
-      w.box(0.40 - armSwing, 0.74, 0.14, 0.14, { color: SKIN_TONE, h: 0.16, z: 0.58 + zBase });
+      // Near Arm (south side) with articulated East thrust/swing
+      let eArmX = 0.32 - armSwing + forwardLean;
+      let eArmZ = 0.70 + zBase;
+      if (actionCode === 1) eArmX += slashSin * 0.30;
+      else if (actionCode === 2 || actionCode === 5) eArmZ += (1 - chopSin) * 0.32 - chopSin * 0.24;
+      else if (actionCode === 3) eArmX += punchSin * 0.35;
+
+      w.box(eArmX, 0.74, 0.20, 0.14, { color: bodyColor, h: 0.55, z: eArmZ });
+      w.box(eArmX + 0.08, 0.74, 0.14, 0.14, { color: SKIN_TONE, h: 0.16, z: eArmZ - 0.12 });
 
       // Weapon
-      if (weaponCode === 2) {
-        w.box(0.75, 0.46, 0.24, 0.06, { color: bladeSteel, h: 0.85, z: 0.55 + zBase });
+      if (weaponCode === 2 || actionCode === 1) {
+        w.box(eArmX + 0.43, 0.46, 0.24, 0.06, { color: bladeSteel, h: 0.85, z: eArmZ - 0.15 });
+      } else if (weaponCode === 1 || actionCode === 5) {
+        w.post(eArmX + 0.45, 0.46, eArmZ - 0.30, 0.85, woodShaft, 0.05);
+        w.box(eArmX + 0.43, 0.46, 0.12, 0.22, { color: bladeSteel, h: 0.28, z: eArmZ + 0.35 });
       }
 
     } else {
       // ── Facing West (A key / -gx) ──
-      w.box(0.26, 0.34, 0.04, 0.32, { color: visorColor, h: 0.14, z: 1.48 + zBase });
+      w.box(0.26 - forwardLean * 1.2, 0.34, 0.04, 0.32, { color: visorColor, h: 0.14, z: 1.48 + zBase });
 
-      // Far Arm (north side) — draw BEFORE torso
-      w.box(0.32 - armSwing, 0.14, 0.20, 0.12, { color: bodyColor, h: 0.55, z: 0.68 + zBase });
+      // Far Arm (north side)
+      w.box(0.32 - armSwing - forwardLean, 0.14, 0.20, 0.12, { color: bodyColor, h: 0.55, z: 0.68 + zBase });
 
       // Legs
       w.box(0.36 - swing, 0.26, 0.24, 0.18, { color: BOOTS_DARK, h: 0.45 });
       w.box(0.36 + swing, 0.54, 0.24, 0.18, { color: BOOTS_DARK, h: 0.45 });
 
       // Torso
-      w.box(0.24, 0.24, 0.52, 0.52, { color: bodyColor, h: 0.4, z: 0.45 + zBase });
-      w.box(0.25, 0.25, 0.50, 0.50, { color: bodyColor, h: 0.5, z: 0.85 + zBase });
+      w.box(0.24 - forwardLean, 0.24, 0.52, 0.52, { color: bodyColor, h: 0.4, z: 0.45 + zBase });
+      w.box(0.25 - forwardLean, 0.25, 0.50, 0.50, { color: bodyColor, h: 0.5, z: 0.85 + zBase });
 
       // Head
-      w.box(0.28, 0.28, 0.44, 0.44, { color: SKIN_TONE, h: 0.44, z: 1.35 + zBase });
-      w.box(0.26, 0.26, 0.48, 0.48, { color: HAIR_DARK, h: 0.18, z: 1.68 + zBase });
+      w.box(0.28 - forwardLean * 1.2, 0.28, 0.44, 0.44, { color: SKIN_TONE, h: 0.44, z: 1.35 + zBase });
+      w.box(0.26 - forwardLean * 1.2, 0.26, 0.48, 0.48, { color: HAIR_DARK, h: 0.18, z: 1.68 + zBase });
 
-      // Near Arm (south side) — draw AFTER torso
-      w.box(0.32 + armSwing, 0.74, 0.20, 0.14, { color: bodyColor, h: 0.55, z: 0.7 + zBase });
-      w.box(0.26 + armSwing, 0.74, 0.14, 0.14, { color: SKIN_TONE, h: 0.16, z: 0.58 + zBase });
+      // Near Arm (south side) with articulated West thrust/swing
+      let wArmX = 0.32 + armSwing - forwardLean;
+      let wArmZ = 0.70 + zBase;
+      if (actionCode === 1) wArmX -= slashSin * 0.30;
+      else if (actionCode === 2 || actionCode === 5) wArmZ += (1 - chopSin) * 0.32 - chopSin * 0.24;
+      else if (actionCode === 3) wArmX -= punchSin * 0.35;
+
+      w.box(wArmX, 0.74, 0.20, 0.14, { color: bodyColor, h: 0.55, z: wArmZ });
+      w.box(wArmX - 0.06, 0.74, 0.14, 0.14, { color: SKIN_TONE, h: 0.16, z: wArmZ - 0.12 });
 
       // Backpack on East side
-      w.box(0.70, 0.32, 0.14, 0.36, { color: packColor, h: 0.55, z: 0.5 + zBase });
+      w.box(0.70 - forwardLean * 0.5, 0.32, 0.14, 0.36, { color: packColor, h: 0.55, z: 0.5 + zBase });
     }
   };
 }
@@ -221,84 +322,103 @@ export const PLAYER_SPRITES: [SpriteDef, SpriteDef] = [
   defineSprite({ id: 'player1', w: 1, d: 1, massing: makePlayerMassing(P2_COLOR) }),
 ];
 
-// ── 1. Rabbit (Detailed Fluffy Bounding Hare with 4-Way Facing) ────────────────
+// ── 1. Rabbit (Detailed Fluffy Bounding Hare with Eating/Foraging & Fleeing Animations) ──
 
 const rabbitMassing: Massing = (w, v, _rng) => {
   const facing = v.flags & 3; // 0: 'n', 1: 's', 2: 'e', 3: 'w'
+  const stateCode = (v.flags >> 3) & 7; // 0: idle, 1: wander, 2: flee, 3: chase, 4: attack, 5: eat, 6: forage
+  const isHurt = ((v.flags >> 7) & 1) !== 0;
+
   const phase = ((v.level % 1000) / 1000);
-  // @tier-b — gentle periodic hopping arc with ground rest and subtle ear twitches
-  // Hop occurs during the first 35% of the cycle, staying grounded with gentle sniffing for the remaining 65%
-  const hop = phase < 0.35 ? Math.sin((phase / 0.35) * Math.PI) * 0.08 : 0;
-  const earTwitch = phase < 0.35 ? Math.sin((phase / 0.35) * Math.PI * 2) * 0.015 : Math.sin(phase * Math.PI * 4) * 0.006;
+  const isEating = stateCode === 5 || stateCode === 6;
+  const isFleeing = stateCode === 2;
+
+  // @tier-b — gentle hopping or frantic sprinting leaps with nibbling chewing motion
+  const hopMultiplier = isFleeing ? 1.8 : isEating ? 0.2 : 1.0;
+  const hop = phase < 0.35 ? Math.sin((phase / 0.35) * Math.PI) * 0.08 * hopMultiplier : 0;
+
+  const chewNibble = isEating ? Math.sin(phase * Math.PI * 10) * 0.02 : 0;
+  const earTwitch = isFleeing
+    ? -0.04 // Pinned back during flee
+    : isEating
+    ? Math.sin(phase * Math.PI * 6) * 0.015
+    : phase < 0.35
+    ? Math.sin((phase / 0.35) * Math.PI * 2) * 0.015
+    : Math.sin(phase * Math.PI * 4) * 0.006;
+
+  const hurtShake = isHurt ? Math.sin(phase * Math.PI * 8) * 0.03 : 0;
 
   w.shadow(0.18, 0.18, 0.64, 0.64, 0.22);
 
   if (facing === 1) {
     // ── South: Facing Camera ──
-    // Fluffy tail at north (draw first)
-    w.box(0.42, 0.14, 0.16, 0.16, { color: 0xffffffff, h: 0.18, z: 0.20 + hop });
+    // Fluffy tail at north
+    w.box(0.42, 0.14, 0.16, 0.16, { color: 0xffffffff, h: 0.18, z: 0.20 + hop + hurtShake });
 
     // Hind haunches & feet
     w.box(0.18, 0.30, 0.20, 0.32, { color: RABBIT, h: 0.28, z: 0 });
     w.box(0.62, 0.30, 0.20, 0.32, { color: RABBIT, h: 0.28, z: 0 });
 
     // Body & chest
-    w.box(0.24, 0.22, 0.52, 0.54, { color: RABBIT, h: 0.46, z: 0.12 + hop });
-    w.box(0.30, 0.48, 0.40, 0.24, { color: 0xffffffff, h: 0.30, z: 0.18 + hop });
+    w.box(0.24, 0.22, 0.52, 0.54, { color: RABBIT, h: 0.46, z: 0.12 + hop + hurtShake });
+    w.box(0.30, 0.48, 0.40, 0.24, { color: 0xffffffff, h: 0.30, z: 0.18 + hop + hurtShake });
 
-    // Front paws
-    w.box(0.28, 0.56, 0.14, 0.16, { color: RABBIT, h: 0.16, z: hop * 0.5 });
-    w.box(0.58, 0.56, 0.14, 0.16, { color: RABBIT, h: 0.16, z: hop * 0.5 });
+    // Front paws (tucked to mouth when eating)
+    const pawZ = isEating ? 0.38 + hop : hop * 0.5;
+    const pawY = isEating ? 0.62 : 0.56;
+    w.box(0.28, pawY, 0.14, 0.16, { color: RABBIT, h: 0.16, z: pawZ });
+    w.box(0.58, pawY, 0.14, 0.16, { color: RABBIT, h: 0.16, z: pawZ });
 
-    // Head, ears, snout
-    w.box(0.30, 0.42, 0.40, 0.38, { color: RABBIT, h: 0.36, z: 0.50 + hop });
-    w.box(0.38, 0.68, 0.24, 0.14, { color: 0xffffffff, h: 0.16, z: 0.54 + hop });
-    w.box(0.46, 0.78, 0.08, 0.04, { color: RABBIT_EAR, h: 0.06, z: 0.62 + hop });
+    // Head, ears, snout (chewing motion when eating)
+    const headZ = 0.50 + hop + chewNibble + hurtShake;
+    w.box(0.30, 0.42, 0.40, 0.38, { color: RABBIT, h: 0.36, z: headZ });
+    w.box(0.38, 0.68, 0.24, 0.14, { color: 0xffffffff, h: 0.16, z: headZ + 0.04 });
+    w.box(0.46, 0.78, 0.08, 0.04, { color: RABBIT_EAR, h: 0.06, z: headZ + 0.12 });
 
     // Eyes
-    w.box(0.28, 0.54, 0.04, 0.08, { color: 0x1c2833ff, h: 0.08, z: 0.68 + hop });
-    w.box(0.68, 0.54, 0.04, 0.08, { color: 0x1c2833ff, h: 0.08, z: 0.68 + hop });
+    w.box(0.28, 0.54, 0.04, 0.08, { color: 0x1c2833ff, h: 0.08, z: headZ + 0.18 });
+    w.box(0.68, 0.54, 0.04, 0.08, { color: 0x1c2833ff, h: 0.08, z: headZ + 0.18 });
 
     // Ears
-    w.post(0.36 + earTwitch, 0.38, 0.84 + hop, 0.48, RABBIT, 0.05);
-    w.post(0.36 + earTwitch, 0.40, 0.86 + hop, 0.38, RABBIT_EAR, 0.03);
-    w.post(0.60 - earTwitch, 0.38, 0.84 + hop, 0.48, RABBIT, 0.05);
-    w.post(0.60 - earTwitch, 0.40, 0.86 + hop, 0.38, RABBIT_EAR, 0.03);
+    w.post(0.36 + earTwitch, 0.38 - (isFleeing ? 0.12 : 0), headZ + 0.34, 0.48, RABBIT, 0.05);
+    w.post(0.36 + earTwitch, 0.40 - (isFleeing ? 0.12 : 0), headZ + 0.36, 0.38, RABBIT_EAR, 0.03);
+    w.post(0.60 - earTwitch, 0.38 - (isFleeing ? 0.12 : 0), headZ + 0.34, 0.48, RABBIT, 0.05);
+    w.post(0.60 - earTwitch, 0.40 - (isFleeing ? 0.12 : 0), headZ + 0.36, 0.38, RABBIT_EAR, 0.03);
 
   } else if (facing === 0) {
     // ── North: Facing Away ──
-    // Head & ears at north
-    w.box(0.30, 0.20, 0.40, 0.38, { color: RABBIT, h: 0.36, z: 0.50 + hop });
-    w.post(0.36 + earTwitch, 0.22, 0.84 + hop, 0.48, RABBIT, 0.05);
-    w.post(0.60 - earTwitch, 0.22, 0.84 + hop, 0.48, RABBIT, 0.05);
+    const headZ = 0.50 + hop + hurtShake;
+    w.box(0.30, 0.20, 0.40, 0.38, { color: RABBIT, h: 0.36, z: headZ });
+    w.post(0.36 + earTwitch, 0.22, headZ + 0.34, 0.48, RABBIT, 0.05);
+    w.post(0.60 - earTwitch, 0.22, headZ + 0.34, 0.48, RABBIT, 0.05);
 
-    // Body
-    w.box(0.24, 0.24, 0.52, 0.54, { color: RABBIT, h: 0.46, z: 0.12 + hop });
+    w.box(0.24, 0.24, 0.52, 0.54, { color: RABBIT, h: 0.46, z: 0.12 + hop + hurtShake });
     w.box(0.18, 0.38, 0.20, 0.32, { color: RABBIT, h: 0.28, z: 0 });
     w.box(0.62, 0.38, 0.20, 0.32, { color: RABBIT, h: 0.28, z: 0 });
 
-    // Fluffy tail at south (draw last)
-    w.box(0.42, 0.70, 0.16, 0.16, { color: 0xffffffff, h: 0.18, z: 0.20 + hop });
+    w.box(0.42, 0.70, 0.16, 0.16, { color: 0xffffffff, h: 0.18, z: 0.20 + hop + hurtShake });
 
   } else if (facing === 2) {
     // ── East: Facing +gx ──
-    w.box(0.14, 0.42, 0.16, 0.16, { color: 0xffffffff, h: 0.18, z: 0.20 + hop }); // Tail at west
-    w.box(0.20, 0.30, 0.28, 0.40, { color: RABBIT, h: 0.28, z: 0 }); // Haunches
+    const headZ = 0.50 + hop + chewNibble + hurtShake;
+    w.box(0.14, 0.42, 0.16, 0.16, { color: 0xffffffff, h: 0.18, z: 0.20 + hop });
+    w.box(0.20, 0.30, 0.28, 0.40, { color: RABBIT, h: 0.28, z: 0 });
     w.box(0.22, 0.24, 0.56, 0.52, { color: RABBIT, h: 0.46, z: 0.12 + hop });
-    w.box(0.46, 0.30, 0.38, 0.40, { color: RABBIT, h: 0.36, z: 0.50 + hop }); // Head at east
-    w.box(0.72, 0.38, 0.16, 0.24, { color: 0xffffffff, h: 0.16, z: 0.54 + hop }); // Snout
-    w.post(0.42 + earTwitch, 0.36, 0.84 + hop, 0.48, RABBIT, 0.05);
-    w.post(0.42 + earTwitch, 0.56, 0.84 + hop, 0.48, RABBIT, 0.05);
+    w.box(0.46, 0.30, 0.38, 0.40, { color: RABBIT, h: 0.36, z: headZ });
+    w.box(0.72, 0.38, 0.16, 0.24, { color: 0xffffffff, h: 0.16, z: headZ + 0.04 });
+    w.post(0.42 + earTwitch, 0.36, headZ + 0.34, 0.48, RABBIT, 0.05);
+    w.post(0.42 + earTwitch, 0.56, headZ + 0.34, 0.48, RABBIT, 0.05);
 
   } else {
     // ── West: Facing -gx ──
-    w.box(0.70, 0.42, 0.16, 0.16, { color: 0xffffffff, h: 0.18, z: 0.20 + hop }); // Tail at east
-    w.box(0.52, 0.30, 0.28, 0.40, { color: RABBIT, h: 0.28, z: 0 }); // Haunches
+    const headZ = 0.50 + hop + chewNibble + hurtShake;
+    w.box(0.70, 0.42, 0.16, 0.16, { color: 0xffffffff, h: 0.18, z: 0.20 + hop });
+    w.box(0.52, 0.30, 0.28, 0.40, { color: RABBIT, h: 0.28, z: 0 });
     w.box(0.22, 0.24, 0.56, 0.52, { color: RABBIT, h: 0.46, z: 0.12 + hop });
-    w.box(0.16, 0.30, 0.38, 0.40, { color: RABBIT, h: 0.36, z: 0.50 + hop }); // Head at west
-    w.box(0.12, 0.38, 0.16, 0.24, { color: 0xffffffff, h: 0.16, z: 0.54 + hop }); // Snout
-    w.post(0.54 - earTwitch, 0.36, 0.84 + hop, 0.48, RABBIT, 0.05);
-    w.post(0.54 - earTwitch, 0.56, 0.84 + hop, 0.48, RABBIT, 0.05);
+    w.box(0.16, 0.30, 0.38, 0.40, { color: RABBIT, h: 0.36, z: headZ });
+    w.box(0.12, 0.38, 0.16, 0.24, { color: 0xffffffff, h: 0.16, z: headZ + 0.04 });
+    w.post(0.54 - earTwitch, 0.36, headZ + 0.34, 0.48, RABBIT, 0.05);
+    w.post(0.54 - earTwitch, 0.56, headZ + 0.34, 0.48, RABBIT, 0.05);
   }
 };
 
@@ -306,107 +426,110 @@ export const RABBIT_SPRITE: SpriteDef = defineSprite({
   id: 'rabbit', w: 1, d: 1, massing: rabbitMassing,
 });
 
-// ── 2. Fox (Sleek Red Fox with 4-Way Facing & Articulated Legs) ────────────────
+// ── 2. Fox (Sleek Red Fox with Predatory Pounce Leap & Bushy Tail Sway) ──────────
 
 const foxMassing: Massing = (w, v, _rng) => {
   const facing = v.flags & 3;
+  const stateCode = (v.flags >> 3) & 7;
+  const isHurt = ((v.flags >> 7) & 1) !== 0;
+
   const phase = ((v.level % 1000) / 1000);
-  // @tier-b — gentle quadruped trot and swaying bushy tail
-  const legSwing = Math.sin(phase * Math.PI * 2) * 0.06;
-  const tailSway = Math.sin(phase * Math.PI * 2) * 0.07;
+  const isPouncing = stateCode === 3 || stateCode === 4; // Chase or Attack
+  const isEating = stateCode === 5 || stateCode === 6;
+
+  // @tier-b — quadruped trot, pounce leap arch, and tail sway
+  const pounceSin = isPouncing ? Math.sin(phase * Math.PI) : 0;
+  const pounceZ = pounceSin * 0.22;
+  const legSwing = isPouncing ? pounceSin * 0.12 : Math.sin(phase * Math.PI * 2) * 0.06;
+  const tailSway = Math.sin(phase * Math.PI * 2) * (isPouncing ? 0.14 : 0.07);
+  const headDip = isEating ? -0.16 + Math.sin(phase * Math.PI * 6) * 0.03 : isPouncing ? pounceSin * 0.12 : 0;
 
   w.shadow(0.12, 0.12, 0.76, 0.76, 0.26);
 
   if (facing === 1) {
     // ── South: Facing Camera ──
     // Tail at north (draw first)
-    w.box(0.42 + tailSway, 0.06, 0.22, 0.26, { color: FOX, h: 0.24, z: 0.50 });
-    w.box(0.44 + tailSway * 1.4, 0.01, 0.18, 0.18, { color: FOX_WHITE, h: 0.18, z: 0.58 });
+    w.box(0.42 + tailSway, 0.06 - (isPouncing ? 0.10 : 0), 0.22, 0.26, { color: FOX, h: 0.24, z: 0.50 + pounceZ });
+    w.box(0.44 + tailSway * 1.4, 0.01 - (isPouncing ? 0.10 : 0), 0.18, 0.18, { color: FOX_WHITE, h: 0.18, z: 0.58 + pounceZ });
 
     // 4 Legs
     w.box(0.20, 0.22 + legSwing, 0.14, 0.16, { color: FOX_DARK, h: 0.36 });
     w.box(0.66, 0.22 - legSwing, 0.14, 0.16, { color: FOX_DARK, h: 0.36 });
-    w.box(0.20, 0.62 - legSwing, 0.14, 0.16, { color: FOX_DARK, h: 0.36 });
-    w.box(0.66, 0.62 + legSwing, 0.14, 0.16, { color: FOX_DARK, h: 0.36 });
+    w.box(0.20, 0.62 - legSwing + (isPouncing ? 0.15 : 0), 0.14, 0.16, { color: FOX_DARK, h: 0.36, z: pounceZ * 0.5 });
+    w.box(0.66, 0.62 + legSwing + (isPouncing ? 0.15 : 0), 0.14, 0.16, { color: FOX_DARK, h: 0.36, z: pounceZ * 0.5 });
 
     // Body & white chest
-    w.box(0.22, 0.18, 0.56, 0.64, { color: FOX, h: 0.40, z: 0.34 });
-    w.box(0.28, 0.44, 0.44, 0.34, { color: FOX_WHITE, h: 0.32, z: 0.36 });
+    w.box(0.22, 0.18, 0.56, 0.64, { color: FOX, h: 0.40, z: 0.34 + pounceZ });
+    w.box(0.28, 0.44, 0.44, 0.34, { color: FOX_WHITE, h: 0.32, z: 0.36 + pounceZ });
 
     // Head, muzzle, ears
-    w.box(0.28, 0.52, 0.44, 0.36, { color: FOX, h: 0.36, z: 0.62 });
-    w.box(0.34, 0.76, 0.32, 0.22, { color: FOX_WHITE, h: 0.18, z: 0.62 });
-    w.box(0.44, 0.92, 0.12, 0.08, { color: FOX_DARK, h: 0.08, z: 0.70 });
-    w.box(0.30, 0.68, 0.05, 0.06, { color: WOLF_EYE, h: 0.06, z: 0.82 });
-    w.box(0.65, 0.68, 0.05, 0.06, { color: WOLF_EYE, h: 0.06, z: 0.82 });
+    const headZ = 0.62 + pounceZ + headDip;
+    w.box(0.28, 0.52 + (isPouncing ? 0.10 : 0), 0.44, 0.36, { color: FOX, h: 0.36, z: headZ });
+    w.box(0.34, 0.76 + (isPouncing ? 0.10 : 0), 0.32, 0.22, { color: FOX_WHITE, h: 0.18, z: headZ });
+    w.box(0.44, 0.92 + (isPouncing ? 0.10 : 0), 0.12, 0.08, { color: FOX_DARK, h: 0.08, z: headZ + 0.08 });
+    w.box(0.30, 0.68 + (isPouncing ? 0.10 : 0), 0.05, 0.06, { color: WOLF_EYE, h: 0.06, z: headZ + 0.20 });
+    w.box(0.65, 0.68 + (isPouncing ? 0.10 : 0), 0.05, 0.06, { color: WOLF_EYE, h: 0.06, z: headZ + 0.20 });
 
-    w.post(0.30, 0.50, 0.94, 0.22, FOX_DARK, 0.05);
-    w.post(0.31, 0.52, 0.94, 0.18, FOX_WHITE, 0.03);
-    w.post(0.66, 0.50, 0.94, 0.22, FOX_DARK, 0.05);
-    w.post(0.65, 0.52, 0.94, 0.18, FOX_WHITE, 0.03);
+    w.post(0.30, 0.50 + (isPouncing ? 0.10 : 0), headZ + 0.32, 0.22, FOX_DARK, 0.05);
+    w.post(0.31, 0.52 + (isPouncing ? 0.10 : 0), headZ + 0.32, 0.18, FOX_WHITE, 0.03);
+    w.post(0.66, 0.50 + (isPouncing ? 0.10 : 0), headZ + 0.32, 0.22, FOX_DARK, 0.05);
+    w.post(0.65, 0.52 + (isPouncing ? 0.10 : 0), headZ + 0.32, 0.18, FOX_WHITE, 0.03);
 
   } else if (facing === 0) {
     // ── North: Facing Away ──
-    // Head at north
-    w.box(0.28, 0.12, 0.44, 0.36, { color: FOX, h: 0.36, z: 0.62 });
-    w.post(0.30, 0.20, 0.94, 0.22, FOX_DARK, 0.05);
-    w.post(0.66, 0.20, 0.94, 0.22, FOX_DARK, 0.05);
+    const headZ = 0.62 + pounceZ + headDip;
+    w.box(0.28, 0.12 - (isPouncing ? 0.10 : 0), 0.44, 0.36, { color: FOX, h: 0.36, z: headZ });
+    w.post(0.30, 0.20 - (isPouncing ? 0.10 : 0), headZ + 0.32, 0.22, FOX_DARK, 0.05);
+    w.post(0.66, 0.20 - (isPouncing ? 0.10 : 0), headZ + 0.32, 0.22, FOX_DARK, 0.05);
 
-    // 4 Legs
     w.box(0.20, 0.22 - legSwing, 0.14, 0.16, { color: FOX_DARK, h: 0.36 });
     w.box(0.66, 0.22 + legSwing, 0.14, 0.16, { color: FOX_DARK, h: 0.36 });
     w.box(0.20, 0.62 + legSwing, 0.14, 0.16, { color: FOX_DARK, h: 0.36 });
     w.box(0.66, 0.62 - legSwing, 0.14, 0.16, { color: FOX_DARK, h: 0.36 });
 
-    // Body
-    w.box(0.22, 0.18, 0.56, 0.64, { color: FOX, h: 0.40, z: 0.34 });
+    w.box(0.22, 0.18, 0.56, 0.64, { color: FOX, h: 0.40, z: 0.34 + pounceZ });
 
-    // Tail at south (draw last)
-    w.box(0.42 + tailSway, 0.68, 0.22, 0.26, { color: FOX, h: 0.24, z: 0.50 });
-    w.box(0.44 + tailSway * 1.4, 0.82, 0.18, 0.18, { color: FOX_WHITE, h: 0.18, z: 0.58 });
+    w.box(0.42 + tailSway, 0.68, 0.22, 0.26, { color: FOX, h: 0.24, z: 0.50 + pounceZ });
+    w.box(0.44 + tailSway * 1.4, 0.82, 0.18, 0.18, { color: FOX_WHITE, h: 0.18, z: 0.58 + pounceZ });
 
   } else if (facing === 2) {
     // ── East: Facing +gx ──
-    w.box(0.06, 0.42 + tailSway, 0.26, 0.22, { color: FOX, h: 0.24, z: 0.50 }); // Tail at west
-    w.box(0.01, 0.44 + tailSway * 1.4, 0.18, 0.18, { color: FOX_WHITE, h: 0.18, z: 0.58 });
+    const headZ = 0.62 + pounceZ + headDip;
+    w.box(0.06, 0.42 + tailSway, 0.26, 0.22, { color: FOX, h: 0.24, z: 0.50 + pounceZ });
+    w.box(0.01, 0.44 + tailSway * 1.4, 0.18, 0.18, { color: FOX_WHITE, h: 0.18, z: 0.58 + pounceZ });
 
-    // 4 Legs
     w.box(0.22 + legSwing, 0.20, 0.16, 0.14, { color: FOX_DARK, h: 0.36 });
     w.box(0.22 - legSwing, 0.66, 0.16, 0.14, { color: FOX_DARK, h: 0.36 });
     w.box(0.62 - legSwing, 0.20, 0.16, 0.14, { color: FOX_DARK, h: 0.36 });
     w.box(0.62 + legSwing, 0.66, 0.16, 0.14, { color: FOX_DARK, h: 0.36 });
 
-    // Body
-    w.box(0.18, 0.22, 0.64, 0.56, { color: FOX, h: 0.40, z: 0.34 });
-    w.box(0.44, 0.28, 0.34, 0.44, { color: FOX_WHITE, h: 0.32, z: 0.36 });
+    w.box(0.18, 0.22, 0.64, 0.56, { color: FOX, h: 0.40, z: 0.34 + pounceZ });
+    w.box(0.44, 0.28, 0.34, 0.44, { color: FOX_WHITE, h: 0.32, z: 0.36 + pounceZ });
 
-    // Head at east
-    w.box(0.52, 0.28, 0.36, 0.44, { color: FOX, h: 0.36, z: 0.62 });
-    w.box(0.76, 0.34, 0.22, 0.32, { color: FOX_WHITE, h: 0.18, z: 0.62 });
-    w.box(0.92, 0.44, 0.08, 0.12, { color: FOX_DARK, h: 0.08, z: 0.70 });
-    w.post(0.50, 0.30, 0.94, 0.22, FOX_DARK, 0.05);
-    w.post(0.50, 0.66, 0.94, 0.22, FOX_DARK, 0.05);
+    w.box(0.52 + (isPouncing ? 0.10 : 0), 0.28, 0.36, 0.44, { color: FOX, h: 0.36, z: headZ });
+    w.box(0.76 + (isPouncing ? 0.10 : 0), 0.34, 0.22, 0.32, { color: FOX_WHITE, h: 0.18, z: headZ });
+    w.box(0.92 + (isPouncing ? 0.10 : 0), 0.44, 0.08, 0.12, { color: FOX_DARK, h: 0.08, z: headZ + 0.08 });
+    w.post(0.50 + (isPouncing ? 0.10 : 0), 0.30, headZ + 0.32, 0.22, FOX_DARK, 0.05);
+    w.post(0.50 + (isPouncing ? 0.10 : 0), 0.66, headZ + 0.32, 0.22, FOX_DARK, 0.05);
 
   } else {
     // ── West: Facing -gx ──
-    w.box(0.68, 0.42 + tailSway, 0.26, 0.22, { color: FOX, h: 0.24, z: 0.50 }); // Tail at east
-    w.box(0.82, 0.44 + tailSway * 1.4, 0.18, 0.18, { color: FOX_WHITE, h: 0.18, z: 0.58 });
+    const headZ = 0.62 + pounceZ + headDip;
+    w.box(0.68, 0.42 + tailSway, 0.26, 0.22, { color: FOX, h: 0.24, z: 0.50 + pounceZ });
+    w.box(0.82, 0.44 + tailSway * 1.4, 0.18, 0.18, { color: FOX_WHITE, h: 0.18, z: 0.58 + pounceZ });
 
-    // 4 Legs
     w.box(0.22 - legSwing, 0.20, 0.16, 0.14, { color: FOX_DARK, h: 0.36 });
     w.box(0.22 + legSwing, 0.66, 0.16, 0.14, { color: FOX_DARK, h: 0.36 });
     w.box(0.62 + legSwing, 0.20, 0.16, 0.14, { color: FOX_DARK, h: 0.36 });
     w.box(0.62 - legSwing, 0.66, 0.16, 0.14, { color: FOX_DARK, h: 0.36 });
 
-    // Body
-    w.box(0.18, 0.22, 0.64, 0.56, { color: FOX, h: 0.40, z: 0.34 });
+    w.box(0.18, 0.22, 0.64, 0.56, { color: FOX, h: 0.40, z: 0.34 + pounceZ });
 
-    // Head at west
-    w.box(0.12, 0.28, 0.36, 0.44, { color: FOX, h: 0.36, z: 0.62 });
-    w.box(0.02, 0.34, 0.22, 0.32, { color: FOX_WHITE, h: 0.18, z: 0.62 });
-    w.box(0.00, 0.44, 0.08, 0.12, { color: FOX_DARK, h: 0.08, z: 0.70 });
-    w.post(0.20, 0.30, 0.94, 0.22, FOX_DARK, 0.05);
-    w.post(0.20, 0.66, 0.94, 0.22, FOX_DARK, 0.05);
+    w.box(0.12 - (isPouncing ? 0.10 : 0), 0.28, 0.36, 0.44, { color: FOX, h: 0.36, z: headZ });
+    w.box(0.02 - (isPouncing ? 0.10 : 0), 0.34, 0.22, 0.32, { color: FOX_WHITE, h: 0.18, z: headZ });
+    w.box(0.00 - (isPouncing ? 0.10 : 0), 0.44, 0.08, 0.12, { color: FOX_DARK, h: 0.08, z: headZ + 0.08 });
+    w.post(0.20 - (isPouncing ? 0.10 : 0), 0.30, headZ + 0.32, 0.22, FOX_DARK, 0.05);
+    w.post(0.20 - (isPouncing ? 0.10 : 0), 0.66, headZ + 0.32, 0.22, FOX_DARK, 0.05);
   }
 };
 
@@ -414,21 +537,29 @@ export const FOX_SPRITE: SpriteDef = defineSprite({
   id: 'fox', w: 1, d: 1, massing: foxMassing,
 });
 
-// ── 3. Deer (Majestic Antlered Forest Stag with 4-Way Facing) ──────────────────
+// ── 3. Deer (Majestic Antlered Forest Stag with Grazing & High Bounding Gallop) ──
 
 const deerMassing: Massing = (w, v, _rng) => {
   const facing = v.flags & 3;
+  const stateCode = (v.flags >> 3) & 7;
   const phase = ((v.level % 1000) / 1000);
-  // @tier-b — graceful trotting stride & head bob
-  const legSwing = Math.sin(phase * Math.PI * 2) * 0.07;
-  const headBob = Math.sin(phase * Math.PI * 2) * 0.02;
+
+  const isGrazing = stateCode === 5 || stateCode === 6;
+  const isFleeing = stateCode === 2;
+
+  // @tier-b — graceful trotting stride or deep grazing head bend
+  const legSwing = Math.sin(phase * Math.PI * 2) * (isFleeing ? 0.14 : 0.07);
+  const grazeBend = isGrazing ? 0.55 : 0;
+  const grazeBob = isGrazing ? Math.sin(phase * Math.PI * 4) * 0.04 : 0;
+  const headBob = (Math.sin(phase * Math.PI * 2) * 0.02) - grazeBend + grazeBob;
 
   w.shadow(0.12, 0.12, 0.76, 0.76, 0.28);
 
   if (facing === 1) {
     // ── South: Facing Camera ──
-    // Tail at north (draw first)
-    w.box(0.42, 0.12, 0.16, 0.14, { color: DEER_BELLY, h: 0.20, z: 1.05 });
+    // Tail at north (raised high when fleeing)
+    const tailZ = isFleeing ? 1.25 : 1.05;
+    w.box(0.42, 0.12, 0.16, 0.14, { color: DEER_BELLY, h: 0.20, z: tailZ });
 
     // 4 Slender legs with dark cloven hooves
     w.box(0.22, 0.20 + legSwing, 0.14, 0.16, { color: DEER, h: 0.72 });
@@ -444,71 +575,78 @@ const deerMassing: Massing = (w, v, _rng) => {
     w.box(0.22, 0.18, 0.56, 0.64, { color: DEER, h: 0.52, z: 0.70 });
     w.box(0.26, 0.24, 0.48, 0.50, { color: DEER_BELLY, h: 0.22, z: 0.70 });
 
-    // Long arching neck & head
-    w.box(0.32, 0.54, 0.36, 0.32, { color: DEER, h: 0.65, z: 1.10 + headBob });
-    w.box(0.30, 0.58, 0.40, 0.36, { color: DEER, h: 0.36, z: 1.65 + headBob });
-    w.box(0.36, 0.82, 0.28, 0.18, { color: DEER_BELLY, h: 0.20, z: 1.68 + headBob });
-    w.box(0.42, 0.94, 0.16, 0.08, { color: 0x1c2833ff, h: 0.10, z: 1.76 + headBob }); // Dark nose
+    // Long arching neck & head (bends low to graze grass)
+    const neckZ = 1.10 + headBob * 0.6;
+    const hZ = 1.65 + headBob;
+    const neckY = 0.54 + (isGrazing ? 0.14 : 0);
+    const headY = 0.58 + (isGrazing ? 0.20 : 0);
+
+    w.box(0.32, neckY, 0.36, 0.32, { color: DEER, h: 0.65, z: neckZ });
+    w.box(0.30, headY, 0.40, 0.36, { color: DEER, h: 0.36, z: hZ });
+    w.box(0.36, headY + 0.24, 0.28, 0.18, { color: DEER_BELLY, h: 0.20, z: hZ + 0.03 });
+    w.box(0.42, headY + 0.36, 0.16, 0.08, { color: 0x1c2833ff, h: 0.10, z: hZ + 0.11 });
 
     // Eyes & Ears
-    w.box(0.28, 0.72, 0.04, 0.08, { color: 0x1c2833ff, h: 0.08, z: 1.84 + headBob });
-    w.box(0.68, 0.72, 0.04, 0.08, { color: 0x1c2833ff, h: 0.08, z: 1.84 + headBob });
-    w.box(0.20, 0.52, 0.12, 0.12, { color: DEER, h: 0.18, z: 1.95 + headBob });
-    w.box(0.68, 0.52, 0.12, 0.12, { color: DEER, h: 0.18, z: 1.95 + headBob });
+    w.box(0.28, headY + 0.14, 0.04, 0.08, { color: 0x1c2833ff, h: 0.08, z: hZ + 0.19 });
+    w.box(0.68, headY + 0.14, 0.04, 0.08, { color: 0x1c2833ff, h: 0.08, z: hZ + 0.19 });
+    w.box(0.20, headY - 0.06, 0.12, 0.12, { color: DEER, h: 0.18, z: hZ + 0.30 });
+    w.box(0.68, headY - 0.06, 0.12, 0.12, { color: DEER, h: 0.18, z: hZ + 0.30 });
 
     // Antlers
-    w.post(0.32, 0.56, 1.98 + headBob, 0.85, ANTLER_BONE, 0.04);
-    w.post(0.68, 0.56, 1.98 + headBob, 0.85, ANTLER_BONE, 0.04);
-    w.post(0.30, 0.72, 2.25 + headBob, 0.35, ANTLER_BONE, 0.03);
-    w.post(0.70, 0.72, 2.25 + headBob, 0.35, ANTLER_BONE, 0.03);
+    w.post(0.32, headY - 0.02, hZ + 0.33, 0.85, ANTLER_BONE, 0.04);
+    w.post(0.68, headY - 0.02, hZ + 0.33, 0.85, ANTLER_BONE, 0.04);
+    w.post(0.30, headY + 0.14, hZ + 0.60, 0.35, ANTLER_BONE, 0.03);
+    w.post(0.70, headY + 0.14, hZ + 0.60, 0.35, ANTLER_BONE, 0.03);
 
   } else if (facing === 0) {
     // ── North: Facing Away ──
-    // Head & Antlers at north
-    w.box(0.32, 0.14, 0.36, 0.32, { color: DEER, h: 0.65, z: 1.10 + headBob });
-    w.box(0.30, 0.08, 0.40, 0.36, { color: DEER, h: 0.36, z: 1.65 + headBob });
-    w.post(0.32, 0.16, 1.98 + headBob, 0.85, ANTLER_BONE, 0.04);
-    w.post(0.68, 0.16, 1.98 + headBob, 0.85, ANTLER_BONE, 0.04);
+    const hZ = 1.65 + headBob;
+    w.box(0.32, 0.14, 0.36, 0.32, { color: DEER, h: 0.65, z: 1.10 + headBob * 0.6 });
+    w.box(0.30, 0.08, 0.40, 0.36, { color: DEER, h: 0.36, z: hZ });
+    w.post(0.32, 0.16, hZ + 0.33, 0.85, ANTLER_BONE, 0.04);
+    w.post(0.68, 0.16, hZ + 0.33, 0.85, ANTLER_BONE, 0.04);
 
-    // Legs & Body
     w.box(0.22, 0.20 - legSwing, 0.14, 0.16, { color: DEER, h: 0.72 });
     w.box(0.64, 0.20 + legSwing, 0.14, 0.16, { color: DEER, h: 0.72 });
     w.box(0.22, 0.64 + legSwing, 0.14, 0.16, { color: DEER, h: 0.72 });
     w.box(0.64, 0.64 - legSwing, 0.14, 0.16, { color: DEER, h: 0.72 });
     w.box(0.22, 0.18, 0.56, 0.64, { color: DEER, h: 0.52, z: 0.70 });
 
-    // Tail at south (draw last)
-    w.box(0.42, 0.74, 0.16, 0.14, { color: DEER_BELLY, h: 0.20, z: 1.05 });
+    w.box(0.42, 0.74, 0.16, 0.14, { color: DEER_BELLY, h: 0.20, z: isFleeing ? 1.25 : 1.05 });
 
   } else if (facing === 2) {
     // ── East: Facing +gx ──
-    w.box(0.08, 0.42, 0.14, 0.16, { color: DEER_BELLY, h: 0.20, z: 1.05 }); // Tail at west
+    const hZ = 1.65 + headBob;
+    const hX = 0.58 + (isGrazing ? 0.15 : 0);
+    w.box(0.08, 0.42, 0.14, 0.16, { color: DEER_BELLY, h: 0.20, z: isFleeing ? 1.25 : 1.05 });
     w.box(0.20 + legSwing, 0.22, 0.16, 0.14, { color: DEER, h: 0.72 });
     w.box(0.20 - legSwing, 0.64, 0.16, 0.14, { color: DEER, h: 0.72 });
     w.box(0.64 - legSwing, 0.22, 0.16, 0.14, { color: DEER, h: 0.72 });
     w.box(0.64 + legSwing, 0.64, 0.16, 0.14, { color: DEER, h: 0.72 });
 
     w.box(0.18, 0.22, 0.64, 0.56, { color: DEER, h: 0.52, z: 0.70 });
-    w.box(0.54, 0.32, 0.32, 0.36, { color: DEER, h: 0.65, z: 1.10 + headBob });
-    w.box(0.58, 0.30, 0.36, 0.40, { color: DEER, h: 0.36, z: 1.65 + headBob });
-    w.box(0.82, 0.36, 0.18, 0.28, { color: DEER_BELLY, h: 0.20, z: 1.68 + headBob });
-    w.post(0.56, 0.32, 1.98 + headBob, 0.85, ANTLER_BONE, 0.04);
-    w.post(0.56, 0.68, 1.98 + headBob, 0.85, ANTLER_BONE, 0.04);
+    w.box(0.54, 0.32, 0.32, 0.36, { color: DEER, h: 0.65, z: 1.10 + headBob * 0.6 });
+    w.box(hX, 0.30, 0.36, 0.40, { color: DEER, h: 0.36, z: hZ });
+    w.box(hX + 0.24, 0.36, 0.18, 0.28, { color: DEER_BELLY, h: 0.20, z: hZ + 0.03 });
+    w.post(hX - 0.02, 0.32, hZ + 0.33, 0.85, ANTLER_BONE, 0.04);
+    w.post(hX - 0.02, 0.68, hZ + 0.33, 0.85, ANTLER_BONE, 0.04);
 
   } else {
     // ── West: Facing -gx ──
-    w.box(0.74, 0.42, 0.14, 0.16, { color: DEER_BELLY, h: 0.20, z: 1.05 }); // Tail at east
+    const hZ = 1.65 + headBob;
+    const hX = 0.08 - (isGrazing ? 0.15 : 0);
+    w.box(0.74, 0.42, 0.14, 0.16, { color: DEER_BELLY, h: 0.20, z: isFleeing ? 1.25 : 1.05 });
     w.box(0.20 - legSwing, 0.22, 0.16, 0.14, { color: DEER, h: 0.72 });
     w.box(0.20 + legSwing, 0.64, 0.16, 0.14, { color: DEER, h: 0.72 });
     w.box(0.64 + legSwing, 0.22, 0.16, 0.14, { color: DEER, h: 0.72 });
     w.box(0.64 - legSwing, 0.64, 0.16, 0.14, { color: DEER, h: 0.72 });
 
     w.box(0.18, 0.22, 0.64, 0.56, { color: DEER, h: 0.52, z: 0.70 });
-    w.box(0.14, 0.32, 0.32, 0.36, { color: DEER, h: 0.65, z: 1.10 + headBob });
-    w.box(0.08, 0.30, 0.36, 0.40, { color: DEER, h: 0.36, z: 1.65 + headBob });
-    w.box(0.00, 0.36, 0.18, 0.28, { color: DEER_BELLY, h: 0.20, z: 1.68 + headBob });
-    w.post(0.20, 0.32, 1.98 + headBob, 0.85, ANTLER_BONE, 0.04);
-    w.post(0.20, 0.68, 1.98 + headBob, 0.85, ANTLER_BONE, 0.04);
+    w.box(0.14, 0.32, 0.32, 0.36, { color: DEER, h: 0.65, z: 1.10 + headBob * 0.6 });
+    w.box(hX, 0.30, 0.36, 0.40, { color: DEER, h: 0.36, z: hZ });
+    w.box(hX - 0.08, 0.36, 0.18, 0.28, { color: DEER_BELLY, h: 0.20, z: hZ + 0.03 });
+    w.post(hX + 0.12, 0.32, hZ + 0.33, 0.85, ANTLER_BONE, 0.04);
+    w.post(hX + 0.12, 0.68, hZ + 0.33, 0.85, ANTLER_BONE, 0.04);
   }
 };
 
@@ -516,82 +654,116 @@ export const DEER_SPRITE: SpriteDef = defineSprite({
   id: 'deer', w: 1, d: 1, massing: deerMassing,
 });
 
-// ── 4. Wolf (Menacing Slate-Grey Apex Stalker with 4-Way Facing) ────────────────
+// ── 4. Wolf (Menacing Slate-Grey Apex Stalker with Snapping Fang Bite Lunge) ─────
 
 const wolfMassing: Massing = (w, v, _rng) => {
   const facing = v.flags & 3;
+  const stateCode = (v.flags >> 3) & 7;
   const phase = ((v.level % 1000) / 1000);
-  // @tier-b — predatory stalk cadence
-  const legSwing = Math.sin(phase * Math.PI * 2) * 0.07;
-  const tailSway = Math.sin(phase * Math.PI * 2) * 0.05;
+
+  const isAttacking = stateCode === 4;
+  const isChasing = stateCode === 3;
+
+  // @tier-b — predatory stalk, bite lunge, and aggressive bristling tail
+  const biteSin = isAttacking ? Math.sin(phase * Math.PI) : 0;
+  const lungeDist = biteSin * 0.38;
+  const jawGape = biteSin * 0.24;
+
+  const legSwing = isChasing ? Math.sin(phase * Math.PI * 2) * 0.12 : Math.sin(phase * Math.PI * 2) * 0.07;
+  const tailSway = Math.sin(phase * Math.PI * 2) * 0.06;
+  const tailZ = (isAttacking || isChasing) ? 0.72 : 0.54;
 
   w.shadow(0.08, 0.08, 0.84, 0.84, 0.38);
 
   if (facing === 1) {
     // ── South: Facing Camera ──
     // Tail at north (draw first)
-    w.box(0.40 + tailSway, 0.04, 0.20, 0.28, { color: WOLF, h: 0.26, z: 0.54 });
-    w.box(0.42 + tailSway * 1.4, 0.00, 0.16, 0.16, { color: WOLF_MANE, h: 0.20, z: 0.46 });
+    w.box(0.40 + tailSway, 0.04 - lungeDist * 0.3, 0.20, 0.28, { color: WOLF, h: 0.26, z: tailZ });
+    w.box(0.42 + tailSway * 1.4, 0.00 - lungeDist * 0.3, 0.16, 0.16, { color: WOLF_MANE, h: 0.20, z: tailZ - 0.08 });
 
     // 4 Legs
     w.box(0.18, 0.18 + legSwing, 0.16, 0.18, { color: WOLF, h: 0.48 });
     w.box(0.66, 0.18 - legSwing, 0.16, 0.18, { color: WOLF, h: 0.48 });
-    w.box(0.18, 0.64 - legSwing, 0.16, 0.18, { color: WOLF, h: 0.48 });
-    w.box(0.66, 0.64 + legSwing, 0.16, 0.18, { color: WOLF, h: 0.48 });
+    w.box(0.18, 0.64 - legSwing + lungeDist * 0.6, 0.16, 0.18, { color: WOLF, h: 0.48 });
+    w.box(0.66, 0.64 + legSwing + lungeDist * 0.6, 0.16, 0.18, { color: WOLF, h: 0.48 });
 
     // Body & mane
-    w.box(0.20, 0.18, 0.60, 0.64, { color: WOLF, h: 0.46, z: 0.46 });
-    w.box(0.16, 0.36, 0.68, 0.44, { color: WOLF_MANE, h: 0.54, z: 0.48 });
+    w.box(0.20, 0.18 + lungeDist * 0.4, 0.60, 0.64, { color: WOLF, h: 0.46, z: 0.46 });
+    w.box(0.16, 0.36 + lungeDist * 0.6, 0.68, 0.44, { color: WOLF_MANE, h: 0.54, z: 0.48 });
 
-    // Head, eyes, ears
-    w.box(0.26, 0.50, 0.48, 0.38, { color: WOLF, h: 0.40, z: 0.72 });
-    w.box(0.32, 0.76, 0.36, 0.24, { color: WOLF_MANE, h: 0.22, z: 0.74 });
-    w.box(0.42, 0.94, 0.16, 0.08, { color: 0x111111ff, h: 0.12, z: 0.82 }); // Black nose
+    // Head, snapping fangs, eyes, ears
+    const headY = 0.50 + lungeDist;
+    // Lower jaw
+    w.box(0.30, headY + 0.12, 0.40, 0.28, { color: WOLF_MANE, h: 0.16, z: 0.60 - jawGape * 0.5 });
+    // Upper muzzle
+    w.box(0.26, headY, 0.48, 0.38, { color: WOLF, h: 0.36, z: 0.74 + jawGape });
+    w.box(0.32, headY + 0.26, 0.36, 0.24, { color: WOLF_MANE, h: 0.22, z: 0.74 + jawGape });
+    w.box(0.42, headY + 0.44, 0.16, 0.08, { color: 0x111111ff, h: 0.12, z: 0.82 + jawGape }); // Black nose
 
-    w.box(0.28, 0.72, 0.06, 0.08, { color: WOLF_EYE, h: 0.08, z: 0.96 });
-    w.box(0.66, 0.72, 0.06, 0.08, { color: WOLF_EYE, h: 0.08, z: 0.96 });
+    // Red maw and sharp fangs when attacking
+    if (isAttacking) {
+      w.box(0.32, headY + 0.20, 0.36, 0.20, { color: 0x882222ff, h: 0.12, z: 0.68 });
+      // Upper fangs
+      w.box(0.32, headY + 0.34, 0.08, 0.08, { color: 0xffffffff, h: 0.16, z: 0.70 + jawGape });
+      w.box(0.60, headY + 0.34, 0.08, 0.08, { color: 0xffffffff, h: 0.16, z: 0.70 + jawGape });
+      // Lower fangs
+      w.box(0.35, headY + 0.30, 0.07, 0.07, { color: 0xffffffff, h: 0.14, z: 0.68 - jawGape * 0.5 });
+      w.box(0.58, headY + 0.30, 0.07, 0.07, { color: 0xffffffff, h: 0.14, z: 0.68 - jawGape * 0.5 });
+    }
 
-    w.post(0.28, 0.48, 1.10, 0.26, WOLF, 0.06);
-    w.post(0.72, 0.48, 1.10, 0.26, WOLF, 0.06);
+    w.box(0.28, headY + 0.22, 0.06, 0.08, { color: WOLF_EYE, h: 0.08, z: 0.96 + jawGape });
+    w.box(0.66, headY + 0.22, 0.06, 0.08, { color: WOLF_EYE, h: 0.08, z: 0.96 + jawGape });
+
+    w.post(0.28, headY - 0.02, 1.10 + jawGape, 0.26, WOLF, 0.06);
+    w.post(0.72, headY - 0.02, 1.10 + jawGape, 0.26, WOLF, 0.06);
 
   } else if (facing === 0) {
     // ── North: Facing Away ──
-    // Head at north
-    w.box(0.26, 0.12, 0.48, 0.38, { color: WOLF, h: 0.40, z: 0.72 });
-    w.post(0.28, 0.20, 1.10, 0.26, WOLF, 0.06);
-    w.post(0.72, 0.20, 1.10, 0.26, WOLF, 0.06);
+    const headY = 0.12 - lungeDist * 1.2;
+    w.box(0.26, headY, 0.48, 0.38, { color: WOLF, h: 0.40, z: 0.72 });
+    w.post(0.28, headY + 0.08, 1.10, 0.26, WOLF, 0.06);
+    w.post(0.72, headY + 0.08, 1.10, 0.26, WOLF, 0.06);
 
-    // Legs & Body
     w.box(0.18, 0.18 - legSwing, 0.16, 0.18, { color: WOLF, h: 0.48 });
     w.box(0.66, 0.18 + legSwing, 0.16, 0.18, { color: WOLF, h: 0.48 });
     w.box(0.18, 0.64 + legSwing, 0.16, 0.18, { color: WOLF, h: 0.48 });
     w.box(0.66, 0.64 - legSwing, 0.16, 0.18, { color: WOLF, h: 0.48 });
-    w.box(0.20, 0.18, 0.60, 0.64, { color: WOLF, h: 0.46, z: 0.46 });
+    w.box(0.20, 0.18 - lungeDist * 0.3, 0.60, 0.64, { color: WOLF, h: 0.46, z: 0.46 });
 
-    // Tail at south (draw last)
-    w.box(0.40 + tailSway, 0.74, 0.20, 0.28, { color: WOLF, h: 0.26, z: 0.54 });
+    w.box(0.40 + tailSway, 0.74 + lungeDist * 0.3, 0.20, 0.28, { color: WOLF, h: 0.26, z: tailZ });
 
   } else if (facing === 2) {
     // ── East: Facing +gx ──
-    w.box(0.04, 0.40 + tailSway, 0.28, 0.20, { color: WOLF, h: 0.26, z: 0.54 }); // Tail at west
+    const headX = 0.50 + lungeDist;
+    w.box(0.04, 0.40 + tailSway, 0.28, 0.20, { color: WOLF, h: 0.26, z: tailZ });
     w.box(0.18 + legSwing, 0.18, 0.18, 0.16, { color: WOLF, h: 0.48 });
     w.box(0.18 - legSwing, 0.66, 0.18, 0.16, { color: WOLF, h: 0.48 });
     w.box(0.64 - legSwing, 0.18, 0.18, 0.16, { color: WOLF, h: 0.48 });
-    w.box(0.64 + legSwing, 0.66, 0.18, 0.16, { color: WOLF, h: 0.48 });
+    w.box(0.64 + legSwing, 0.66, 0.16, 0.14, { color: WOLF, h: 0.48 });
 
     w.box(0.18, 0.20, 0.64, 0.60, { color: WOLF, h: 0.46, z: 0.46 });
     w.box(0.36, 0.16, 0.44, 0.68, { color: WOLF_MANE, h: 0.54, z: 0.48 });
 
-    // Head at east
-    w.box(0.50, 0.26, 0.38, 0.48, { color: WOLF, h: 0.40, z: 0.72 });
-    w.box(0.76, 0.32, 0.24, 0.36, { color: WOLF_MANE, h: 0.22, z: 0.74 });
-    w.box(0.94, 0.42, 0.08, 0.16, { color: 0x111111ff, h: 0.12, z: 0.82 });
-    w.post(0.48, 0.28, 1.10, 0.26, WOLF, 0.06);
-    w.post(0.48, 0.72, 1.10, 0.26, WOLF, 0.06);
+    // Lower jaw
+    w.box(headX + 0.10, 0.28, 0.30, 0.44, { color: WOLF_MANE, h: 0.16, z: 0.60 - jawGape * 0.5 });
+    // Upper muzzle
+    w.box(headX, 0.26, 0.38, 0.48, { color: WOLF, h: 0.36, z: 0.74 + jawGape });
+    w.box(headX + 0.26, 0.32, 0.24, 0.36, { color: WOLF_MANE, h: 0.22, z: 0.74 + jawGape });
+    w.box(headX + 0.44, 0.42, 0.08, 0.16, { color: 0x111111ff, h: 0.12, z: 0.82 + jawGape });
+
+    if (isAttacking) {
+      w.box(headX + 0.15, 0.30, 0.22, 0.40, { color: 0x882222ff, h: 0.12, z: 0.68 });
+      w.box(headX + 0.36, 0.32, 0.08, 0.08, { color: 0xffffffff, h: 0.16, z: 0.70 + jawGape });
+      w.box(headX + 0.32, 0.34, 0.08, 0.08, { color: 0xffffffff, h: 0.14, z: 0.68 - jawGape * 0.5 });
+    }
+
+    w.post(headX - 0.02, 0.28, 1.10 + jawGape, 0.26, WOLF, 0.06);
+    w.post(headX - 0.02, 0.72, 1.10 + jawGape, 0.26, WOLF, 0.06);
 
   } else {
     // ── West: Facing -gx ──
-    w.box(0.74, 0.40 + tailSway, 0.28, 0.20, { color: WOLF, h: 0.26, z: 0.54 }); // Tail at east
+    const headX = 0.12 - lungeDist;
+    w.box(0.74, 0.40 + tailSway, 0.28, 0.20, { color: WOLF, h: 0.26, z: tailZ });
     w.box(0.18 - legSwing, 0.18, 0.18, 0.16, { color: WOLF, h: 0.48 });
     w.box(0.18 + legSwing, 0.66, 0.18, 0.16, { color: WOLF, h: 0.48 });
     w.box(0.64 + legSwing, 0.18, 0.18, 0.16, { color: WOLF, h: 0.48 });
@@ -599,12 +771,21 @@ const wolfMassing: Massing = (w, v, _rng) => {
 
     w.box(0.18, 0.20, 0.64, 0.60, { color: WOLF, h: 0.46, z: 0.46 });
 
-    // Head at west
-    w.box(0.12, 0.26, 0.38, 0.48, { color: WOLF, h: 0.40, z: 0.72 });
-    w.box(0.00, 0.32, 0.24, 0.36, { color: WOLF_MANE, h: 0.22, z: 0.74 });
-    w.box(0.00, 0.42, 0.08, 0.16, { color: 0x111111ff, h: 0.12, z: 0.82 });
-    w.post(0.26, 0.28, 1.10, 0.26, WOLF, 0.06);
-    w.post(0.26, 0.72, 1.10, 0.26, WOLF, 0.06);
+    // Lower jaw
+    w.box(headX - 0.10, 0.28, 0.30, 0.44, { color: WOLF_MANE, h: 0.16, z: 0.60 - jawGape * 0.5 });
+    // Upper muzzle
+    w.box(headX, 0.26, 0.38, 0.48, { color: WOLF, h: 0.36, z: 0.74 + jawGape });
+    w.box(headX - 0.12, 0.32, 0.24, 0.36, { color: WOLF_MANE, h: 0.22, z: 0.74 + jawGape });
+    w.box(headX - 0.12, 0.42, 0.08, 0.16, { color: 0x111111ff, h: 0.12, z: 0.82 + jawGape });
+
+    if (isAttacking) {
+      w.box(headX - 0.10, 0.30, 0.22, 0.40, { color: 0x882222ff, h: 0.12, z: 0.68 });
+      w.box(headX - 0.14, 0.32, 0.08, 0.08, { color: 0xffffffff, h: 0.16, z: 0.70 + jawGape });
+      w.box(headX - 0.10, 0.34, 0.08, 0.08, { color: 0xffffffff, h: 0.14, z: 0.68 - jawGape * 0.5 });
+    }
+
+    w.post(headX + 0.14, 0.28, 1.10 + jawGape, 0.26, WOLF, 0.06);
+    w.post(headX + 0.14, 0.72, 1.10 + jawGape, 0.26, WOLF, 0.06);
   }
 };
 
@@ -612,95 +793,113 @@ export const WOLF_SPRITE: SpriteDef = defineSprite({
   id: 'wolf', w: 1, d: 1, massing: wolfMassing,
 });
 
-// ── 5. Troll (Massive 2x2 Ancient Moss-Stone Behemoth with 4-Way Facing) ───────
+// ── 5. Troll (Massive 2x2 Ancient Moss-Stone Behemoth with 2-Handed Overhead Ground Slam) ──
 
 const trollMassing: Massing = (w, v, _rng) => {
   const facing = v.flags & 3;
+  const stateCode = (v.flags >> 3) & 7;
+  const isHurt = ((v.flags >> 7) & 1) !== 0;
+
   const phase = ((v.level % 1000) / 1000);
-  // @tier-b — lumbering heavy earth-shaking stomp
-  const stompL = Math.sin(phase * Math.PI * 2) * 0.08;
+  const isAttacking = stateCode === 4;
+
+  // @tier-b — heavy earth-shaking stomp and massive two-handed overhead ground slam
+  const smashSin = isAttacking ? Math.sin(phase * Math.PI) : 0;
+  const rearUp = isAttacking && phase < 0.5 ? Math.sin(phase * 2 * Math.PI * 0.5) * 0.45 : 0;
+  const slamDown = isAttacking && phase >= 0.5 ? Math.sin((phase - 0.5) * 2 * Math.PI * 0.5) * 0.35 : 0;
+
+  const stompL = isAttacking ? 0 : Math.sin(phase * Math.PI * 2) * 0.08;
   const stompR = -stompL;
-  const sway = Math.sin(phase * Math.PI * 2) * 0.04;
+  const sway = isAttacking ? 0 : Math.sin(phase * Math.PI * 2) * 0.04;
+  const hurtShake = isHurt ? Math.sin(phase * Math.PI * 8) * 0.08 : 0;
 
   w.shadow(0.1, 0.1, 1.8, 1.8, 0.55);
 
   if (facing === 1) {
     // ── South: Facing Camera ──
     // 2 Massive stone pillar legs
-    w.box(0.24, 0.35 + stompL, 0.55, 0.65, { color: TROLL, h: 1.10 });
+    w.box(0.24, 0.35 + stompL, 0.55, 0.65, { color: TROLL, h: 1.10 + rearUp * 0.5 });
     w.box(0.20, 0.85 + stompL, 0.60, 0.30, { color: 0x3d4737ff, h: 0.35 });
 
-    w.box(1.21, 0.35 + stompR, 0.55, 0.65, { color: TROLL, h: 1.10 });
+    w.box(1.21, 0.35 + stompR, 0.55, 0.65, { color: TROLL, h: 1.10 + rearUp * 0.5 });
     w.box(1.20, 0.85 + stompR, 0.60, 0.30, { color: 0x3d4737ff, h: 0.35 });
 
     // Hunched boulder torso & mossy plates
-    w.box(0.22 + sway, 0.22, 1.56, 1.56, { color: TROLL, h: 1.50, z: 1.05 });
-    w.box(0.30 + sway, 0.15, 1.40, 1.20, { color: TROLL_MOSS, h: 0.45, z: 2.20 });
+    const torsoZ = 1.05 + rearUp - slamDown + hurtShake;
+    w.box(0.22 + sway, 0.22, 1.56, 1.56, { color: TROLL, h: 1.50, z: torsoZ });
+    w.box(0.30 + sway, 0.15, 1.40, 1.20, { color: TROLL_MOSS, h: 0.45, z: torsoZ + 1.15 });
 
-    // Tree-trunk arms with boulder knuckles
-    w.box(0.04 + sway, 0.50 - stompL * 0.8, 0.36, 0.55, { color: TROLL, h: 1.70, z: 0.40 });
-    w.box(0.02 + sway, 0.85 - stompL * 0.8, 0.40, 0.35, { color: 0x3d4737ff, h: 0.45, z: 0.15 });
+    // Overhead boulder arms (rise high during windup, slam down during strike)
+    const armZ = isAttacking
+      ? (phase < 0.5 ? 0.40 + rearUp * 2.2 : 0.40 - slamDown * 1.8)
+      : 0.40;
+    const armY = isAttacking ? 0.50 + smashSin * 0.45 : 0.50;
 
-    w.box(1.60 + sway, 0.50 - stompR * 0.8, 0.36, 0.55, { color: TROLL, h: 1.70, z: 0.40 });
-    w.box(1.58 + sway, 0.85 - stompR * 0.8, 0.40, 0.35, { color: 0x3d4737ff, h: 0.45, z: 0.15 });
+    w.box(0.04 + sway, armY - stompL * 0.8, 0.36, 0.55, { color: TROLL, h: 1.70, z: armZ });
+    w.box(0.02 + sway, armY + 0.35 - stompL * 0.8, 0.40, 0.35, { color: 0x3d4737ff, h: 0.45, z: armZ - 0.25 });
+
+    w.box(1.60 + sway, armY - stompR * 0.8, 0.36, 0.55, { color: TROLL, h: 1.70, z: armZ });
+    w.box(1.58 + sway, armY + 0.35 - stompR * 0.8, 0.40, 0.35, { color: 0x3d4737ff, h: 0.45, z: armZ - 0.25 });
 
     // Shoulder boulders
-    w.box(0.12 + sway, 0.45, 0.55, 0.65, { color: 0x5a6654ff, h: 0.65, z: 2.30 });
-    w.box(1.33 + sway, 0.45, 0.55, 0.65, { color: 0x5a6654ff, h: 0.65, z: 2.30 });
+    w.box(0.12 + sway, 0.45, 0.55, 0.65, { color: 0x5a6654ff, h: 0.65, z: torsoZ + 1.25 });
+    w.box(1.33 + sway, 0.45, 0.55, 0.65, { color: 0x5a6654ff, h: 0.65, z: torsoZ + 1.25 });
 
     // Head, glowing eyes, tusks
-    w.box(0.55 + sway, 0.80, 0.90, 0.80, { color: TROLL, h: 0.95, z: 1.65 });
-    w.box(0.50 + sway, 1.10, 1.00, 0.45, { color: TROLL_MOSS, h: 0.35, z: 2.45 });
+    const headZ = 1.65 + rearUp - slamDown + hurtShake;
+    w.box(0.55 + sway, 0.80, 0.90, 0.80, { color: TROLL, h: 0.95, z: headZ });
+    w.box(0.50 + sway, 1.10, 1.00, 0.45, { color: TROLL_MOSS, h: 0.35, z: headZ + 0.80 });
 
-    w.box(0.65 + sway, 1.48, 0.16, 0.08, { color: TROLL_EYE, h: 0.14, z: 2.15 });
-    w.box(1.19 + sway, 1.48, 0.16, 0.08, { color: TROLL_EYE, h: 0.14, z: 2.15 });
+    w.box(0.65 + sway, 1.48, 0.16, 0.08, { color: TROLL_EYE, h: 0.14, z: headZ + 0.50 });
+    w.box(1.19 + sway, 1.48, 0.16, 0.08, { color: TROLL_EYE, h: 0.14, z: headZ + 0.50 });
 
-    w.post(0.68 + sway, 1.55, 1.85, 0.45, 0xe0d6b8ff, 0.07);
-    w.post(1.24 + sway, 1.55, 1.85, 0.45, 0xe0d6b8ff, 0.07);
+    w.post(0.68 + sway, 1.55, headZ + 0.20, 0.45, 0xe0d6b8ff, 0.07);
+    w.post(1.24 + sway, 1.55, headZ + 0.20, 0.45, 0xe0d6b8ff, 0.07);
 
   } else if (facing === 0) {
     // ── North: Facing Away ──
-    // Head at north
-    w.box(0.55 + sway, 0.30, 0.90, 0.80, { color: TROLL, h: 0.95, z: 1.65 });
+    const headZ = 1.65 + rearUp - slamDown + hurtShake;
+    w.box(0.55 + sway, 0.30, 0.90, 0.80, { color: TROLL, h: 0.95, z: headZ });
 
-    // Legs
     w.box(0.24, 0.35 - stompL, 0.55, 0.65, { color: TROLL, h: 1.10 });
     w.box(1.21, 0.35 - stompR, 0.55, 0.65, { color: TROLL, h: 1.10 });
 
-    // Torso & Back
-    w.box(0.22 + sway, 0.22, 1.56, 1.56, { color: TROLL, h: 1.50, z: 1.05 });
-    w.box(0.30 + sway, 0.60, 1.40, 1.20, { color: TROLL_MOSS, h: 0.45, z: 2.20 });
+    const torsoZ = 1.05 + rearUp - slamDown + hurtShake;
+    w.box(0.22 + sway, 0.22, 1.56, 1.56, { color: TROLL, h: 1.50, z: torsoZ });
+    w.box(0.30 + sway, 0.60, 1.40, 1.20, { color: TROLL_MOSS, h: 0.45, z: torsoZ + 1.15 });
 
-    // Arms
-    w.box(0.04 + sway, 0.50 + stompL * 0.8, 0.36, 0.55, { color: TROLL, h: 1.70, z: 0.40 });
-    w.box(1.60 + sway, 0.50 + stompR * 0.8, 0.36, 0.55, { color: TROLL, h: 1.70, z: 0.40 });
+    const armZ = isAttacking ? (phase < 0.5 ? 0.40 + rearUp * 2.2 : 0.40 - slamDown * 1.8) : 0.40;
+    w.box(0.04 + sway, 0.50 + stompL * 0.8, 0.36, 0.55, { color: TROLL, h: 1.70, z: armZ });
+    w.box(1.60 + sway, 0.50 + stompR * 0.8, 0.36, 0.55, { color: TROLL, h: 1.70, z: armZ });
 
   } else if (facing === 2) {
     // ── East: Facing +gx ──
+    const torsoZ = 1.05 + rearUp - slamDown + hurtShake;
     w.box(0.35 + stompL, 0.24, 0.65, 0.55, { color: TROLL, h: 1.10 });
     w.box(0.35 + stompR, 1.21, 0.65, 0.55, { color: TROLL, h: 1.10 });
 
-    w.box(0.22, 0.22 + sway, 1.56, 1.56, { color: TROLL, h: 1.50, z: 1.05 });
-    w.box(0.15, 0.30 + sway, 1.20, 1.40, { color: TROLL_MOSS, h: 0.45, z: 2.20 });
+    w.box(0.22, 0.22 + sway, 1.56, 1.56, { color: TROLL, h: 1.50, z: torsoZ });
+    w.box(0.15, 0.30 + sway, 1.20, 1.40, { color: TROLL_MOSS, h: 0.45, z: torsoZ + 1.15 });
 
-    // Head at east (+gx)
-    w.box(0.80, 0.55 + sway, 0.80, 0.90, { color: TROLL, h: 0.95, z: 1.65 });
-    w.box(1.48, 0.65 + sway, 0.08, 0.16, { color: TROLL_EYE, h: 0.14, z: 2.15 });
-    w.box(1.48, 1.19 + sway, 0.08, 0.16, { color: TROLL_EYE, h: 0.14, z: 2.15 });
-    w.post(1.55, 0.68 + sway, 1.85, 0.45, 0xe0d6b8ff, 0.07);
+    const headZ = 1.65 + rearUp - slamDown + hurtShake;
+    w.box(0.80 + (isAttacking ? smashSin * 0.4 : 0), 0.55 + sway, 0.80, 0.90, { color: TROLL, h: 0.95, z: headZ });
+    w.box(1.48 + (isAttacking ? smashSin * 0.4 : 0), 0.65 + sway, 0.08, 0.16, { color: TROLL_EYE, h: 0.14, z: headZ + 0.50 });
+    w.box(1.48 + (isAttacking ? smashSin * 0.4 : 0), 1.19 + sway, 0.08, 0.16, { color: TROLL_EYE, h: 0.14, z: headZ + 0.50 });
+    w.post(1.55 + (isAttacking ? smashSin * 0.4 : 0), 0.68 + sway, headZ + 0.20, 0.45, 0xe0d6b8ff, 0.07);
 
   } else {
     // ── West: Facing -gx ──
+    const torsoZ = 1.05 + rearUp - slamDown + hurtShake;
     w.box(0.35 - stompL, 0.24, 0.65, 0.55, { color: TROLL, h: 1.10 });
     w.box(0.35 - stompR, 1.21, 0.65, 0.55, { color: TROLL, h: 1.10 });
 
-    w.box(0.22, 0.22 + sway, 1.56, 1.56, { color: TROLL, h: 1.50, z: 1.05 });
+    w.box(0.22, 0.22 + sway, 1.56, 1.56, { color: TROLL, h: 1.50, z: torsoZ });
 
-    // Head at west (-gx)
-    w.box(0.30, 0.55 + sway, 0.80, 0.90, { color: TROLL, h: 0.95, z: 1.65 });
-    w.box(0.16, 0.65 + sway, 0.08, 0.16, { color: TROLL_EYE, h: 0.14, z: 2.15 });
-    w.box(0.16, 1.19 + sway, 0.08, 0.16, { color: TROLL_EYE, h: 0.14, z: 2.15 });
-    w.post(0.25, 0.68 + sway, 1.85, 0.45, 0xe0d6b8ff, 0.07);
+    const headZ = 1.65 + rearUp - slamDown + hurtShake;
+    w.box(0.30 - (isAttacking ? smashSin * 0.4 : 0), 0.55 + sway, 0.80, 0.90, { color: TROLL, h: 0.95, z: headZ });
+    w.box(0.16 - (isAttacking ? smashSin * 0.4 : 0), 0.65 + sway, 0.08, 0.16, { color: TROLL_EYE, h: 0.14, z: headZ + 0.50 });
+    w.box(0.16 - (isAttacking ? smashSin * 0.4 : 0), 1.19 + sway, 0.08, 0.16, { color: TROLL_EYE, h: 0.14, z: headZ + 0.50 });
+    w.post(0.25 - (isAttacking ? smashSin * 0.4 : 0), 0.68 + sway, headZ + 0.20, 0.45, 0xe0d6b8ff, 0.07);
   }
 };
 
@@ -708,76 +907,106 @@ export const TROLL_SPRITE: SpriteDef = defineSprite({
   id: 'troll', w: 2, d: 2, massing: trollMassing,
 });
 
-// ── 5. Bear (Massive Grizzly / Brown Bear with 4-Way Facing) ───────────────────
+// ── 6. Bear (Massive Grizzly with Rearing Maul Swipe & Foraging Snout) ───────────
 
 const bearMassing: Massing = (w, v, _rng) => {
   const facing = v.flags & 3;
+  const stateCode = (v.flags >> 3) & 7;
   const phase = ((v.level % 1000) / 1000);
-  // @tier-b — lumbering heavy quad gait
+
+  const isAttacking = stateCode === 4;
+  const isEating = stateCode === 5 || stateCode === 6;
+
+  // @tier-b — rearing up on hind legs for mauling attack or grazing ground
+  const maulSin = isAttacking ? Math.sin(phase * Math.PI) : 0;
+  const rearUp = maulSin * 0.40;
+  const swipe = isAttacking ? Math.sin(phase * Math.PI * 2) * 0.25 : 0;
+
   const legSwing = Math.sin(phase * Math.PI * 2) * 0.08;
-  const headSway = Math.sin(phase * Math.PI * 2) * 0.03;
+  const headSway = Math.sin(phase * Math.PI * 2) * 0.03 + (isEating ? -0.22 + Math.sin(phase * Math.PI * 6) * 0.03 : 0);
 
   w.shadow(0.1, 0.1, 1.4, 1.4, 0.45);
 
   if (facing === 1) {
     // South: Facing camera
-    w.box(0.24, 0.24 + legSwing, 0.26, 0.28, { color: BEAR, h: 0.55 });
+    w.box(0.24, 0.24 + legSwing, 0.26, 0.28, { color: BEAR, h: 0.55 + rearUp });
     w.box(0.24, 0.24 + legSwing, 0.26, 0.28, { color: BEAR_CLAW, h: 0.12, z: 0 });
-    w.box(0.90, 0.24 - legSwing, 0.26, 0.28, { color: BEAR, h: 0.55 });
+    w.box(0.90, 0.24 - legSwing, 0.26, 0.28, { color: BEAR, h: 0.55 + rearUp });
     w.box(0.90, 0.24 - legSwing, 0.26, 0.28, { color: BEAR_CLAW, h: 0.12, z: 0 });
-    w.box(0.24, 0.88 - legSwing, 0.26, 0.28, { color: BEAR, h: 0.55 });
-    w.box(0.24, 0.88 - legSwing, 0.26, 0.28, { color: BEAR_CLAW, h: 0.12, z: 0 });
-    w.box(0.90, 0.88 + legSwing, 0.26, 0.28, { color: BEAR, h: 0.55 });
-    w.box(0.90, 0.88 + legSwing, 0.26, 0.28, { color: BEAR_CLAW, h: 0.12, z: 0 });
 
-    w.box(0.26, 0.22, 0.88, 0.96, { color: BEAR, h: 0.70, z: 0.50 });
-    w.box(0.32, 0.48, 0.76, 0.58, { color: BEAR, h: 0.85, z: 0.58 });
+    // Front paws (raise high during maul attack)
+    const fPawZ = isAttacking ? 0.70 + rearUp * 1.5 : 0;
+    const fPawY = isAttacking ? 0.88 + maulSin * 0.30 : 0.88 - legSwing;
+    w.box(0.24, fPawY, 0.26, 0.28, { color: BEAR, h: 0.55, z: fPawZ });
+    w.box(0.24, fPawY, 0.26, 0.28, { color: BEAR_CLAW, h: 0.12, z: fPawZ });
+    w.box(0.90, fPawY, 0.26, 0.28, { color: BEAR, h: 0.55, z: fPawZ + swipe });
+    w.box(0.90, fPawY, 0.26, 0.28, { color: BEAR_CLAW, h: 0.12, z: fPawZ + swipe });
 
-    w.box(0.38, 0.76, 0.64, 0.48, { color: BEAR, h: 0.50, z: 0.85 + headSway });
-    w.box(0.48, 1.08, 0.44, 0.28, { color: BEAR_MUZZLE, h: 0.28, z: 0.88 + headSway });
-    w.box(0.62, 1.30, 0.16, 0.10, { color: BEAR_NOSE, h: 0.12, z: 0.98 + headSway });
+    // Body & shoulders
+    const bodyZ = 0.50 + rearUp;
+    w.box(0.26, 0.22, 0.88, 0.96, { color: BEAR, h: 0.70, z: bodyZ });
+    w.box(0.32, 0.48, 0.76, 0.58, { color: BEAR, h: 0.85, z: bodyZ + 0.08 });
 
-    w.box(0.32, 0.70, 0.18, 0.18, { color: BEAR, h: 0.20, z: 1.35 + headSway });
-    w.box(0.90, 0.70, 0.18, 0.18, { color: BEAR, h: 0.20, z: 1.35 + headSway });
+    // Head, muzzle, ears
+    const headZ = 0.85 + rearUp + headSway;
+    w.box(0.38, 0.76 + (isAttacking ? 0.15 : 0), 0.64, 0.48, { color: BEAR, h: 0.50, z: headZ });
+    w.box(0.48, 1.08 + (isAttacking ? 0.15 : 0), 0.44, 0.28, { color: BEAR_MUZZLE, h: 0.28, z: headZ + 0.03 });
+    w.box(0.62, 1.30 + (isAttacking ? 0.15 : 0), 0.16, 0.10, { color: BEAR_NOSE, h: 0.12, z: headZ + 0.13 });
+
+    w.box(0.32, 0.70 + (isAttacking ? 0.15 : 0), 0.18, 0.18, { color: BEAR, h: 0.20, z: headZ + 0.50 });
+    w.box(0.90, 0.70 + (isAttacking ? 0.15 : 0), 0.18, 0.18, { color: BEAR, h: 0.20, z: headZ + 0.50 });
+
   } else if (facing === 0) {
     // North: Facing away
-    w.box(0.38, 0.16, 0.64, 0.48, { color: BEAR, h: 0.50, z: 0.85 + headSway });
-    w.box(0.32, 0.20, 0.18, 0.18, { color: BEAR, h: 0.20, z: 1.35 + headSway });
-    w.box(0.90, 0.20, 0.18, 0.18, { color: BEAR, h: 0.20, z: 1.35 + headSway });
+    const bodyZ = 0.50 + rearUp;
+    const headZ = 0.85 + rearUp + headSway;
+    w.box(0.38, 0.16, 0.64, 0.48, { color: BEAR, h: 0.50, z: headZ });
+    w.box(0.32, 0.20, 0.18, 0.18, { color: BEAR, h: 0.20, z: headZ + 0.50 });
+    w.box(0.90, 0.20, 0.18, 0.18, { color: BEAR, h: 0.20, z: headZ + 0.50 });
 
-    w.box(0.24, 0.24 - legSwing, 0.26, 0.28, { color: BEAR, h: 0.55 });
-    w.box(0.90, 0.24 + legSwing, 0.26, 0.28, { color: BEAR, h: 0.55 });
+    w.box(0.24, 0.24 - legSwing, 0.26, 0.28, { color: BEAR, h: 0.55 + rearUp });
+    w.box(0.90, 0.24 + legSwing, 0.26, 0.28, { color: BEAR, h: 0.55 + rearUp });
     w.box(0.24, 0.88 + legSwing, 0.26, 0.28, { color: BEAR, h: 0.55 });
     w.box(0.90, 0.88 - legSwing, 0.26, 0.28, { color: BEAR, h: 0.55 });
 
-    w.box(0.26, 0.22, 0.88, 0.96, { color: BEAR, h: 0.70, z: 0.50 });
-    w.box(0.32, 0.34, 0.76, 0.58, { color: BEAR, h: 0.85, z: 0.58 });
+    w.box(0.26, 0.22, 0.88, 0.96, { color: BEAR, h: 0.70, z: bodyZ });
+    w.box(0.32, 0.34, 0.76, 0.58, { color: BEAR, h: 0.85, z: bodyZ + 0.08 });
+
   } else if (facing === 2) {
     // East: Facing +gx
-    w.box(0.24 + legSwing, 0.24, 0.28, 0.26, { color: BEAR, h: 0.55 });
-    w.box(0.24 - legSwing, 0.90, 0.28, 0.26, { color: BEAR, h: 0.55 });
+    const bodyZ = 0.50 + rearUp;
+    const headZ = 0.85 + rearUp + headSway;
+    const hX = 0.76 + (isAttacking ? maulSin * 0.35 : 0);
+
+    w.box(0.24 + legSwing, 0.24, 0.28, 0.26, { color: BEAR, h: 0.55 + rearUp });
+    w.box(0.24 - legSwing, 0.90, 0.28, 0.26, { color: BEAR, h: 0.55 + rearUp });
     w.box(0.88 - legSwing, 0.24, 0.28, 0.26, { color: BEAR, h: 0.55 });
     w.box(0.88 + legSwing, 0.90, 0.28, 0.26, { color: BEAR, h: 0.55 });
 
-    w.box(0.22, 0.26, 0.96, 0.88, { color: BEAR, h: 0.70, z: 0.50 });
-    w.box(0.48, 0.32, 0.58, 0.76, { color: BEAR, h: 0.85, z: 0.58 });
+    w.box(0.22, 0.26, 0.96, 0.88, { color: BEAR, h: 0.70, z: bodyZ });
+    w.box(0.48, 0.32, 0.58, 0.76, { color: BEAR, h: 0.85, z: bodyZ + 0.08 });
 
-    w.box(0.76, 0.38, 0.48, 0.64, { color: BEAR, h: 0.50, z: 0.85 + headSway });
-    w.box(1.08, 0.48, 0.28, 0.44, { color: BEAR_MUZZLE, h: 0.28, z: 0.88 + headSway });
-    w.box(1.30, 0.62, 0.10, 0.16, { color: BEAR_NOSE, h: 0.12, z: 0.98 + headSway });
+    w.box(hX, 0.38, 0.48, 0.64, { color: BEAR, h: 0.50, z: headZ });
+    w.box(hX + 0.32, 0.48, 0.28, 0.44, { color: BEAR_MUZZLE, h: 0.28, z: headZ + 0.03 });
+    w.box(hX + 0.54, 0.62, 0.10, 0.16, { color: BEAR_NOSE, h: 0.12, z: headZ + 0.13 });
+
   } else {
     // West: Facing -gx
-    w.box(0.24 - legSwing, 0.24, 0.28, 0.26, { color: BEAR, h: 0.55 });
-    w.box(0.24 + legSwing, 0.90, 0.28, 0.26, { color: BEAR, h: 0.55 });
+    const bodyZ = 0.50 + rearUp;
+    const headZ = 0.85 + rearUp + headSway;
+    const hX = 0.16 - (isAttacking ? maulSin * 0.35 : 0);
+
+    w.box(0.24 - legSwing, 0.24, 0.28, 0.26, { color: BEAR, h: 0.55 + rearUp });
+    w.box(0.24 + legSwing, 0.90, 0.28, 0.26, { color: BEAR, h: 0.55 + rearUp });
     w.box(0.88 + legSwing, 0.24, 0.28, 0.26, { color: BEAR, h: 0.55 });
     w.box(0.88 - legSwing, 0.90, 0.28, 0.26, { color: BEAR, h: 0.55 });
 
-    w.box(0.22, 0.26, 0.96, 0.88, { color: BEAR, h: 0.70, z: 0.50 });
-    w.box(0.34, 0.32, 0.58, 0.76, { color: BEAR, h: 0.85, z: 0.58 });
+    w.box(0.22, 0.26, 0.96, 0.88, { color: BEAR, h: 0.70, z: bodyZ });
+    w.box(0.34, 0.32, 0.58, 0.76, { color: BEAR, h: 0.85, z: bodyZ + 0.08 });
 
-    w.box(0.16, 0.38, 0.48, 0.64, { color: BEAR, h: 0.50, z: 0.85 + headSway });
-    w.box(0.04, 0.48, 0.28, 0.44, { color: BEAR_MUZZLE, h: 0.28, z: 0.88 + headSway });
-    w.box(0.00, 0.62, 0.10, 0.16, { color: BEAR_NOSE, h: 0.12, z: 0.98 + headSway });
+    w.box(hX, 0.38, 0.48, 0.64, { color: BEAR, h: 0.50, z: headZ });
+    w.box(hX - 0.12, 0.48, 0.28, 0.44, { color: BEAR_MUZZLE, h: 0.28, z: headZ + 0.03 });
+    w.box(hX - 0.16, 0.62, 0.10, 0.16, { color: BEAR_NOSE, h: 0.12, z: headZ + 0.13 });
   }
 };
 
@@ -785,11 +1014,22 @@ export const BEAR_SPRITE: SpriteDef = defineSprite({
   id: 'bear', w: 2, d: 2, massing: bearMassing,
 });
 
-// ── 6. Wild Boar (Stout Russet Quadruped with Protruding Tusks) ────────────────
+// ── 7. Wild Boar (Stout Russet Quadruped with Tusk-Headbutt Gore Thrust) ─────────
 
 const boarMassing: Massing = (w, v, _rng) => {
   const facing = v.flags & 3;
+  const stateCode = (v.flags >> 3) & 7;
   const phase = ((v.level % 1000) / 1000);
+
+  const isAttacking = stateCode === 4;
+  const isEating = stateCode === 5 || stateCode === 6;
+
+  // @tier-b — aggressive tusk headbutt thrust or mud rooting
+  const goreSin = isAttacking ? Math.sin(phase * Math.PI) : 0;
+  const goreDist = goreSin * 0.26;
+  const goreLift = goreSin * 0.16;
+
+  const rootDip = isEating ? -0.15 + Math.sin(phase * Math.PI * 8) * 0.03 : 0;
   const legSwing = Math.sin(phase * Math.PI * 2) * 0.08;
 
   w.shadow(0.12, 0.12, 0.76, 0.76, 0.32);
@@ -798,50 +1038,62 @@ const boarMassing: Massing = (w, v, _rng) => {
     // South: Facing Camera
     w.box(0.20, 0.20 + legSwing, 0.16, 0.18, { color: BOAR_MANE, h: 0.38 });
     w.box(0.64, 0.20 - legSwing, 0.16, 0.18, { color: BOAR_MANE, h: 0.38 });
-    w.box(0.20, 0.62 - legSwing, 0.16, 0.18, { color: BOAR_MANE, h: 0.38 });
-    w.box(0.64, 0.62 + legSwing, 0.16, 0.18, { color: BOAR_MANE, h: 0.38 });
+    w.box(0.20, 0.62 - legSwing + goreDist * 0.5, 0.16, 0.18, { color: BOAR_MANE, h: 0.38 });
+    w.box(0.64, 0.62 + legSwing + goreDist * 0.5, 0.16, 0.18, { color: BOAR_MANE, h: 0.38 });
 
-    w.box(0.20, 0.18, 0.60, 0.64, { color: BOAR, h: 0.48, z: 0.32 });
-    w.box(0.38, 0.18, 0.24, 0.60, { color: BOAR_MANE, h: 0.18, z: 0.78 });
+    w.box(0.20, 0.18 + goreDist * 0.3, 0.60, 0.64, { color: BOAR, h: 0.48, z: 0.32 });
+    w.box(0.38, 0.18 + goreDist * 0.3, 0.24, 0.60, { color: BOAR_MANE, h: 0.18, z: 0.78 });
 
-    w.box(0.26, 0.52, 0.48, 0.38, { color: BOAR, h: 0.42, z: 0.56 });
-    w.box(0.32, 0.78, 0.36, 0.22, { color: BOAR_SNOUT, h: 0.26, z: 0.56 });
+    const headY = 0.52 + goreDist;
+    const headZ = 0.56 + goreLift + rootDip;
+    w.box(0.26, headY, 0.48, 0.38, { color: BOAR, h: 0.42, z: headZ });
+    w.box(0.32, headY + 0.26, 0.36, 0.22, { color: BOAR_SNOUT, h: 0.26, z: headZ });
 
-    w.post(0.24, 0.82, 0.62, 0.22, BOAR_TUSK, 0.04);
-    w.post(0.76, 0.82, 0.62, 0.22, BOAR_TUSK, 0.04);
+    // Tusks thrust up aggressively
+    w.post(0.24, headY + 0.30, headZ + 0.06, 0.22 + goreLift, BOAR_TUSK, 0.04);
+    w.post(0.76, headY + 0.30, headZ + 0.06, 0.22 + goreLift, BOAR_TUSK, 0.04);
+
   } else if (facing === 0) {
     // North: Facing Away
-    w.box(0.26, 0.12, 0.48, 0.38, { color: BOAR, h: 0.42, z: 0.56 });
+    const headY = 0.12 - goreDist;
+    const headZ = 0.56 + goreLift + rootDip;
+    w.box(0.26, headY, 0.48, 0.38, { color: BOAR, h: 0.42, z: headZ });
     w.box(0.20, 0.20 - legSwing, 0.16, 0.18, { color: BOAR_MANE, h: 0.38 });
     w.box(0.64, 0.20 + legSwing, 0.16, 0.18, { color: BOAR_MANE, h: 0.38 });
     w.box(0.20, 0.62 + legSwing, 0.16, 0.18, { color: BOAR_MANE, h: 0.38 });
     w.box(0.64, 0.62 - legSwing, 0.16, 0.18, { color: BOAR_MANE, h: 0.38 });
     w.box(0.20, 0.18, 0.60, 0.64, { color: BOAR, h: 0.48, z: 0.32 });
     w.box(0.38, 0.22, 0.24, 0.60, { color: BOAR_MANE, h: 0.18, z: 0.78 });
+
   } else if (facing === 2) {
     // East: Facing +gx
+    const headX = 0.50 + goreDist;
+    const headZ = 0.56 + goreLift + rootDip;
     w.box(0.20 + legSwing, 0.20, 0.18, 0.16, { color: BOAR_MANE, h: 0.38 });
     w.box(0.20 - legSwing, 0.64, 0.18, 0.16, { color: BOAR_MANE, h: 0.38 });
     w.box(0.62 - legSwing, 0.20, 0.18, 0.16, { color: BOAR_MANE, h: 0.38 });
     w.box(0.62 + legSwing, 0.64, 0.18, 0.16, { color: BOAR_MANE, h: 0.38 });
 
     w.box(0.18, 0.20, 0.64, 0.60, { color: BOAR, h: 0.48, z: 0.32 });
-    w.box(0.50, 0.26, 0.38, 0.48, { color: BOAR, h: 0.42, z: 0.56 });
-    w.box(0.76, 0.32, 0.22, 0.36, { color: BOAR_SNOUT, h: 0.26, z: 0.56 });
-    w.post(0.82, 0.24, 0.62, 0.22, BOAR_TUSK, 0.04);
-    w.post(0.82, 0.76, 0.62, 0.22, BOAR_TUSK, 0.04);
+    w.box(headX, 0.26, 0.38, 0.48, { color: BOAR, h: 0.42, z: headZ });
+    w.box(headX + 0.26, 0.32, 0.22, 0.36, { color: BOAR_SNOUT, h: 0.26, z: headZ });
+    w.post(headX + 0.32, 0.24, headZ + 0.06, 0.22 + goreLift, BOAR_TUSK, 0.04);
+    w.post(headX + 0.32, 0.76, headZ + 0.06, 0.22 + goreLift, BOAR_TUSK, 0.04);
+
   } else {
     // West: Facing -gx
+    const headX = 0.12 - goreDist;
+    const headZ = 0.56 + goreLift + rootDip;
     w.box(0.20 - legSwing, 0.20, 0.18, 0.16, { color: BOAR_MANE, h: 0.38 });
     w.box(0.20 + legSwing, 0.64, 0.18, 0.16, { color: BOAR_MANE, h: 0.38 });
     w.box(0.62 + legSwing, 0.20, 0.18, 0.16, { color: BOAR_MANE, h: 0.38 });
     w.box(0.62 - legSwing, 0.64, 0.18, 0.16, { color: BOAR_MANE, h: 0.38 });
 
     w.box(0.18, 0.20, 0.64, 0.60, { color: BOAR, h: 0.48, z: 0.32 });
-    w.box(0.12, 0.26, 0.38, 0.48, { color: BOAR, h: 0.42, z: 0.56 });
-    w.box(0.02, 0.32, 0.22, 0.36, { color: BOAR_SNOUT, h: 0.26, z: 0.56 });
-    w.post(0.18, 0.24, 0.62, 0.22, BOAR_TUSK, 0.04);
-    w.post(0.18, 0.76, 0.62, 0.22, BOAR_TUSK, 0.04);
+    w.box(headX, 0.26, 0.38, 0.48, { color: BOAR, h: 0.42, z: headZ });
+    w.box(headX - 0.10, 0.32, 0.22, 0.36, { color: BOAR_SNOUT, h: 0.26, z: headZ });
+    w.post(headX + 0.06, 0.24, headZ + 0.06, 0.22 + goreLift, BOAR_TUSK, 0.04);
+    w.post(headX + 0.06, 0.76, headZ + 0.06, 0.22 + goreLift, BOAR_TUSK, 0.04);
   }
 };
 
@@ -849,49 +1101,65 @@ export const BOAR_SPRITE: SpriteDef = defineSprite({
   id: 'boar', w: 1, d: 1, massing: boarMassing,
 });
 
-// ── 7. Marsh Crocodile (Armored Aquatic Reptile with Tail Sway) ────────────────
+// ── 8. Marsh Crocodile (Armored Aquatic Reptile with Explosive Gaping Jaw Snap) ──
 
 const crocMassing: Massing = (w, v, _rng) => {
   const facing = v.flags & 3;
+  const stateCode = (v.flags >> 3) & 7;
   const phase = ((v.level % 1000) / 1000);
-  const tailSway = Math.sin(phase * Math.PI * 2) * 0.12;
+
+  const isAttacking = stateCode === 4;
+
+  // @tier-b — sinuous swimming tail sway and explosive jaw snap
+  const snapSin = isAttacking ? Math.sin(phase * Math.PI) : 0;
+  const snapLunge = snapSin * 0.30;
+  const gapeZ = snapSin * 0.15;
+  const tailSway = Math.sin(phase * Math.PI * 2) * (isAttacking ? 0.20 : 0.12);
 
   w.shadow(0.06, 0.06, 0.88, 0.88, 0.35);
 
   if (facing === 1) {
     // South: Facing Camera
-    w.box(0.42 + tailSway, 0.02, 0.16, 0.34, { color: CROC, h: 0.18, z: 0.08 });
-    w.box(0.45 + tailSway * 1.5, 0.00, 0.10, 0.20, { color: CROC_RIDGE, h: 0.14, z: 0.24 });
+    w.box(0.42 + tailSway, 0.02 - snapLunge * 0.3, 0.16, 0.34, { color: CROC, h: 0.18, z: 0.08 });
+    w.box(0.45 + tailSway * 1.5, 0.00 - snapLunge * 0.3, 0.10, 0.20, { color: CROC_RIDGE, h: 0.14, z: 0.24 });
 
     w.box(0.08, 0.26, 0.18, 0.18, { color: CROC, h: 0.16, z: 0 });
     w.box(0.74, 0.26, 0.18, 0.18, { color: CROC, h: 0.16, z: 0 });
-    w.box(0.08, 0.58, 0.18, 0.18, { color: CROC, h: 0.16, z: 0 });
-    w.box(0.74, 0.58, 0.18, 0.18, { color: CROC, h: 0.16, z: 0 });
+    w.box(0.08, 0.58 + snapLunge * 0.5, 0.18, 0.18, { color: CROC, h: 0.16, z: 0 });
+    w.box(0.74, 0.58 + snapLunge * 0.5, 0.18, 0.18, { color: CROC, h: 0.16, z: 0 });
 
-    w.box(0.20, 0.20, 0.60, 0.58, { color: CROC, h: 0.24, z: 0.06 });
-    w.box(0.36, 0.22, 0.28, 0.52, { color: CROC_RIDGE, h: 0.14, z: 0.28 });
+    w.box(0.20, 0.20 + snapLunge * 0.4, 0.60, 0.58, { color: CROC, h: 0.24, z: 0.06 });
+    w.box(0.36, 0.22 + snapLunge * 0.4, 0.28, 0.52, { color: CROC_RIDGE, h: 0.14, z: 0.28 });
 
-    w.box(0.26, 0.68, 0.48, 0.38, { color: CROC, h: 0.20, z: 0.08 });
-    w.box(0.28, 0.94, 0.06, 0.08, { color: CROC_TOOTH, h: 0.10, z: 0.16 });
-    w.box(0.66, 0.94, 0.06, 0.08, { color: CROC_TOOTH, h: 0.10, z: 0.16 });
+    // Gaping jaws snap
+    const jawY = 0.68 + snapLunge;
+    w.box(0.26, jawY, 0.48, 0.38, { color: CROC, h: 0.20, z: 0.08 + gapeZ });
+    w.box(0.28, jawY + 0.26, 0.06, 0.08, { color: CROC_TOOTH, h: 0.10, z: 0.16 + gapeZ });
+    w.box(0.66, jawY + 0.26, 0.06, 0.08, { color: CROC_TOOTH, h: 0.10, z: 0.16 + gapeZ });
+
   } else if (facing === 0) {
     // North: Facing Away
-    w.box(0.26, 0.04, 0.48, 0.38, { color: CROC, h: 0.20, z: 0.08 });
+    const jawY = 0.04 - snapLunge;
+    w.box(0.26, jawY, 0.48, 0.38, { color: CROC, h: 0.20, z: 0.08 + gapeZ });
     w.box(0.20, 0.22, 0.60, 0.58, { color: CROC, h: 0.24, z: 0.06 });
     w.box(0.36, 0.26, 0.28, 0.52, { color: CROC_RIDGE, h: 0.14, z: 0.28 });
     w.box(0.42 + tailSway, 0.64, 0.16, 0.34, { color: CROC, h: 0.18, z: 0.08 });
+
   } else if (facing === 2) {
     // East: Facing +gx
+    const jawX = 0.68 + snapLunge;
     w.box(0.02, 0.42 + tailSway, 0.34, 0.16, { color: CROC, h: 0.18, z: 0.08 });
     w.box(0.20, 0.20, 0.58, 0.60, { color: CROC, h: 0.24, z: 0.06 });
     w.box(0.24, 0.36, 0.52, 0.28, { color: CROC_RIDGE, h: 0.14, z: 0.28 });
-    w.box(0.68, 0.26, 0.38, 0.48, { color: CROC, h: 0.20, z: 0.08 });
+    w.box(jawX, 0.26, 0.38, 0.48, { color: CROC, h: 0.20, z: 0.08 + gapeZ });
+
   } else {
     // West: Facing -gx
+    const jawX = 0.04 - snapLunge;
     w.box(0.64, 0.42 + tailSway, 0.34, 0.16, { color: CROC, h: 0.18, z: 0.08 });
     w.box(0.22, 0.20, 0.58, 0.60, { color: CROC, h: 0.24, z: 0.06 });
     w.box(0.24, 0.36, 0.52, 0.28, { color: CROC_RIDGE, h: 0.14, z: 0.28 });
-    w.box(0.04, 0.26, 0.38, 0.48, { color: CROC, h: 0.20, z: 0.08 });
+    w.box(jawX, 0.26, 0.38, 0.48, { color: CROC, h: 0.20, z: 0.08 + gapeZ });
   }
 };
 
@@ -945,23 +1213,38 @@ const PLAYER_VARIANT_SCRATCH: MutableVariant = {
 /**
  * Build a `Variant` for a creature.
  *
- * Encodes facing orientation, state, and walk animation phase.
+ * Encodes facing orientation, state, attack phase, and hurt reaction.
  * Reuses an internal scratch variant to guarantee zero allocations on the hot path.
  */
 export function creatureVariant(c: Creature): Variant {
   const facingCode = c.facing === 's' ? 1 : c.facing === 'e' ? 2 : c.facing === 'w' ? 3 : 0;
-  const stateCode = c.state === 'idle' ? 0 : c.state === 'wander' ? 1 : c.state === 'flee' ? 2 : c.state === 'chase' ? 3 : c.state === 'eat' ? 4 : 5;
+  const stateCode =
+    c.state === 'idle' ? 0 :
+    c.state === 'wander' ? 1 :
+    c.state === 'flee' ? 2 :
+    c.state === 'chase' ? 3 :
+    c.state === 'attack' ? 4 :
+    c.state === 'eat' ? 5 : 6;
+
+  const isHurtFlag = c.hurtTimer > 0 ? (1 << 7) : 0;
+
+  let animPhase = c.walkCycle % 1;
+  if (c.attackAnimTimer > 0 || c.state === 'attack') {
+    animPhase = Math.min(1.0, Math.max(0.0, 1.0 - c.attackAnimTimer / 0.55));
+  } else if (c.state === 'eat' || c.state === 'forage') {
+    animPhase = (c.eatTimer % 0.6) / 0.6;
+  }
 
   CREATURE_VARIANT_SCRATCH.seed = hash2(c.id, 0, 0);
-  CREATURE_VARIANT_SCRATCH.flags = facingCode | (stateCode << 3);
-  CREATURE_VARIANT_SCRATCH.level = Math.floor((c.walkCycle % 1) * 1000);
+  CREATURE_VARIANT_SCRATCH.flags = facingCode | (stateCode << 3) | isHurtFlag;
+  CREATURE_VARIANT_SCRATCH.level = Math.floor(animPhase * 1000);
   CREATURE_VARIANT_SCRATCH.progress = c.traits.size;
   CREATURE_VARIANT_SCRATCH.label = '';
   return CREATURE_VARIANT_SCRATCH;
 }
 
 /**
- * Build a `Variant` for a player — encodes facing orientation, movement, weapon, and leg stride phase.
+ * Build a `Variant` for a player — encodes facing orientation, movement, weapon, action type, and action phase.
  * Reuses an internal scratch variant to guarantee zero allocations on the hot path.
  */
 export function playerVariant(p: Player): Variant {
@@ -969,9 +1252,27 @@ export function playerVariant(p: Player): Variant {
   const isMovingFlag = p.isMoving ? 4 : 0;
   const weaponCode = p.weapon === 'hands' ? 0 : p.weapon === 'axe' ? 1 : p.weapon === 'sword' ? 2 : 3;
 
+  const actionCode =
+    p.actionType === 'sword_slash' ? 1 :
+    p.actionType === 'axe_chop' ? 2 :
+    p.actionType === 'fist_punch' ? 3 :
+    p.actionType === 'bow_draw' ? 4 :
+    p.actionType === 'chop' ? 5 :
+    p.actionType === 'mine' ? 6 :
+    p.actionType === 'forage' ? 7 :
+    p.actionType === 'repair' ? 8 :
+    p.actionType === 'dig' ? 9 :
+    p.actionType === 'raise' ? 10 : 0;
+
+  const isHurtFlag = p.hurtFlash > 0 ? (1 << 10) : 0;
+
+  const actionProgress = (p.actionDuration > 0 && p.actionTimer > 0)
+    ? Math.min(1.0, Math.max(0.0, 1.0 - p.actionTimer / p.actionDuration))
+    : 0;
+
   PLAYER_VARIANT_SCRATCH.seed = hash2(p.index, 42, 0);
-  PLAYER_VARIANT_SCRATCH.flags = facingCode | isMovingFlag | (weaponCode << 4);
-  PLAYER_VARIANT_SCRATCH.level = p.attackCooldown > 0 ? 1 : 0;
+  PLAYER_VARIANT_SCRATCH.flags = facingCode | isMovingFlag | (weaponCode << 4) | (actionCode << 6) | isHurtFlag;
+  PLAYER_VARIANT_SCRATCH.level = Math.floor(actionProgress * 1000);
   PLAYER_VARIANT_SCRATCH.progress = p.walkCycle % 1;
   PLAYER_VARIANT_SCRATCH.label = '';
   return PLAYER_VARIANT_SCRATCH;
@@ -1001,5 +1302,6 @@ export function setScratchVariant(
   VARIANT_SCRATCH.label = label;
   return VARIANT_SCRATCH;
 }
+
 
 

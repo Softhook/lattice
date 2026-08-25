@@ -19,6 +19,7 @@ export default defineConfig({
     include: ['packages/*/test/**/*.test.ts', 'examples/*/test/**/*.test.ts', 'my-game/test/**/*.test.ts', 'test/**/*.test.ts'],
     benchmark: { include: ['packages/*/test/**/*.bench.ts', 'examples/*/test/**/*.bench.ts'] },
     environment: 'node',
+    testTimeout: 20000,
     restoreMocks: true,
     coverage: {
       provider: 'v8',

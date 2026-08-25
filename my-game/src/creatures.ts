@@ -252,6 +252,10 @@ export interface Creature {
   generation: number;
   /** Foraging / eating timer in seconds. */
   eatTimer: number;
+  /** Attack animation timer in seconds. */
+  attackAnimTimer: number;
+  /** Damage reaction flinch timer in seconds. */
+  hurtTimer: number;
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -302,6 +306,8 @@ export function spawnCreature(
     rng,
     generation: parentGen,
     eatTimer: 0,
+    attackAnimTimer: 0,
+    hurtTimer: 0,
   };
 }
 
@@ -405,6 +411,13 @@ function updateOne(
   events: CreatureEvents,
 ): void {
   const def = SPECIES_REGISTRY[c.species];
+
+  if (c.attackAnimTimer > 0) {
+    c.attackAnimTimer = Math.max(0, c.attackAnimTimer - dt);
+  }
+  if (c.hurtTimer > 0) {
+    c.hurtTimer = Math.max(0, c.hurtTimer - dt);
+  }
 
   // Slow natural idle/breathing cadence
   const idleRate = c.species === 'rabbit' ? 0.15 : c.species === 'croc' ? 0.08 : 0.3;
@@ -552,22 +565,40 @@ function updateOne(
       if (bestDist < attackRangeThreshold) {
         c.state = 'attack';
 
-        if (targetType === 'player' && targetPlayer !== undefined) {
-          const baseDmg = def.attackDamage;
-          const nightDmg = baseDmg * (1 + darkness * 0.4);
-          damagePlayer(targetPlayer, dt * nightDmg * c.traits.size);
-          events.playerAttacked = true;
-          if (c.species === 'troll' || c.species === 'bear') events.roarOccurred = true;
-          if (c.species === 'wolf' && darkness > 0.3) events.howlOccurred = true;
-        } else if (targetType === 'creature' && targetCreature !== undefined) {
-          const huntDmg = def.attackDamage;
-          targetCreature.hp -= dt * huntDmg * c.traits.size;
-          if (targetCreature.hp <= 0) {
-            c.hp = Math.min(c.maxHp, c.hp + 8); // Predator heals from kill
-          }
-        } else if (targetType === 'building' && targetBuilding !== undefined) {
-          targetBuilding.hp -= dt * 32 * c.traits.size;
+        // Face towards target when attacking
+        const tdx = bestTargetGx - c.gx;
+        const tdy = bestTargetGy - c.gy;
+        if (Math.abs(tdx) > Math.abs(tdy)) {
+          c.facing = tdx > 0 ? 'e' : 'w';
+        } else {
+          c.facing = tdy > 0 ? 's' : 'n';
         }
+
+        // Trigger discrete attack strike if not currently mid-animation
+        if (c.attackAnimTimer <= 0) {
+          c.attackAnimTimer = 0.55;
+
+          if (targetType === 'player' && targetPlayer !== undefined) {
+            const baseDmg = def.attackDamage;
+            const nightDmg = baseDmg * (1 + darkness * 0.4);
+            damagePlayer(targetPlayer, nightDmg * c.traits.size * 0.35);
+            events.playerAttacked = true;
+            if (c.species === 'troll' || c.species === 'bear') events.roarOccurred = true;
+            if (c.species === 'wolf' && darkness > 0.3) events.howlOccurred = true;
+          } else if (targetType === 'creature' && targetCreature !== undefined) {
+            const huntDmg = def.attackDamage;
+            targetCreature.hp -= huntDmg * c.traits.size * 0.35;
+            targetCreature.hurtTimer = 0.35;
+            if (targetCreature.hp <= 0) {
+              c.hp = Math.min(c.maxHp, c.hp + 8); // Predator heals from kill
+            }
+          } else if (targetType === 'building' && targetBuilding !== undefined) {
+            targetBuilding.hp -= 12 * c.traits.size;
+          }
+        }
+      } else if (c.attackAnimTimer > 0) {
+        // Continue finishing attack animation swing if mid-strike
+        c.state = 'attack';
       } else {
         c.state = 'chase';
         const attackRunSpeed = def.behavior === 'ambush' ? huntSpeed * 1.5 : def.behavior === 'territorial' ? huntSpeed * 1.15 : huntSpeed;

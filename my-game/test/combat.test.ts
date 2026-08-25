@@ -6,11 +6,18 @@ import { createPlayers, canAffordWeapon, craftWeapon, cycleWeapon, craftNextAvai
 import {
   WEAPONS,
   createProjectilePool,
+  createFxPool,
+  spawnSlashFx,
+  spawnHitSparks,
+  spawnShockwave,
+  spawnHarvestDebris,
+  stepFx,
   launchArrow,
   executeAttack,
   stepProjectiles,
 } from '../src/combat.js';
-import { spawnCreature, type Creature } from '../src/creatures.js';
+import { spawnCreature, updateCreatures, type Creature } from '../src/creatures.js';
+import { playerVariant, creatureVariant } from '../src/sprites.js';
 
 describe('Combat & Weapon Crafting System', () => {
   it('defines all core weapons with valid stats and non-zero costs for craftables', () => {
@@ -117,7 +124,84 @@ describe('Combat & Weapon Crafting System', () => {
     expect(hits[0]?.hit).toBe(true);
     expect(targetCreature.hp).toBe(100 - WEAPONS.bow.damage);
     expect(activeArrow?.live).toBe(false); // Fused on impact
+  }, 15000);
+
+  it('triggers player action animations and encodes them in playerVariant', () => {
+    const [p1] = createPlayers();
+    expect(p1.actionType).toBe('none');
+    expect(p1.actionTimer).toBe(0);
+
+    const pool = createProjectilePool();
+    const wolf = spawnCreature('wolf', 10.5, 10.0, 1);
+    p1.gx = 10;
+    p1.gy = 10;
+    p1.facing = 'e';
+    p1.weapon = 'sword';
+
+    executeAttack(p1, [wolf], pool, 0);
+    expect(p1.actionType).toBe('sword_slash');
+    expect(p1.actionTimer).toBeGreaterThan(0);
+    expect(wolf.hurtTimer).toBeGreaterThan(0);
+
+    const v = playerVariant(p1);
+    const actionCode = (v.flags >> 6) & 15;
+    expect(actionCode).toBe(1); // 1: sword_slash
   });
 
+  it('manages visual FX particle pool without heap allocations', () => {
+    const fxPool = createFxPool();
+    expect(fxPool.length).toBe(256);
+    expect(fxPool.every((fx) => !fx.live)).toBe(true);
+
+    spawnSlashFx(fxPool, 10, 10, 0, 'e', 0xffffffff);
+    const activeSlash = fxPool.find((fx) => fx.live && fx.kind === 'slash');
+    expect(activeSlash).toBeDefined();
+    expect(activeSlash?.lifeSec).toBeGreaterThan(0);
+
+    spawnHitSparks(fxPool, 10, 10, 0, 0xffd54fff, 4);
+    const sparks = fxPool.filter((fx) => fx.live && fx.kind === 'spark');
+    expect(sparks.length).toBe(4);
+
+    spawnShockwave(fxPool, 10, 10, 0, 0x8a6040ff, 1.5);
+    const shockwaves = fxPool.filter((fx) => fx.live && fx.kind === 'shockwave');
+    expect(shockwaves.length).toBe(1);
+
+    spawnHarvestDebris(fxPool, 10, 10, 0, 0x2ecc71ff, 5);
+    const debris = fxPool.filter((fx) => fx.live && fx.kind === 'debris');
+    expect(debris.length).toBe(5);
+
+    // Step FX
+    stepFx(fxPool, 0.1);
+    expect(activeSlash?.lifeSec).toBeLessThan(0.22);
+  });
+
+  it('plays wolf attack animation cycle smoothly without timer resets', () => {
+    const [p1] = createPlayers();
+    p1.gx = 10;
+    p1.gy = 10;
+
+    const world = createWorld(42);
+    const wolf = spawnCreature('wolf', 10.5, 10.0, 1);
+    wolf.traits.aggression = 1.0;
+    const creatures = [wolf];
+
+    // First update tick: wolf enters attack range, triggers attack animation (0.55s)
+    const events1 = updateCreatures(creatures, world, [p1], [], [], 0, 1 / 60);
+    expect(wolf.state).toBe('attack');
+    expect(wolf.attackAnimTimer).toBeGreaterThan(0.5);
+    expect(events1.playerAttacked).toBe(true);
+
+    const v1 = creatureVariant(wolf);
+    const stateCode1 = (v1.flags >> 3) & 7;
+    expect(stateCode1).toBe(4); // 4 = attack
+
+    // Next tick: timer counts down smoothly and is NOT reset to 0.55
+    updateCreatures(creatures, world, [p1], [], [], 0, 0.2);
+    expect(wolf.attackAnimTimer).toBeLessThan(0.4);
+    expect(wolf.attackAnimTimer).toBeGreaterThan(0);
+
+    const v2 = creatureVariant(wolf);
+    expect(v2.level).toBeGreaterThan(0); // Progress is advancing smoothly
+  }, 15000);
 });
 

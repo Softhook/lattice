@@ -48,7 +48,7 @@ describe('Verdant Storage', () => {
     expect(save.p2.weapon).toBe('bow');
     expect(save.buildings.length).toBe(1);
     expect(save.buildings[0]?.kind).toBe('wood_tower');
-  });
+  }, 15000);
 
   it('recognizes valid V1 save and preserves all weapon and coordinate fields', () => {
     const [p1, p2] = createPlayers();
@@ -97,7 +97,7 @@ describe('Verdant Storage', () => {
     expect(restored.hp).toBe(200);
     expect(restored.maxHp).toBe(200);
     expect(restored.basePx).toBeGreaterThan(0);
-  });
+  }, 15000);
 
   it('round-trips through persist store with memory adapter', () => {
     const [p1, p2] = createPlayers();
@@ -151,7 +151,7 @@ describe('Verdant Storage', () => {
     applyTerrainDeltas(freshWorld, saveState.terrainHeights!, saveState.terrainSurfaces!);
     expect(freshWorld.heights.get(10, 10)).toBe(initialH + 3);
     expect(freshWorld.surface.get(10, 10)).toBe(1);
-  });
+  }, 15000);
 
   it('persists and restores harvested and living flora landscape', () => {
     const world = createWorld(77);

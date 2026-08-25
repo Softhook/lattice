@@ -12,11 +12,12 @@
 
 import { clamp } from '@latticekit/core';
 import { heightAt } from '@latticekit/iso';
+import { hex, type Rgba } from '@latticekit/draw';
 import type { WorldTerrain } from './world.js';
 import { W, H } from './world.js';
 import { SPECIES_REGISTRY, type Species, type Creature } from './creatures.js';
 import type { Player } from './players.js';
-import { facingTile } from './players.js';
+import { facingTile, triggerPlayerAction } from './players.js';
 
 export type WeaponKind = 'hands' | 'axe' | 'sword' | 'bow';
 
@@ -86,6 +87,200 @@ export const WEAPONS: Record<WeaponKind, WeaponDef> = {
 };
 
 export const CRAFTABLE_WEAPONS: readonly WeaponKind[] = ['axe', 'sword', 'bow'];
+
+// ── Combat & Harvest Visual FX (Zero Heap Allocation) ───────────────────────────
+
+export type FxKind = 'slash' | 'spark' | 'shockwave' | 'debris';
+
+export interface VisualFx {
+  live: boolean;
+  kind: FxKind;
+  gx: number;
+  gy: number;
+  z: number;
+  vx: number;
+  vy: number;
+  vz: number;
+  facing: 'n' | 's' | 'e' | 'w';
+  color: Rgba;
+  size: number;
+  lifeSec: number;
+  maxLifeSec: number;
+}
+
+export const MAX_FX = 256;
+
+/** Fast deterministic linear congruential generator for particle kinematics. */
+let fxSeed = 1337;
+function fxRand(): number {
+  fxSeed = (fxSeed * 1664525 + 1013904223) >>> 0;
+  return (fxSeed & 0xffff) / 65536;
+}
+
+/** Pre-allocated FX pool for zero per-frame garbage collection allocations. */
+export function createFxPool(): VisualFx[] {
+  const pool: VisualFx[] = [];
+  for (let i = 0; i < MAX_FX; i++) {
+    pool.push({
+      live: false,
+      kind: 'slash',
+      gx: 0,
+      gy: 0,
+      z: 0,
+      vx: 0,
+      vy: 0,
+      vz: 0,
+      facing: 's',
+      color: 0xffffffff,
+      size: 1,
+      lifeSec: 0,
+      maxLifeSec: 0.2,
+    });
+  }
+  return pool;
+}
+
+/** Spawn an animated curved crescent slash arc in front of the attacker. */
+export function spawnSlashFx(
+  pool: VisualFx[],
+  gx: number,
+  gy: number,
+  z: number,
+  facing: 'n' | 's' | 'e' | 'w',
+  color: Rgba = 0xffffffff,
+  size = 1.1,
+): void {
+  for (let i = 0; i < pool.length; i++) {
+    const fx = pool[i];
+    if (fx !== undefined && !fx.live) {
+      fx.live = true;
+      fx.kind = 'slash';
+      fx.gx = gx;
+      fx.gy = gy;
+      fx.z = z;
+      fx.vx = 0;
+      fx.vy = 0;
+      fx.vz = 0;
+      fx.facing = facing;
+      fx.color = color;
+      fx.size = size;
+      fx.lifeSec = 0.18;
+      fx.maxLifeSec = 0.18;
+      return;
+    }
+  }
+}
+
+/** Spawn bright directional impact sparks on strike contact. */
+export function spawnHitSparks(
+  pool: VisualFx[],
+  gx: number,
+  gy: number,
+  z: number,
+  color: Rgba = hex('#ffcc00'),
+  count = 6,
+): void {
+  let spawned = 0;
+  for (let i = 0; i < pool.length && spawned < count; i++) {
+    const fx = pool[i];
+    if (fx !== undefined && !fx.live) {
+      fx.live = true;
+      fx.kind = 'spark';
+      fx.gx = gx + (fxRand() - 0.5) * 0.3;
+      fx.gy = gy + (fxRand() - 0.5) * 0.3;
+      fx.z = z + (fxRand() - 0.5) * 8;
+      fx.vx = (fxRand() - 0.5) * 5;
+      fx.vy = (fxRand() - 0.5) * 5;
+      fx.vz = 35 + fxRand() * 35;
+      fx.facing = 's';
+      fx.color = color;
+      fx.size = 2.2;
+      fx.lifeSec = 0.22;
+      fx.maxLifeSec = 0.22;
+      spawned++;
+    }
+  }
+}
+
+/** Spawn an expanding ground shockwave ring. */
+export function spawnShockwave(
+  pool: VisualFx[],
+  gx: number,
+  gy: number,
+  z: number,
+  color: Rgba = hex('#bdc3c7'),
+  size = 2.4,
+): void {
+  for (let i = 0; i < pool.length; i++) {
+    const fx = pool[i];
+    if (fx !== undefined && !fx.live) {
+      fx.live = true;
+      fx.kind = 'shockwave';
+      fx.gx = gx;
+      fx.gy = gy;
+      fx.z = z;
+      fx.vx = 0;
+      fx.vy = 0;
+      fx.vz = 0;
+      fx.facing = 's';
+      fx.color = color;
+      fx.size = size;
+      fx.lifeSec = 0.36;
+      fx.maxLifeSec = 0.36;
+      return;
+    }
+  }
+}
+
+/** Spawn flying harvest splinters, stone chips, petals, or dirt debris. */
+export function spawnHarvestDebris(
+  pool: VisualFx[],
+  gx: number,
+  gy: number,
+  z: number,
+  color: Rgba,
+  count = 6,
+): void {
+  let spawned = 0;
+  for (let i = 0; i < pool.length && spawned < count; i++) {
+    const fx = pool[i];
+    if (fx !== undefined && !fx.live) {
+      fx.live = true;
+      fx.kind = 'debris';
+      fx.gx = gx + (fxRand() - 0.5) * 0.35;
+      fx.gy = gy + (fxRand() - 0.5) * 0.35;
+      fx.z = z + 4 + fxRand() * 8;
+      fx.vx = (fxRand() - 0.5) * 4;
+      fx.vy = (fxRand() - 0.5) * 4;
+      fx.vz = 25 + fxRand() * 30;
+      fx.facing = 's';
+      fx.color = color;
+      fx.size = 2.4;
+      fx.lifeSec = 0.32;
+      fx.maxLifeSec = 0.32;
+      spawned++;
+    }
+  }
+}
+
+/** Step all active FX particles and update lifecycles. */
+export function stepFx(pool: VisualFx[], dt: number): void {
+  for (let i = 0; i < pool.length; i++) {
+    const fx = pool[i];
+    if (fx === undefined || !fx.live) continue;
+    fx.lifeSec -= dt;
+    if (fx.lifeSec <= 0) {
+      fx.live = false;
+      continue;
+    }
+    if (fx.kind === 'spark' || fx.kind === 'debris') {
+      fx.gx += fx.vx * dt;
+      fx.gy += fx.vy * dt;
+      fx.vz -= 280 * dt; // gravity
+      fx.z += fx.vz * dt;
+    }
+  }
+}
 
 // ── 3D Ballistic Projectiles (Arrows) ───────────────────────────────────────────
 
@@ -177,18 +372,20 @@ export interface AttackResult {
   msg: string;
 }
 
-/** Perform an attack with the player's equipped weapon. */
+/** Perform an attack with the player's equipped weapon and trigger animations & effects. */
 export function executeAttack(
   player: Player,
   creatures: Creature[],
   projectiles: Projectile[],
   baseHeightPx: number,
+  fxPool?: VisualFx[],
 ): AttackResult {
   const weapon = WEAPONS[player.weapon];
 
   if (weapon.isRanged) {
     const fired = launchArrow(projectiles, player, baseHeightPx);
     player.attackCooldown = weapon.cooldownSec;
+    triggerPlayerAction(player, 'bow_draw', 0.35);
     return {
       hit: fired,
       damageDealt: 0,
@@ -196,6 +393,29 @@ export function executeAttack(
       isRanged: true,
       msg: fired ? 'SHOT ARROW' : '',
     };
+  }
+
+  // Trigger articulated weapon strike animation
+  if (player.weapon === 'sword') {
+    triggerPlayerAction(player, 'sword_slash', 0.24);
+  } else if (player.weapon === 'axe') {
+    triggerPlayerAction(player, 'axe_chop', 0.32);
+  } else {
+    triggerPlayerAction(player, 'fist_punch', 0.20);
+  }
+
+  // Spawn visual slash arc in front of player
+  if (fxPool !== undefined && (player.weapon === 'sword' || player.weapon === 'axe')) {
+    const fTile = facingTile(player, 0.75);
+    spawnSlashFx(
+      fxPool,
+      fTile.gx,
+      fTile.gy,
+      baseHeightPx + 14,
+      player.facing,
+      player.weapon === 'sword' ? hex('#81ecec') : hex('#fab1a0'),
+      player.weapon === 'axe' ? 1.4 : 1.2,
+    );
   }
 
   // Melee attack: check creatures in facing direction cone
@@ -228,6 +448,7 @@ export function executeAttack(
   if (targetCreature !== undefined) {
     const dmg = weapon.damage;
     targetCreature.hp -= dmg;
+    targetCreature.hurtTimer = 0.25; // Trigger creature damage flinch
 
     // Apply knockback
     let kx = 0;
@@ -242,6 +463,11 @@ export function executeAttack(
     targetCreature.gy = clamp(targetCreature.gy + ky, 2, H - 3);
     targetCreature.idleTimer = 0.4;
     targetCreature.state = targetCreature.species === 'troll' || targetCreature.species === 'wolf' ? 'chase' : 'flee';
+
+    // Spawn impact hit sparks
+    if (fxPool !== undefined) {
+      spawnHitSparks(fxPool, targetCreature.gx, targetCreature.gy, baseHeightPx + 12, hex('#ff7675'), 8);
+    }
 
     const killed = targetCreature.hp <= 0;
     if (killed) {
@@ -280,6 +506,7 @@ export function stepProjectiles(
   players: readonly [Player, Player],
   world: WorldTerrain,
   dt: number,
+  fxPool?: VisualFx[],
 ): readonly AttackResult[] {
   HIT_EVENTS_SCRATCH.length = 0;
 
@@ -306,7 +533,10 @@ export function stepProjectiles(
 
     const groundH = heightAt(world.field, p.x, p.y);
     if (p.z <= groundH) {
-      // Landed on ground
+      // Landed on ground — spawn a few subtle dust particles
+      if (fxPool !== undefined) {
+        spawnHarvestDebris(fxPool, p.x, p.y, groundH, hex('#8d6e63'), 3);
+      }
       p.live = false;
       continue;
     }
@@ -322,12 +552,17 @@ export function stepProjectiles(
 
       if (distSq < 0.75 * 0.75) {
         c.hp -= p.damage;
+        c.hurtTimer = 0.25; // Trigger hit flinch
         // Knockback along projectile vector
         const mag = Math.sqrt(p.vx * p.vx + p.vy * p.vy) || 1; // @tier-b
         c.gx = clamp(c.gx + (p.vx / mag) * 0.6, 2, W - 3);
         c.gy = clamp(c.gy + (p.vy / mag) * 0.6, 2, H - 3);
         c.idleTimer = 0.3;
         c.state = c.species === 'troll' || c.species === 'wolf' ? 'chase' : 'flee';
+
+        if (fxPool !== undefined) {
+          spawnHitSparks(fxPool, c.gx, c.gy, p.z, hex('#ff7675'), 8);
+        }
 
         const killed = c.hp <= 0;
         const shooter = players[p.shooterIndex];

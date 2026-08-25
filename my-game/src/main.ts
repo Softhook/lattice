@@ -34,6 +34,7 @@ import {
 import {
   createPlayers,
   movePlayer,
+  facingTile,
   buildAtFacing,
   interactAtFacing,
   digAtFacing,
@@ -66,6 +67,9 @@ import { createGameAudio } from './audio.js';
 import { createVerdantStore, extractSaveState } from './storage.js';
 import {
   createProjectilePool,
+  createFxPool,
+  stepFx,
+  spawnHarvestDebris,
   executeAttack,
   stepProjectiles,
 } from './combat.js';
@@ -273,6 +277,7 @@ let currentDarkness = 0;
 let autosaveTimer = 0;
 let prevDaylight = 1.0;
 const projectiles = createProjectilePool();
+const fxPool = createFxPool();
 
 loop.onUpdate((dt, tick) => {
   input.tick(tick);
@@ -317,13 +322,19 @@ loop.onUpdate((dt, tick) => {
         }
       } else {
         // Contextual: Interact (Flora harvest, building repair, campfire stoke) or Combat Attack
+        const targetTile = facingTile(p1);
+        const targetBaseH = heightAt(world.field, targetTile.gx, targetTile.gy);
         const interact = interactAtFacing(p1, world, flora, buildings);
         if (interact.type !== 'none') {
           audio.play(interact.type);
+          if (interact.type === 'chop') spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0x8a6040ff);
+          else if (interact.type === 'mine') spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0x95a5a6ff);
+          else if (interact.type === 'forage') spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0x2ecc71ff);
+          else if (interact.type === 'repair') spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0xf39c12ff);
           updateDomHud();
         } else if (p1.attackCooldown <= 0) {
           const baseH = heightAt(world.field, p1.gx, p1.gy);
-          const res = executeAttack(p1, creatures, projectiles, baseH);
+          const res = executeAttack(p1, creatures, projectiles, baseH, fxPool);
           if (res.isRanged) audio.play('bow_shoot');
           else if (res.hit) audio.play('hit_meat');
           else audio.play('attack');
@@ -336,6 +347,9 @@ loop.onUpdate((dt, tick) => {
     const changed = digAtFacing(p1, world);
     if (changed) {
       audio.play('dig');
+      const targetTile = facingTile(p1);
+      const targetBaseH = heightAt(world.field, targetTile.gx, targetTile.gy);
+      spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0x795548ff);
       input.setTerrain({ field: world.field, maxHeightPx: world.currentMaxHeightPx });
     } else {
       audio.play('deny');
@@ -345,6 +359,9 @@ loop.onUpdate((dt, tick) => {
     const changed = raiseAtFacing(p1, world);
     if (changed) {
       audio.play('raise');
+      const targetTile = facingTile(p1);
+      const targetBaseH = heightAt(world.field, targetTile.gx, targetTile.gy);
+      spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0x8d6e63ff);
       input.setTerrain({ field: world.field, maxHeightPx: world.currentMaxHeightPx });
     } else {
       audio.play('deny');
@@ -381,13 +398,19 @@ loop.onUpdate((dt, tick) => {
           audio.play('deny');
         }
       } else {
+        const targetTile = facingTile(p2);
+        const targetBaseH = heightAt(world.field, targetTile.gx, targetTile.gy);
         const interact = interactAtFacing(p2, world, flora, buildings);
         if (interact.type !== 'none') {
           audio.play(interact.type);
+          if (interact.type === 'chop') spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0x8a6040ff);
+          else if (interact.type === 'mine') spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0x95a5a6ff);
+          else if (interact.type === 'forage') spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0x2ecc71ff);
+          else if (interact.type === 'repair') spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0xf39c12ff);
           updateDomHud();
         } else if (p2.attackCooldown <= 0) {
           const baseH = heightAt(world.field, p2.gx, p2.gy);
-          const res = executeAttack(p2, creatures, projectiles, baseH);
+          const res = executeAttack(p2, creatures, projectiles, baseH, fxPool);
           if (res.isRanged) audio.play('bow_shoot');
           else if (res.hit) audio.play('hit_meat');
           else audio.play('attack');
@@ -400,6 +423,9 @@ loop.onUpdate((dt, tick) => {
     const changed = digAtFacing(p2, world);
     if (changed) {
       audio.play('dig');
+      const targetTile = facingTile(p2);
+      const targetBaseH = heightAt(world.field, targetTile.gx, targetTile.gy);
+      spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0x795548ff);
       input.setTerrain({ field: world.field, maxHeightPx: world.currentMaxHeightPx });
     } else {
       audio.play('deny');
@@ -409,6 +435,9 @@ loop.onUpdate((dt, tick) => {
     const changed = raiseAtFacing(p2, world);
     if (changed) {
       audio.play('raise');
+      const targetTile = facingTile(p2);
+      const targetBaseH = heightAt(world.field, targetTile.gx, targetTile.gy);
+      spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0x8d6e63ff);
       input.setTerrain({ field: world.field, maxHeightPx: world.currentMaxHeightPx });
     } else {
       audio.play('deny');
@@ -419,11 +448,14 @@ loop.onUpdate((dt, tick) => {
   copyKeys(curr, prevKeys);
 
   // ── Projectile kinematics & collision ────────────────────────────────────────
-  const projHits = stepProjectiles(projectiles, creatures, [p1, p2], world, dt);
+  const projHits = stepProjectiles(projectiles, creatures, [p1, p2], world, dt, fxPool);
   if (projHits.length > 0) {
     audio.play('hit_meat');
     updateDomHud();
   }
+
+  // ── Combat and interaction FX particle simulation ───────────────────────────
+  stepFx(fxPool, dt);
 
   // ── Creature & Flora Ecosystem ───────────────────────────────────────────────
   const creEvents = updateCreatures(creatures, world, [p1, p2], flora, buildings, currentDarkness, dt);
@@ -543,6 +575,7 @@ loop.onRender((_alpha, t, nowMs) => {
     daylight,
     cycle,
     SEED,
+    fxPool,
   );
 });
 
