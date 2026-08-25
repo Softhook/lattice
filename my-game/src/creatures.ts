@@ -267,6 +267,11 @@ export interface Creature {
   hurtTimer: number;
   /** Locked foraging target; kept until eaten or gone so the creature doesn't flicker between equidistant plants. */
   forageTarget: FloraItem | undefined;
+  /** Smoothed flee heading (unit vector), turn-rate-limited so escape direction doesn't snap frame to frame. */
+  fleeDirX: number;
+  fleeDirY: number;
+  /** Seconds remaining to keep fleeing after the last threat was seen, so brief dips out of noticeRange don't flip the state every tick. */
+  fleeSpookTimer: number;
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -279,6 +284,12 @@ export const MAX_CREATURES = 600;
 
 /** Mutation magnitude per generation (trait drift). */
 const MUTATION = 0.08;
+
+/** How fast a fleeing creature's heading turns to face away from a threat, in full-turns/sec equivalent. Lower = smoother but laggier escapes. */
+const FLEE_TURN_RATE = 6.0;
+
+/** Seconds a creature keeps fleeing after its last threat sighting, so brushing the edge of noticeRange doesn't flicker the state. */
+const FLEE_SPOOK_DURATION = 0.6;
 
 // ── Spawn ──────────────────────────────────────────────────────────────────────
 
@@ -320,6 +331,9 @@ export function spawnCreature(
     attackAnimTimer: 0,
     hurtTimer: 0,
     forageTarget: undefined,
+    fleeDirX: 0,
+    fleeDirY: 0,
+    fleeSpookTimer: 0,
   };
 }
 
@@ -579,17 +593,38 @@ function updateOne(
   }
 
   // If threatened, scatter and FLEE!
+  //
+  // The raw away-from-threat vector is recomputed from instantaneous relative position every
+  // tick. Steering straight at that raw vector (as this used to do) makes the heading swing
+  // wildly frame to frame — small position deltas produce large angle swings when a threat is
+  // close, and threats crossing the noticeRange edge pop in/out of the average abruptly. Both
+  // read as glitchy direction-snapping. So: turn-rate-limit the heading toward the raw vector
+  // instead of snapping to it, and hold the flee state for a short "spooked" window after the
+  // last threat sighting so the state itself doesn't flicker at the detection boundary.
   if (threatCount > 0) {
-    c.state = 'flee';
-    c.eatTimer = 0;
     const avgThreatDx = threatDx / threatCount;
     const avgThreatDy = threatDy / threatCount;
     const threatDist = Math.sqrt(avgThreatDx * avgThreatDx + avgThreatDy * avgThreatDy); // @tier-b
     if (threatDist > 0.01) {
-      const fleeDx = -avgThreatDx / threatDist;
-      const fleeDy = -avgThreatDy / threatDist;
-      moveWithSeparation(c, c.gx + fleeDx * 8, c.gy + fleeDy * 8, speed * 1.4, dt, world, allCreatures, buildings);
+      const rawFleeDx = -avgThreatDx / threatDist;
+      const rawFleeDy = -avgThreatDy / threatDist;
+      const turn = Math.min(1, FLEE_TURN_RATE * dt);
+      c.fleeDirX += (rawFleeDx - c.fleeDirX) * turn;
+      c.fleeDirY += (rawFleeDy - c.fleeDirY) * turn;
+      const len = Math.sqrt(c.fleeDirX * c.fleeDirX + c.fleeDirY * c.fleeDirY); // @tier-b
+      if (len > 0.01) {
+        c.fleeDirX /= len;
+        c.fleeDirY /= len;
+      }
     }
+    c.fleeSpookTimer = FLEE_SPOOK_DURATION;
+  }
+
+  if (c.fleeSpookTimer > 0) {
+    c.fleeSpookTimer = Math.max(0, c.fleeSpookTimer - dt);
+    c.state = 'flee';
+    c.eatTimer = 0;
+    moveWithSeparation(c, c.gx + c.fleeDirX * 8, c.gy + c.fleeDirY * 8, speed * 1.4, dt, world, allCreatures, buildings);
     return;
   }
 
