@@ -9,9 +9,9 @@
  */
 
 import { clamp01, hash2, noise2, toUnit, type Vec2 } from '@latticekit/core';
-import { gridToScreen, heightAt, HALF_W } from '@latticekit/iso';
+import { gridToScreen, heightAt } from '@latticekit/iso';
 import { mix, withAlpha, type Pen, hex, type LightField } from '@latticekit/draw';
-import { W, H, MAT_GRASS, MAT_WATER, type WorldTerrain } from './world.js';
+import { W, H, type WorldTerrain } from './world.js';
 import type { Building } from './buildings.js';
 
 const pt: Vec2 = { x: 0, y: 0 };

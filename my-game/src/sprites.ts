@@ -48,7 +48,6 @@ import {
   BOAR_TUSK,
   BOAR_MANE,
   CROC,
-  CROC_BELLY,
   CROC_RIDGE,
   CROC_TOOTH,
   BOOTS_DARK,

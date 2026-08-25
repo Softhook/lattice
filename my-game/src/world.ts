@@ -211,8 +211,6 @@ export const MAT_ROCK   = 2;
 export const MAT_WATER  = 3;
 export const MAT_SAND   = 4;
 export const MAT_SNOW   = 5;
-export const MAT_FLOOR  = 6;  // placed by players
-export const MAT_STONE  = 7;  // placed by players
 
 // ── world state ────────────────────────────────────────────────────────────────
 
@@ -420,15 +418,6 @@ export function extractTerrainDeltas(world: WorldTerrain): {
   return { heights, surfaces };
 }
 
-/** Map a height unit value to its default material. */
-export function materialFromHeight(h: number): number {
-  if (h <= 1) return MAT_WATER;
-  if (h <= 2) return MAT_SAND;
-  if (h >= 19) return MAT_SNOW;
-  if (h >= 14) return MAT_ROCK;
-  return MAT_GRASS;
-}
-
 /**
  * Lower the four vertices around a tile by one height unit.
  *
@@ -512,13 +501,6 @@ function boundedHeightSource(grid: TileGrid, w: number, h: number): MutableTileS
     fill(v) { grid.fill(v); },
     fillFrom(getVal) { grid.fillFrom(getVal); },
   };
-}
-
-/** Read a tile's center height in world pixels (bilinear-like: average of four vertices). */
-export function tileCenterHeightPx(world: WorldTerrain, gx: number, gy: number): number {
-  const h = world.heights;
-  const avg = (h.get(gx, gy) + h.get(gx+1, gy) + h.get(gx, gy+1) + h.get(gx+1, gy+1)) * 0.25;
-  return avg * STEP_PX;
 }
 
 /** True if a tile is walkable (not water, not a wall block). */

@@ -55,6 +55,7 @@ export interface SpeciesDefinition {
   readonly preyTargets: readonly Species[];
   readonly predatorThreats: readonly Species[];
   readonly loot: CreatureLoot;
+  readonly fearsFire?: boolean;
 }
 
 /** Trait vector. These are the "genes" that evolve each generation. */
@@ -88,6 +89,7 @@ export const SPECIES_REGISTRY: Record<Species, SpeciesDefinition> = {
     preyTargets: [],
     predatorThreats: ['fox', 'wolf', 'croc', 'troll'],
     loot: { fiber: 4 },
+    fearsFire: true,
   },
   deer: {
     species: 'deer',
@@ -107,6 +109,7 @@ export const SPECIES_REGISTRY: Record<Species, SpeciesDefinition> = {
     preyTargets: [],
     predatorThreats: ['wolf', 'bear', 'croc', 'troll'],
     loot: { wood: 6, fiber: 8 },
+    fearsFire: true,
   },
   boar: {
     species: 'boar',
@@ -126,6 +129,7 @@ export const SPECIES_REGISTRY: Record<Species, SpeciesDefinition> = {
     preyTargets: ['wolf'],
     predatorThreats: ['bear', 'troll', 'wolf'],
     loot: { wood: 8, fiber: 10 },
+    fearsFire: true,
   },
   fox: {
     species: 'fox',
@@ -145,6 +149,7 @@ export const SPECIES_REGISTRY: Record<Species, SpeciesDefinition> = {
     preyTargets: ['rabbit'],
     predatorThreats: ['wolf', 'bear', 'troll'],
     loot: { fiber: 6, stone: 4 },
+    fearsFire: true,
   },
   wolf: {
     species: 'wolf',
@@ -164,6 +169,7 @@ export const SPECIES_REGISTRY: Record<Species, SpeciesDefinition> = {
     preyTargets: ['deer', 'rabbit', 'boar'],
     predatorThreats: ['bear', 'troll'],
     loot: { stone: 8, fiber: 10 },
+    fearsFire: true,
   },
   croc: {
     species: 'croc',
@@ -183,6 +189,7 @@ export const SPECIES_REGISTRY: Record<Species, SpeciesDefinition> = {
     preyTargets: ['deer', 'rabbit', 'boar'],
     predatorThreats: [],
     loot: { stone: 14, fiber: 12 },
+    fearsFire: true,
   },
   bear: {
     species: 'bear',
@@ -202,6 +209,7 @@ export const SPECIES_REGISTRY: Record<Species, SpeciesDefinition> = {
     preyTargets: ['deer', 'boar', 'wolf'],
     predatorThreats: [],
     loot: { wood: 16, stone: 18, fiber: 16 },
+    fearsFire: true,
   },
   troll: {
     species: 'troll',
@@ -221,6 +229,7 @@ export const SPECIES_REGISTRY: Record<Species, SpeciesDefinition> = {
     preyTargets: ['deer', 'wolf', 'bear'],
     predatorThreats: [],
     loot: { wood: 20, stone: 24, fiber: 12 },
+    fearsFire: false,
   },
 };
 
@@ -349,13 +358,54 @@ export function populateWorld(worldSeed: number, world: WorldTerrain): Creature[
 // ── Shared Spatial Grids for Simulation & Viewport Culling (Zero-Allocation) ───
 
 export const CREATURE_SPATIAL = new SpatialGrid();
-import { FLORA_SPATIAL, FLORA_REGISTRY } from './flora.js';
+import { FLORA_SPATIAL } from './flora.js';
 
+/** Radii for fire & light warding in tiles. */
+export const FIRE_WARD_RADIUS = 9.0;
+export const FIRE_SAFE_ZONE_RADIUS = 7.5;
+export const FIRE_BURN_RADIUS = 0.9;
+
+/**
+ * Returns true if (gx, gy) is within the safe sanctuary radius of any active fire
+ * (e.g. campfire) or lit beacon at night.
+ */
+export function isNearActiveFireOrLight(
+  gx: number,
+  gy: number,
+  buildings: readonly Building[],
+  darkness = 0,
+  safeRadius = FIRE_SAFE_ZONE_RADIUS,
+): boolean {
+  for (let i = 0; i < buildings.length; i++) {
+    const b = buildings[i];
+    if (b === undefined || b.hp <= 0) continue;
+
+    let rad = 0;
+    if (b.kind === 'campfire') {
+      rad = safeRadius;
+    } else if (darkness > 0.2) {
+      if (b.kind === 'wood_tower') rad = safeRadius * 0.7;
+      else if (b.kind === 'stone_tower') rad = safeRadius * 0.85;
+    }
+
+    if (rad > 0) {
+      const bx = b.gx + b.w * 0.5;
+      const by = b.gy + b.d * 0.5;
+      const dx = gx - bx;
+      const dy = gy - by;
+      if (dx * dx + dy * dy <= rad * rad) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
 
 export interface CreatureEvents {
   playerAttacked: boolean;
   roarOccurred: boolean;
   howlOccurred: boolean;
+  wardOccurred?: boolean;
 }
 
 /**
@@ -365,6 +415,7 @@ export interface CreatureEvents {
  * - Herbivores and omnivores forage for edible plants and flee from predators.
  * - Carnivores and apex predators hunt prey defined in their species registry.
  * - At night (darkness > 0), apex hunters gain expanded detection ranges and aggressive siege attacks.
+ * - Fire and light sources (campfires, towers) ward off predators like wolves.
  * - Solid buildings (walls and towers) physically block and keep out animals.
  *
  * Accelerated via SpatialGrid to eliminate $O(N^2)$ brute-force distance checks.
@@ -378,7 +429,7 @@ export function updateCreatures(
   darkness: number,
   dt: number,
 ): CreatureEvents {
-  const events: CreatureEvents = { playerAttacked: false, roarOccurred: false, howlOccurred: false };
+  const events: CreatureEvents = { playerAttacked: false, roarOccurred: false, howlOccurred: false, wardOccurred: false };
 
   // 1. Build spatial index for live creatures
   CREATURE_SPATIAL.clear();
@@ -431,10 +482,50 @@ function updateOne(
   const huntSpeed = isApexOrHostileArchetype ? speed * (1.3 + darkness * 0.35) : speed * 1.3;
   const noticeRange = def.noticeRange + (isApexOrHostileArchetype ? darkness * 8 : 0);
 
-  // 1. Check for immediate predator threats to flee from
+  // 1. Check for immediate fire/light & predator threats to flee from
   let threatDx = 0;
   let threatDy = 0;
   let threatCount = 0;
+
+  // Fire / Light warding: basic predators (wolves, foxes, etc.) and wild beasts are warded off by campfires and bright beacons
+  const fearsFire = def.fearsFire ?? true;
+  if (fearsFire) {
+    for (let bi = 0; bi < buildings.length; bi++) {
+      const b = buildings[bi];
+      if (b === undefined || b.hp <= 0) continue;
+
+      let wardRadius = 0;
+      if (b.kind === 'campfire') {
+        wardRadius = FIRE_WARD_RADIUS;
+      } else if (darkness > 0.2) {
+        if (b.kind === 'wood_tower') wardRadius = 6.0;
+        else if (b.kind === 'stone_tower') wardRadius = 7.5;
+      }
+
+      if (wardRadius > 0) {
+        const fireX = b.gx + b.w * 0.5;
+        const fireY = b.gy + b.d * 0.5;
+        const dx = fireX - c.gx;
+        const dy = fireY - c.gy;
+        const dSq = dx * dx + dy * dy;
+        if (dSq < wardRadius * wardRadius) {
+          const d = Math.sqrt(dSq); // @tier-b — distance to fire, pixels only
+          const weight = (wardRadius - d) / wardRadius * 2.5;
+          if (d > 0.01) {
+            threatDx += (dx / d) * weight;
+            threatDy += (dy / d) * weight;
+            threatCount++;
+          }
+          // Immediate singe / burn damage if touching campfire flames directly
+          if (b.kind === 'campfire' && d < FIRE_BURN_RADIUS) {
+            c.hp -= 15 * dt;
+            c.hurtTimer = 0.35;
+          }
+          events.wardOccurred = true;
+        }
+      }
+    }
+  }
 
   const shouldFleeFromPlayers = !isCreatureHostile && def.behavior === 'skittish';
   if (shouldFleeFromPlayers) {
@@ -507,6 +598,10 @@ function updateOne(
         if (other === undefined || other.hp <= 0 || other.id === c.id) continue;
 
         if (def.preyTargets.includes(other.species)) {
+          // Prey protected by fire/light sanctuary is ignored
+          if (fearsFire && isNearActiveFireOrLight(other.gx, other.gy, buildings, darkness)) {
+            continue;
+          }
           const dx = other.gx - c.gx;
           const dy = other.gy - c.gy;
           const d = Math.sqrt(dx * dx + dy * dy); // @tier-b — hunt distance check, pixels only
@@ -527,6 +622,10 @@ function updateOne(
       for (let i = 0; i < players.length; i++) {
         const p = players[i];
         if (p === undefined || p.respawnTimer > 0) continue;
+        // Player protected inside campfire or beacon sanctuary is safe
+        if (fearsFire && isNearActiveFireOrLight(p.gx, p.gy, buildings, darkness)) {
+          continue;
+        }
         const dx = p.gx - c.gx;
         const dy = p.gy - c.gy;
         const d = Math.sqrt(dx * dx + dy * dy); // @tier-b — player chase distance, pixels only
@@ -645,8 +744,12 @@ function updateOne(
   if (c.idleTimer <= 0 || isNaN(c.targetGx)) {
     const angle = c.rng.next() * 6.28318; // @tier-b — wander angle, pixels only
     const dist  = 3 + c.rng.next() * 5;
-    c.targetGx  = clamp(Math.round(c.gx + Math.cos(angle) * dist), 8, W - 9); // @tier-b
-    c.targetGy  = clamp(Math.round(c.gy + Math.sin(angle) * dist), 8, H - 9); // @tier-b
+    const candGx = clamp(Math.round(c.gx + Math.cos(angle) * dist), 8, W - 9); // @tier-b
+    const candGy = clamp(Math.round(c.gy + Math.sin(angle) * dist), 8, H - 9); // @tier-b
+    if (!fearsFire || !isNearActiveFireOrLight(candGx, candGy, buildings, darkness, 4.0)) {
+      c.targetGx  = candGx;
+      c.targetGy  = candGy;
+    }
     c.idleTimer = 3.5 + c.rng.next() * 3.5;
   }
 
@@ -836,15 +939,5 @@ function mutateTrait(base: Traits, rng: Rng, magnitude: number): Traits {
   };
 }
 
-/** Damage a creature (e.g. from a player action). */
-export function damageCreature(c: Creature, amount: number): void {
-  c.hp -= amount;
-}
-
-/** True if a creature is hostile and will attack players. */
-export function isHostile(c: Creature): boolean {
-  const def = SPECIES_REGISTRY[c.species];
-  return (def.behavior === 'apex' || def.behavior === 'territorial' || def.behavior === 'ambush') && c.traits.aggression > 0.65;
-}
 
 

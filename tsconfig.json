@@ -30,6 +30,9 @@
     },
     {
       "path": "examples/demo"
+    },
+    {
+      "path": "my-game"
     }
   ]
 }

@@ -22,7 +22,7 @@ import {
   hex,
 } from '@latticekit/draw';
 import { Rng, createRng, fbm2, clamp } from '@latticekit/core';
-import { W, H, MAT_WATER, MAT_SAND, MAT_SNOW, MAT_ROCK, MAT_GRASS, getBiomeAt, getBiomeBlendAt, type BiomeKind, type WorldTerrain } from './world.js';
+import { W, H, MAT_WATER, MAT_GRASS, getBiomeBlendAt, type BiomeKind, type WorldTerrain } from './world.js';
 
 
 
@@ -35,7 +35,6 @@ export const PINE_NEEDLE2  = hex('#25522e');
 export const OAK_LEAF      = hex('#3c6b2e');
 export const OAK_LEAF2     = hex('#4d8239');
 export const WOOD_TRUNK    = hex('#4a2f1b');
-export const BIRCH_TRUNK   = hex('#d2c8b8');
 export const BUSH_GREEN    = hex('#357335');
 export const BERRY_RED     = hex('#d9383a');
 export const FLOWER_PETAL  = hex('#f2d649');
@@ -49,7 +48,6 @@ export const SHROOM_STEM   = hex('#e8dfd8');
 
 // Additional Biome Vegetation & Rock Colors
 export const CACTUS_GREEN   = hex('#488236');
-export const CACTUS_THORN   = hex('#8ac46e');
 export const SWAMP_WOOD     = hex('#2d2015');
 export const SWAMP_CANOPY   = hex('#2d421e');
 export const SWAMP_VINE     = hex('#3d5926');

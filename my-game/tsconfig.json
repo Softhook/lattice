@@ -2,8 +2,8 @@
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
     "rootDir": ".",
-    "outDir": "dist",
-    "composite": false
+    "outDir": "dist-ts",
+    "noEmit": false
   },
   "include": ["src/**/*.ts", "vite.config.ts"],
   "references": [

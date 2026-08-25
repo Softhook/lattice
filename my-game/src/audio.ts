@@ -19,6 +19,14 @@ import {
 } from '@latticekit/audio';
 
 export const VERDANT_SOUNDS = {
+  step: {
+    bus: 'sfx',
+    minGapMs: 150,
+    layers: [
+      { wave: 'sine', hz: 95, toHz: 55, gain: 0.05, hold: 0.05, cutoff: 320 },
+      { wave: 'noise', hz: 0, gain: 0.03, hold: 0.03, cutoff: 500, highpass: 150 },
+    ],
+  },
   dig: {
     bus: 'sfx',
     minGapMs: 90,

@@ -1,0 +1,20 @@
+Improve the visual style of all the creatures. Crocodiles and Trolls are too small.
+
+Look again at all the attack opattern snad keep in my the z clipping needed
+
+The usability of the crafting and interacting doesn't kind of work right now. 
+
+Timings of things being built or chopped down or mined is not right. Currently it's instant and it needs to take different amounts of time to Interact with different elements 
+
+Think about the inventory system again that can show all the different things the player has collected and picked up. so the player can switch between different weapons and things to build 
+
+make each plant unique variation on its type
+
+dig down caves to excacte and find. Can we have a system whereby the player actually digs a cave and doesn't pull down the surface with it?
+
+
+weather pattners rain, lighting that can set forest on fire
+wind that can make trees sway
+
+Create missions such as a necromancer that spawns in a tower And creates particlum monsters let go towards the players and attacks them.
+A mission announcement text pops up telling them that a necromancer tower has been discovered. Make the Necromancer Tower look visually interesting and foreboding with some magic effects. 

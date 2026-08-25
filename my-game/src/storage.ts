@@ -5,7 +5,7 @@
  * so players can refresh or resume without losing progress.
  */
 
-import { expectObject, asEpochMillis, type EpochMillis } from '@latticekit/core';
+import { expectObject, asEpochMillis } from '@latticekit/core';
 import {
   migrations,
   createStore,

@@ -42,7 +42,6 @@ import {
   cycleBuildKind,
   tickPlayer,
   craftNextAvailable,
-  cycleWeapon,
 } from './players.js';
 import {
   damageBuildings,
@@ -288,8 +287,11 @@ loop.onUpdate((dt, tick) => {
   // ── Player movement ───────────────────────────────────────────────────────────
   pollP1Movement(curr, moveVec1);
   pollP2Movement(curr, moveVec2);
-  movePlayer(p1, moveVec1.dx, moveVec1.dy, world, buildings, dt);
-  movePlayer(p2, moveVec2.dx, moveVec2.dy, world, buildings, dt);
+  const p1Stepped = movePlayer(p1, moveVec1.dx, moveVec1.dy, world, buildings, dt);
+  const p2Stepped = movePlayer(p2, moveVec2.dx, moveVec2.dy, world, buildings, dt);
+  if (p1Stepped || p2Stepped) {
+    audio.play('step');
+  }
 
   // ── Player 1 Actions (Contextual Spacebar Model) ─────────────────────────────
   if (edges.p1CycleWeapon) {

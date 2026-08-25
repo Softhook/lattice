@@ -11,7 +11,8 @@
 
 import { clamp01, hash2, noise2, toUnit, type Vec2 } from '@latticekit/core';
 import { gridToScreen } from '@latticekit/iso';
-import { mix, shade, withAlpha, type Pen, type Rgba, hex } from '@latticekit/draw';
+import { mix, shade, withAlpha, type Pen, hex } from '@latticekit/draw';
+import { SLOT_SKY } from './palette.js';
 
 const pt: Vec2 = { x: 0, y: 0 };
 
@@ -44,11 +45,11 @@ export function drawSky(pen: Pen, daylight: number, cycle: number): void {
   xy[6] = 0; xy[7] = h;
 
   // Sky atmospheric gradient based on time of day
-  const dayZenith = shade(pen.palette.get('sky'), 0.95);
+  const dayZenith = shade(pen.palette.get(SLOT_SKY), 0.95);
   const nightZenith = hex('#060c07');
   const zenith = mix(nightZenith, dayZenith, daylight);
 
-  const dayHorizon = mix(pen.palette.get('sky'), hex('#d4ac0d'), 0.22);
+  const dayHorizon = mix(pen.palette.get(SLOT_SKY), hex('#d4ac0d'), 0.22);
   const nightHorizon = hex('#0e1a12');
   const horizon = mix(nightHorizon, dayHorizon, daylight);
 
@@ -99,7 +100,7 @@ export function farRanges(pen: Pen, seed: number, daylight: number): void {
   if (hy <= 0) return;
 
   const baseRock = hex('#3a4a38');
-  const skyCol = pen.palette.get('sky');
+  const skyCol = pen.palette.get(SLOT_SKY);
 
   for (let layer = 0; layer < 3; layer++) {
     const amp = (18 + layer * 22) * Math.min(1.3, pen.camera.zoom + 0.3);

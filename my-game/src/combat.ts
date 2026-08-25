@@ -406,7 +406,7 @@ export function executeAttack(
 
   // Spawn visual slash arc in front of player
   if (fxPool !== undefined && (player.weapon === 'sword' || player.weapon === 'axe')) {
-    const fTile = facingTile(player, 0.75);
+    const fTile = facingTile(player);
     spawnSlashFx(
       fxPool,
       fTile.gx,
@@ -428,7 +428,7 @@ export function executeAttack(
     if (c === undefined || c.hp <= 0) continue;
     const dx = c.gx - player.gx;
     const dy = c.gy - player.gy;
-    const dist = Math.sqrt(dx * dx + dy * dy);
+    const dist = Math.sqrt(dx * dx + dy * dy); // @tier-b — melee hit-check distance
     if (dist <= weapon.reach) {
       // Check facing alignment
       let inCone = false;

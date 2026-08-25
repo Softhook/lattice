@@ -15,7 +15,7 @@ import { hex, type Rgba } from '@latticekit/draw';
 import type { WorldTerrain } from './world.js';
 import { dig, raise, isWalkable, W, H } from './world.js';
 import type { Building, BuildingKind } from './buildings.js';
-import { placeBuilding, isTileOccupiedBySolidBuilding, BUILDING_COSTS, BUILDING_REGISTRY } from './buildings.js';
+import { placeBuilding, isTileOccupiedBySolidBuilding, BUILDING_COSTS } from './buildings.js';
 import type { FloraItem } from './flora.js';
 import { harvestFloraAt, FLORA_REGISTRY } from './flora.js';
 import type { WeaponKind } from './combat.js';
@@ -125,15 +125,6 @@ const RESPAWN_TIME = 3;
 
 export const PLAYER_MODES: readonly PlayerMode[] = [
   'move',
-  'campfire',
-  'wood_wall',
-  'stone_wall',
-  'wood_tower',
-  'stone_tower',
-  'floor',
-];
-
-export const BUILD_KINDS: readonly BuildingKind[] = [
   'campfire',
   'wood_wall',
   'stone_wall',
@@ -259,11 +250,6 @@ export function canAffordBuilding(player: Player, kind: BuildingKind): boolean {
 
 // ── Movement ───────────────────────────────────────────────────────────────────
 
-export interface MoveResult {
-  stepped: boolean;
-  footstep: boolean;
-}
-
 /**
  * Move a player with tactile momentum physics, stable turn hysteresis, and smooth cursor interpolation.
  * Returns true if footstep trigger fired.
@@ -322,6 +308,7 @@ export function movePlayer(
   if (Math.abs(player.vx) < 0.01 && inputDx === 0) player.vx = 0;
   if (Math.abs(player.vy) < 0.01 && inputDy === 0) player.vy = 0;
 
+  // @tier-b — speed magnitude, drives isMoving/walkCycle only; position integration below is Tier A
   const currentSpeed = Math.sqrt(player.vx * player.vx + player.vy * player.vy);
   player.isMoving = currentSpeed > 0.08;
 
@@ -366,17 +353,28 @@ export function movePlayer(
   }
 
   // Cursor position directly tracks the facing tile on the integer isometric grid
-  const targetTilePos = facingTile(player);
-  player.cursorGx = targetTilePos.gx;
-  player.cursorGy = targetTilePos.gy;
+  facingTileInto(player, MOVE_FACING_SCRATCH);
+  player.cursorGx = MOVE_FACING_SCRATCH.gx;
+  player.cursorGy = MOVE_FACING_SCRATCH.gy;
 
   return stepped;
 }
 
 // ── Actions ────────────────────────────────────────────────────────────────────
 
-/** The exact tile immediately in front of the player on the isometric grid. */
-export function facingTile(player: Player): { gx: number; gy: number } {
+export interface TileCoord {
+  gx: number;
+  gy: number;
+}
+
+const MOVE_FACING_SCRATCH: TileCoord = { gx: 0, gy: 0 };
+
+/**
+ * Write the tile immediately in front of the player into `out`. Zero allocation —
+ * use this on any path that runs every tick or every render frame; `facingTile`
+ * below is a convenience wrapper for the rare, input-triggered call sites only.
+ */
+export function facingTileInto(player: Player, out: TileCoord): void {
   // Use the tile the player is centered over to prevent off-to-the-side cursor parallax
   const curGx = Math.round(player.gx);
   const curGy = Math.round(player.gy);
@@ -388,10 +386,19 @@ export function facingTile(player: Player): { gx: number; gy: number } {
     case 'e': targetGx += 1; break;
     case 'w': targetGx -= 1; break;
   }
-  return {
-    gx: clamp(targetGx, 0, W - 1),
-    gy: clamp(targetGy, 0, H - 1),
-  };
+  out.gx = clamp(targetGx, 0, W - 1);
+  out.gy = clamp(targetGy, 0, H - 1);
+}
+
+/**
+ * The exact tile immediately in front of the player on the isometric grid.
+ * Allocates a fresh object — fine for edge-triggered action handlers (build,
+ * dig, attack), never for a per-tick or per-frame path. Use `facingTileInto` there.
+ */
+export function facingTile(player: Player): TileCoord {
+  const out: TileCoord = { gx: 0, gy: 0 };
+  facingTileInto(player, out);
+  return out;
 }
 
 /** Build the currently selected structure at the player's facing tile if affordable. */
@@ -586,6 +593,9 @@ export interface TargetContext {
   color: Rgba;
 }
 
+/** Scratch tile for `getTargetContext`'s internal facing-tile lookup. Zero allocation. */
+const TARGET_TILE_SCRATCH: TileCoord = { gx: 0, gy: 0 };
+
 const TARGET_SCRATCH: TargetContext = {
   kind: 'none',
   gx: 0,
@@ -602,7 +612,7 @@ const TARGET_SCRATCH: TargetContext = {
  * `spreadRatio` controls the lateral tolerance (1.0 = strict 45 deg, 1.25 = generous forward arc).
  */
 export function isInForwardCone(
-  facing: Direction,
+  facing: Facing,
   dx: number,
   dy: number,
   spreadRatio = 1.25,
@@ -630,7 +640,7 @@ function resolveCreatureTarget(
     if (c === undefined || c.hp <= 0) continue;
     const dx = c.gx - player.gx;
     const dy = c.gy - player.gy;
-    const dist = Math.sqrt(dx * dx + dy * dy);
+    const dist = Math.sqrt(dx * dx + dy * dy); // @tier-b — melee target-lock distance
     if (dist <= weapon.reach && isInForwardCone(player.facing, dx, dy, 1.1)) {
       TARGET_SCRATCH.kind = 'creature';
       TARGET_SCRATCH.gx = Math.round(c.gx);
@@ -793,7 +803,8 @@ export function getTargetContext(
     return TARGET_SCRATCH;
   }
 
-  const targetTile = facingTile(player);
+  facingTileInto(player, TARGET_TILE_SCRATCH);
+  const targetTile = TARGET_TILE_SCRATCH;
 
   // 1. Build mode active: target is the placement ghost tile
   if (player.mode !== 'move') {

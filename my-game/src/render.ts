@@ -23,7 +23,6 @@ import {
   createPalette,
   hex,
   shade,
-  mix,
   withAlpha,
   spriteHeightPx,
   VARIANT_ZERO,
@@ -32,7 +31,6 @@ import {
   type LightField,
   type OffscreenSurface,
 } from '@latticekit/draw';
-import { noise2, hash2, toUnit } from '@latticekit/core';
 import {
   DepthSorter,
   footprintBase,
@@ -45,7 +43,7 @@ import { W, H } from './world.js';
 
 import { CREATURE_SPATIAL, type Creature } from './creatures.js';
 import type { Player } from './players.js';
-import { facingTile, canAffordBuilding } from './players.js';
+import { facingTileInto, canAffordBuilding, type TileCoord } from './players.js';
 import type { Building, BuildingKind } from './buildings.js';
 import { defFor, canPlaceBuilding, LANTERN_GLOW } from './buildings.js';
 import { FLORA_SPATIAL, defForFlora, floraVariant, type FloraItem } from './flora.js';
@@ -57,8 +55,7 @@ import {
   setScratchVariant,
 } from './sprites.js';
 import {
-  GRASS, ROCK, WATER, SAND, SNOW, NIGHT_COLOR, SKY_TOP,
-  HEIGHT_WATER, HEIGHT_SAND, HEIGHT_ROCK, HEIGHT_SNOW,
+  GRASS, WATER, NIGHT_COLOR, SKY_TOP,
   TOOL_GOLD, SWAMP_WATER, COASTAL_WATER,
 } from './palette.js';
 
@@ -114,6 +111,9 @@ interface MutableFootprint {
 }
 
 const FP_SCRATCH: MutableFootprint = { gx: 0, gy: 0, w: 1, d: 1 };
+
+/** Scratch for the build-mode ghost tile lookup, reused across both viewport passes. */
+const GHOST_TILE_SCRATCH: TileCoord = { gx: -1, gy: -1 };
 
 // ── Zero-Allocation Pre-allocated Index Mapping & Viewport Buffers ─────────────
 
@@ -325,7 +325,13 @@ function drawViewport(
 
   // 5. Add placement ghost building into DepthSorter for correct Z-ordering
   const hasGhost = activePlayer.respawnTimer <= 0 && activePlayer.mode !== 'move';
-  const ghostTile = hasGhost ? facingTile(activePlayer) : { gx: -1, gy: -1 };
+  if (hasGhost) {
+    facingTileInto(activePlayer, GHOST_TILE_SCRATCH);
+  } else {
+    GHOST_TILE_SCRATCH.gx = -1;
+    GHOST_TILE_SCRATCH.gy = -1;
+  }
+  const ghostTile = GHOST_TILE_SCRATCH;
   const ghostValidTile = hasGhost && ghostTile.gx >= 0 && ghostTile.gy >= 0 && ghostTile.gx < W && ghostTile.gy < H;
   const buildKind = hasGhost ? (activePlayer.mode as BuildingKind) : undefined;
   const ghostDef = (buildKind !== undefined && ghostValidTile) ? defFor(buildKind) : undefined;
@@ -521,7 +527,7 @@ function drawViewport(
         // Arrow shaft and tip
         const vwx = (p.vx - p.vy) * 32;
         const vwy = (p.vx + p.vy) * 16 - p.vz;
-        const vlen = Math.sqrt(vwx * vwx + vwy * vwy) || 1;
+        const vlen = Math.sqrt(vwx * vwx + vwy * vwy) || 1; // @tier-b — arrow shaft direction, pixels only
         const arrowLen = 10 * camera.zoom;
         const tailX = sx - (vwx / vlen) * arrowLen;
         const tailY = sy - (vwy / vlen) * arrowLen;

@@ -128,7 +128,6 @@ export const P2_ACCENT    = hex('#f39c12');
 
 export const SKIN_TONE    = hex('#f5cba7');
 export const HAIR_DARK    = hex('#342216');
-export const HAIR_BLONDE  = hex('#d4ac0d');
 export const BOOTS_DARK   = hex('#212f3d');
 export const BACKPACK_COL = hex('#6e4c27');
 export const TOOL_GOLD    = hex('#f1c40f');
@@ -140,16 +139,11 @@ export const TOOL_STEEL   = hex('#bdc3c7');
 export const NIGHT_COLOR = hex('#08100a');
 /** Sky gradient top (deep) and bottom (horizon haze). */
 export const SKY_TOP  = hex('#1a2f10');
-export const SKY_MID  = hex('#2a4520');
 
 // ── Palette slot names ─────────────────────────────────────────────────────────
 
-/** Slot name for the active ground color (derived per biome in the terrain pass). */
-export const SLOT_GROUND = 'ground';
 /** Slot name for the sky backdrop gradient start. */
 export const SLOT_SKY    = 'sky';
-/** Slot name for the accent/brand color (used for UI highlights). */
-export const SLOT_BRAND  = 'brand';
 
 // ── Height thresholds (in height units, matching world.ts) ────────────────────
 
@@ -246,18 +240,8 @@ function getPureBiomeColor(
   // 6. Temperate Meadows (Default)
   if (h >= HEIGHT_SNOW) return SNOW;
   if (h >= HEIGHT_ROCK) return MEADOW_ROCK;
-  if (h <= HEIGHT_SAND) return SAND;
+  if (h <= HEIGHT_SAND) return MEADOW_DIRT;
   const lushRoll = toUnit(hash2(seed ^ 0x55, gx, gy));
   return lushRoll > 0.5 ? MEADOW_LUSH : MEADOW_GRASS;
 }
-
-/** Legacy terrain color helper. */
-export function terrainColor(heightUnits: number): Rgba {
-  if (heightUnits <= HEIGHT_WATER) return WATER;
-  if (heightUnits <= HEIGHT_SAND)  return SAND;
-  if (heightUnits >= HEIGHT_SNOW)  return SNOW;
-  if (heightUnits >= HEIGHT_ROCK)  return ROCK;
-  return GRASS;
-}
-
 

@@ -19,6 +19,8 @@
     "packages/*/src/**/*",
     "examples/*/src/**/*",
     "examples/*/test/**/*",
+    "my-game/src/**/*",
+    "my-game/test/**/*",
     "tools/**/*"
   ]
 }

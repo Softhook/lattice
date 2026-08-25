@@ -176,17 +176,17 @@ describe('Combat & Weapon Crafting System', () => {
   });
 
   it('plays wolf attack animation cycle smoothly without timer resets', () => {
-    const [p1] = createPlayers();
+    const [p1, p2] = createPlayers();
     p1.gx = 10;
     p1.gy = 10;
 
     const world = createWorld(42);
     const wolf = spawnCreature('wolf', 10.5, 10.0, 1);
-    wolf.traits.aggression = 1.0;
+    wolf.traits = { ...wolf.traits, aggression: 1.0 };
     const creatures = [wolf];
 
     // First update tick: wolf enters attack range, triggers attack animation (0.55s)
-    const events1 = updateCreatures(creatures, world, [p1], [], [], 0, 1 / 60);
+    const events1 = updateCreatures(creatures, world, [p1, p2], [], [], 0, 1 / 60);
     expect(wolf.state).toBe('attack');
     expect(wolf.attackAnimTimer).toBeGreaterThan(0.5);
     expect(events1.playerAttacked).toBe(true);
@@ -196,7 +196,7 @@ describe('Combat & Weapon Crafting System', () => {
     expect(stateCode1).toBe(4); // 4 = attack
 
     // Next tick: timer counts down smoothly and is NOT reset to 0.55
-    updateCreatures(creatures, world, [p1], [], [], 0, 0.2);
+    updateCreatures(creatures, world, [p1, p2], [], [], 0, 0.2);
     expect(wolf.attackAnimTimer).toBeLessThan(0.4);
     expect(wolf.attackAnimTimer).toBeGreaterThan(0);
 

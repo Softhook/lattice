@@ -2,8 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { createWorld, W, H, isWalkable, dig, raise, BIOME_REGISTRY } from '../src/world.js';
 import { createPlayers, movePlayer, interactAtFacing, cycleBuildKind, buildAtFacing, canAffordBuilding, tickPlayer, getTargetContext, facingTile, isInForwardCone } from '../src/players.js';
 import { populateFlora, FLORA_REGISTRY } from '../src/flora.js';
-import { BUILDING_COSTS, BUILDING_REGISTRY } from '../src/buildings.js';
-import { populateWorld, updateCreatures, SPECIES_REGISTRY } from '../src/creatures.js';
+import { BUILDING_COSTS, BUILDING_REGISTRY, type Building } from '../src/buildings.js';
+import { populateWorld, updateCreatures, SPECIES_REGISTRY, spawnCreature, isNearActiveFireOrLight, FIRE_WARD_RADIUS, FIRE_SAFE_ZONE_RADIUS, type CreatureState } from '../src/creatures.js';
 
 describe('Verdant Gameplay Logic', () => {
   it('initializes world and terrain grid with bounds', () => {
@@ -78,7 +78,7 @@ describe('Verdant Gameplay Logic', () => {
     p1.inventory.wood = 10;
     p1.inventory.stone = 10;
 
-    const buildings = [];
+    const buildings: Building[] = [];
     expect(canAffordBuilding(p1, 'wood_wall')).toBe(true);
     const placed = buildAtFacing(p1, world, buildings);
     expect(placed).toBeDefined();
@@ -245,15 +245,16 @@ describe('Verdant Gameplay Logic', () => {
     p1.inventory.stone = 5;
     p1.inventory.fiber = 5;
 
-    const buildings: any[] = [];
+    const buildings: Building[] = [];
     expect(canAffordBuilding(p1, 'campfire')).toBe(true);
 
     const placed = buildAtFacing(p1, world, buildings);
     expect(placed).toBeDefined();
-    expect(placed?.kind).toBe('campfire');
-    expect(placed?.gx).toBe(20);
-    expect(placed?.gy).toBe(21);
-    expect(placed?.hp).toBe(120);
+    if (placed === undefined) throw new Error('expected campfire to be placed');
+    expect(placed.kind).toBe('campfire');
+    expect(placed.gx).toBe(20);
+    expect(placed.gy).toBe(21);
+    expect(placed.hp).toBe(120);
 
     // Verify inventory cost deduction: 4 wood, 2 stone, 2 fiber
     expect(p1.inventory.wood).toBe(6);
@@ -297,24 +298,8 @@ describe('Verdant Gameplay Logic', () => {
     expect(targetFire.actionLabel).toContain('STOKE');
 
     // 3. Enemy creature in reach -> Creature target ATTACK
-    const troll = {
-      id: 5,
-      species: 'troll' as const,
-      gx: 10,
-      gy: 10.8,
-      hp: 150,
-      maxHp: 150,
-      hunger: 0,
-      fear: 0,
-      wanderTimer: 0,
-      actionCooldown: 0,
-      targetGx: 10,
-      targetGy: 10.8,
-      targetEntityId: 0,
-      animPhase: 0,
-      traits: { speed: 1, aggro: 1, courage: 1, sight: 1 },
-      generation: 1,
-    };
+    const troll = spawnCreature('troll', 10, 10.8, 42);
+    troll.hp = 150;
     const targetEnemy = getTargetContext(p1, world, [], [troll], []);
     expect(targetEnemy.kind).toBe('creature');
     expect(targetEnemy.actionLabel).toBe('ATTACK TROLL');
@@ -381,7 +366,7 @@ describe('Verdant Gameplay Logic', () => {
 
     // Direct tile is (10, 11). Place flora slightly offset at (10, 11) and another at (11, 11)
     const flora = [
-      { id: 1, kind: 'pine' as const, gx: 10, gy: 11, w: 1, d: 1, basePx: 0, scale: 1 },
+      { id: 1, kind: 'pine' as const, gx: 10, gy: 11, w: 1, d: 1, basePx: 0, scale: 1, subType: 0 },
     ];
     const target1 = getTargetContext(p1, world, flora, [], []);
     expect(target1.kind).toBe('flora');
@@ -391,14 +376,120 @@ describe('Verdant Gameplay Logic', () => {
 
     // Test soft-lock when directly facing empty tile (10, 11) but tree is at (11, 11)
     const offsetFlora = [
-      { id: 2, kind: 'oak' as const, gx: 11, gy: 11, w: 1, d: 1, basePx: 0, scale: 1 },
+      { id: 2, kind: 'oak' as const, gx: 11, gy: 11, w: 1, d: 1, basePx: 0, scale: 1, subType: 0 },
     ];
     const target2 = getTargetContext(p1, world, offsetFlora, [], []);
     expect(target2.kind).toBe('flora');
     expect(target2.gx).toBe(11);
     expect(target2.gy).toBe(11);
   });
+
+  it('wards off basic predators (wolves) near active campfires and light beacons', () => {
+    const world = createWorld(42);
+    const [p1, p2] = createPlayers();
+    p1.gx = 20;
+    p1.gy = 20;
+    p2.gx = 100;
+    p2.gy = 100;
+
+    // 1. Active campfire at (20, 20)
+    const campfire = { id: 101, kind: 'campfire' as const, gx: 20, gy: 20, w: 1, d: 1, hp: 120, maxHp: 120, basePx: 0 };
+    const buildings = [campfire];
+
+    // Wolf placed 4 tiles south of campfire (inside FIRE_WARD_RADIUS = 9.0)
+    const wolf = spawnCreature('wolf', 20, 24, 42);
+    wolf.traits = { speed: 2.0, aggression: 0.9, size: 1.0, fertility: 1.0 }; // Highly aggressive
+    wolf.state = 'idle';
+
+    const creatures = [wolf];
+    const events = updateCreatures(creatures, world, [p1, p2], [], buildings, 0.5, 0.1);
+
+    // Wolf should be warded off by fire, flee south away from campfire, and record ward event
+    expect(events.wardOccurred).toBe(true);
+    expect(wolf.state).toBe('flee');
+    expect(wolf.gy).toBeGreaterThan(24); // Moved further south away from (20, 20)
+  });
+
+  it('protects players and prey inside campfire sanctuary from predator targeting', () => {
+    const world = createWorld(42);
+    const [p1, p2] = createPlayers();
+    // Player 1 is standing directly next to active campfire
+    p1.gx = 20;
+    p1.gy = 20;
+    p2.gx = 200;
+    p2.gy = 200;
+
+    const campfire = { id: 102, kind: 'campfire' as const, gx: 20, gy: 21, w: 1, d: 1, hp: 100, maxHp: 120, basePx: 0 };
+    const buildings = [campfire];
+
+    // Wolf is positioned outside ward radius at (20, 32)
+    const wolf = spawnCreature('wolf', 20, 32, 42);
+    wolf.traits = { speed: 2.0, aggression: 0.95, size: 1.0, fertility: 1.0 };
+    wolf.state = 'idle';
+
+    expect(isNearActiveFireOrLight(p1.gx, p1.gy, buildings)).toBe(true);
+
+    const creatures = [wolf];
+    updateCreatures(creatures, world, [p1, p2], [], buildings, 0.8, 0.1);
+
+    // Wolf should NOT chase player 1 because player is within campfire sanctuary
+    expect(wolf.state).not.toBe('chase');
+    expect(wolf.state).not.toBe('attack');
+  });
+
+  it('does not ward off predators if campfire is extinguished (hp <= 0)', () => {
+    const world = createWorld(42);
+    const [p1, p2] = createPlayers();
+    p1.gx = 20;
+    p1.gy = 20;
+    p2.gx = 200;
+    p2.gy = 200;
+
+    // Extinguished campfire
+    const extinguishedCampfire = { id: 103, kind: 'campfire' as const, gx: 20, gy: 21, w: 1, d: 1, hp: 0, maxHp: 120, basePx: 0 };
+    const buildings = [extinguishedCampfire];
+
+    expect(isNearActiveFireOrLight(p1.gx, p1.gy, buildings)).toBe(false);
+
+    // Wolf placed 3 tiles away from player
+    const wolf = spawnCreature('wolf', 20, 23, 42);
+    wolf.traits = { speed: 2.0, aggression: 0.95, size: 1.0, fertility: 1.0 };
+    wolf.state = 'idle';
+
+    const creatures = [wolf];
+    updateCreatures(creatures, world, [p1, p2], [], buildings, 0.5, 0.1);
+
+    // With extinguished campfire, wolf aggressively targets player as normal
+    const aggressiveStates: readonly CreatureState[] = ['chase', 'attack'];
+    expect(aggressiveStates.includes(wolf.state)).toBe(true);
+  });
+
+  it('allows fearless monsters (trolls) to ignore fire warding', () => {
+    const world = createWorld(42);
+    const [p1, p2] = createPlayers();
+    p1.gx = 20;
+    p1.gy = 20;
+    p2.gx = 200;
+    p2.gy = 200;
+
+    const campfire = { id: 104, kind: 'campfire' as const, gx: 20, gy: 21, w: 1, d: 1, hp: 100, maxHp: 120, basePx: 0 };
+    const buildings = [campfire];
+
+    // Troll placed near campfire
+    const troll = spawnCreature('troll', 20, 24, 42);
+    troll.traits = { speed: 1.0, aggression: 0.95, size: 1.5, fertility: 0.5 };
+    troll.state = 'idle';
+
+    expect(SPECIES_REGISTRY.troll.fearsFire).toBe(false);
+
+    const creatures = [troll];
+    updateCreatures(creatures, world, [p1, p2], [], buildings, 0.5, 0.1);
+
+    // Troll does NOT flee from campfire; it sieges buildings or targets players
+    expect(troll.state).not.toBe('flee');
+  });
 });
+
 
 
 

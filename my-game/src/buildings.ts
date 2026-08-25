@@ -18,7 +18,7 @@ import {
 } from '@latticekit/draw';
 import { Rng } from '@latticekit/core';
 import { footprintBase, type Footprint } from '@latticekit/iso';
-import { TIMBER, STONE, TOWER, FLOOR } from './palette.js';
+import { TOWER, FLOOR } from './palette.js';
 import type { WorldTerrain } from './world.js';
 import { W, H, MAT_WATER } from './world.js';
 
@@ -28,7 +28,6 @@ export const WALL_WOOD    = hex('#795548');
 export const WALL_BEAM    = hex('#4e342e');
 export const WALL_STONE   = hex('#78909c');
 export const STONE_DARK   = hex('#546e7a');
-export const ROOF_GOLD    = hex('#f39c12');
 export const LANTERN_GLOW = hex('#f1c40f');
 export const BANNER_RED   = hex('#e74c3c');
 export const BANNER_BLUE  = hex('#3498db');
