@@ -1264,7 +1264,11 @@ const crocMassing: Massing = (w, v, _rng) => {
   // at rest, but the legs stay planted rather than trotting, unlike the pack/herd animals.
   const tailSway = Math.sin(phase * Math.PI * 2) * (isAttacking ? 0.22 : 0.10);
 
-  w.shadow(0.12, 0.08, 1.72, 1.86, 0.5);
+  // Slimmer than the first pass — a crocodile reads as a sleek ambush predator only when it is
+  // much longer than it is wide. Body/tail/head all narrow to about three-fifths of their old
+  // cross-section here, and the legs pull in to hug that narrower body, while every length-wise
+  // (nose-to-tail) measurement is untouched.
+  w.shadow(0.42, 0.08, 1.16, 1.86, 0.5);
 
   // Two eye bumps and a nostril ridge on top of the skull — real crocodilians float with only
   // these breaking the surface, and it is what makes the head silhouette read as croc rather
@@ -1273,107 +1277,107 @@ const crocMassing: Massing = (w, v, _rng) => {
     const jawZ = 0.16 - gape * 0.55;
     const snoutZ = 0.24 + gape;
     if (alongX) {
-      w.box(skullX, skullY, 0.52, 1.00, { color: CROC, h: 0.16, z: jawZ });
-      w.box(skullX + 0.36, skullY + 0.06, 0.44, 0.88, { color: CROC, h: 0.42, z: snoutZ });
-      w.box(skullX + 0.46, skullY + 0.20, 0.20, 0.22, { color: CROC_RIDGE, h: 0.13, z: snoutZ + 0.42 });
-      w.box(skullX + 0.50, skullY + 0.25, 0.11, 0.11, { color: CROC_EYE, h: 0.08, z: snoutZ + 0.55 });
-      w.box(skullX + 0.46, skullY + 0.62, 0.20, 0.22, { color: CROC_RIDGE, h: 0.13, z: snoutZ + 0.42 });
-      w.box(skullX + 0.50, skullY + 0.67, 0.11, 0.11, { color: CROC_EYE, h: 0.08, z: snoutZ + 0.55 });
-      w.box(skullX + 0.72, skullY + 0.40, 0.16, 0.20, { color: CROC_RIDGE, h: 0.07, z: snoutZ + 0.36 });
-      w.post(skullX + 0.06, skullY + 0.14, jawZ + 0.10, 0.11, CROC_TOOTH, 0.035);
-      w.post(skullX + 0.06, skullY + 0.76, jawZ + 0.10, 0.11, CROC_TOOTH, 0.035);
-      w.post(skullX + 0.30, skullY + 0.22, snoutZ + 0.34, 0.13, CROC_TOOTH, 0.035);
-      w.post(skullX + 0.30, skullY + 0.68, snoutZ + 0.34, 0.13, CROC_TOOTH, 0.035);
+      w.box(skullX, skullY, 0.52, 0.62, { color: CROC, h: 0.16, z: jawZ });
+      w.box(skullX + 0.36, skullY + 0.04, 0.44, 0.55, { color: CROC, h: 0.42, z: snoutZ });
+      w.box(skullX + 0.46, skullY + 0.12, 0.20, 0.14, { color: CROC_RIDGE, h: 0.13, z: snoutZ + 0.42 });
+      w.box(skullX + 0.50, skullY + 0.16, 0.11, 0.07, { color: CROC_EYE, h: 0.08, z: snoutZ + 0.55 });
+      w.box(skullX + 0.46, skullY + 0.38, 0.20, 0.14, { color: CROC_RIDGE, h: 0.13, z: snoutZ + 0.42 });
+      w.box(skullX + 0.50, skullY + 0.42, 0.11, 0.07, { color: CROC_EYE, h: 0.08, z: snoutZ + 0.55 });
+      w.box(skullX + 0.72, skullY + 0.25, 0.16, 0.12, { color: CROC_RIDGE, h: 0.07, z: snoutZ + 0.36 });
+      w.post(skullX + 0.06, skullY + 0.09, jawZ + 0.10, 0.11, CROC_TOOTH, 0.035);
+      w.post(skullX + 0.06, skullY + 0.47, jawZ + 0.10, 0.11, CROC_TOOTH, 0.035);
+      w.post(skullX + 0.30, skullY + 0.14, snoutZ + 0.34, 0.13, CROC_TOOTH, 0.035);
+      w.post(skullX + 0.30, skullY + 0.42, snoutZ + 0.34, 0.13, CROC_TOOTH, 0.035);
     } else {
-      w.box(skullX, skullY, 1.00, 0.52, { color: CROC, h: 0.16, z: jawZ });
-      w.box(skullX + 0.06, skullY + 0.36, 0.88, 0.44, { color: CROC, h: 0.42, z: snoutZ });
-      w.box(skullX + 0.20, skullY + 0.46, 0.22, 0.20, { color: CROC_RIDGE, h: 0.13, z: snoutZ + 0.42 });
-      w.box(skullX + 0.25, skullY + 0.50, 0.11, 0.11, { color: CROC_EYE, h: 0.08, z: snoutZ + 0.55 });
-      w.box(skullX + 0.62, skullY + 0.46, 0.22, 0.20, { color: CROC_RIDGE, h: 0.13, z: snoutZ + 0.42 });
-      w.box(skullX + 0.67, skullY + 0.50, 0.11, 0.11, { color: CROC_EYE, h: 0.08, z: snoutZ + 0.55 });
-      w.box(skullX + 0.40, skullY + 0.72, 0.20, 0.16, { color: CROC_RIDGE, h: 0.07, z: snoutZ + 0.36 });
-      w.post(skullX + 0.14, skullY + 0.06, jawZ + 0.10, 0.11, CROC_TOOTH, 0.035);
-      w.post(skullX + 0.76, skullY + 0.06, jawZ + 0.10, 0.11, CROC_TOOTH, 0.035);
-      w.post(skullX + 0.22, skullY + 0.30, snoutZ + 0.34, 0.13, CROC_TOOTH, 0.035);
-      w.post(skullX + 0.68, skullY + 0.30, snoutZ + 0.34, 0.13, CROC_TOOTH, 0.035);
+      w.box(skullX, skullY, 0.62, 0.52, { color: CROC, h: 0.16, z: jawZ });
+      w.box(skullX + 0.04, skullY + 0.36, 0.55, 0.44, { color: CROC, h: 0.42, z: snoutZ });
+      w.box(skullX + 0.12, skullY + 0.46, 0.14, 0.20, { color: CROC_RIDGE, h: 0.13, z: snoutZ + 0.42 });
+      w.box(skullX + 0.16, skullY + 0.50, 0.07, 0.11, { color: CROC_EYE, h: 0.08, z: snoutZ + 0.55 });
+      w.box(skullX + 0.38, skullY + 0.46, 0.14, 0.20, { color: CROC_RIDGE, h: 0.13, z: snoutZ + 0.42 });
+      w.box(skullX + 0.42, skullY + 0.50, 0.07, 0.11, { color: CROC_EYE, h: 0.08, z: snoutZ + 0.55 });
+      w.box(skullX + 0.25, skullY + 0.72, 0.12, 0.16, { color: CROC_RIDGE, h: 0.07, z: snoutZ + 0.36 });
+      w.post(skullX + 0.09, skullY + 0.06, jawZ + 0.10, 0.11, CROC_TOOTH, 0.035);
+      w.post(skullX + 0.47, skullY + 0.06, jawZ + 0.10, 0.11, CROC_TOOTH, 0.035);
+      w.post(skullX + 0.14, skullY + 0.30, snoutZ + 0.34, 0.13, CROC_TOOTH, 0.035);
+      w.post(skullX + 0.42, skullY + 0.30, snoutZ + 0.34, 0.13, CROC_TOOTH, 0.035);
     }
   };
 
   if (facing === 1) {
     // ── South: Facing Camera — tail far (low y), head near (high y). ──
-    w.box(0.86 + tailSway * 1.4, 0.02, 0.28, 0.20, { color: CROC, h: 0.13, z: 0.05 });
-    w.box(0.72 + tailSway, 0.10, 0.56, 0.34, { color: CROC, h: 0.19, z: 0.04 });
-    w.box(0.85 + tailSway, 0.14, 0.30, 0.24, { color: CROC_RIDGE, h: 0.09, z: 0.22 });
+    w.box(0.92 + tailSway * 1.4, 0.02, 0.16, 0.20, { color: CROC, h: 0.13, z: 0.05 });
+    w.box(0.84 + tailSway, 0.10, 0.32, 0.34, { color: CROC, h: 0.19, z: 0.04 });
+    w.box(0.92 + tailSway, 0.14, 0.16, 0.24, { color: CROC_RIDGE, h: 0.09, z: 0.22 });
 
-    w.box(0.20, 0.38, 0.30, 0.32, { color: CROC, h: 0.24 });
-    w.box(1.50, 0.38, 0.30, 0.32, { color: CROC, h: 0.24 });
+    w.box(0.50, 0.38, 0.24, 0.32, { color: CROC, h: 0.24 });
+    w.box(1.26, 0.38, 0.24, 0.32, { color: CROC, h: 0.24 });
 
-    w.box(0.42, 0.40 + lunge * 0.35, 1.16, 0.85, { color: CROC, h: 0.56, z: 0.10 });
-    w.box(0.86, 0.46 + lunge * 0.35, 0.28, 0.22, { color: CROC_RIDGE, h: 0.15, z: 0.66 });
-    w.box(0.86, 0.70 + lunge * 0.35, 0.28, 0.22, { color: CROC_RIDGE, h: 0.19, z: 0.66 });
-    w.box(0.86, 0.94 + lunge * 0.35, 0.28, 0.22, { color: CROC_RIDGE, h: 0.15, z: 0.66 });
+    w.box(0.68, 0.40 + lunge * 0.35, 0.64, 0.85, { color: CROC, h: 0.56, z: 0.10 });
+    w.box(0.92, 0.46 + lunge * 0.35, 0.16, 0.22, { color: CROC_RIDGE, h: 0.15, z: 0.66 });
+    w.box(0.92, 0.70 + lunge * 0.35, 0.16, 0.22, { color: CROC_RIDGE, h: 0.19, z: 0.66 });
+    w.box(0.92, 0.94 + lunge * 0.35, 0.16, 0.22, { color: CROC_RIDGE, h: 0.15, z: 0.66 });
 
-    w.box(0.20, 1.06 + lunge * 0.3, 0.30, 0.32, { color: CROC, h: 0.24 });
-    w.box(1.50, 1.06 + lunge * 0.3, 0.30, 0.32, { color: CROC, h: 0.24 });
+    w.box(0.50, 1.06 + lunge * 0.3, 0.24, 0.32, { color: CROC, h: 0.24 });
+    w.box(1.26, 1.06 + lunge * 0.3, 0.24, 0.32, { color: CROC, h: 0.24 });
 
-    head(0.48, 1.20 + lunge, false);
+    head(0.69, 1.20 + lunge, false);
 
   } else if (facing === 0) {
     // ── North: Facing Away — head far (low y), tail near (high y). ──
-    head(0.48, 0.02 - lunge * 0.6, false);
+    head(0.69, 0.02 - lunge * 0.6, false);
 
-    w.box(0.20, 0.38, 0.30, 0.32, { color: CROC, h: 0.24 });
-    w.box(1.50, 0.38, 0.30, 0.32, { color: CROC, h: 0.24 });
+    w.box(0.50, 0.38, 0.24, 0.32, { color: CROC, h: 0.24 });
+    w.box(1.26, 0.38, 0.24, 0.32, { color: CROC, h: 0.24 });
 
-    w.box(0.42, 0.74, 1.16, 0.85, { color: CROC, h: 0.56, z: 0.10 });
-    w.box(0.86, 0.80, 0.28, 0.22, { color: CROC_RIDGE, h: 0.15, z: 0.66 });
-    w.box(0.86, 1.04, 0.28, 0.22, { color: CROC_RIDGE, h: 0.19, z: 0.66 });
-    w.box(0.86, 1.28, 0.28, 0.22, { color: CROC_RIDGE, h: 0.15, z: 0.66 });
+    w.box(0.68, 0.74, 0.64, 0.85, { color: CROC, h: 0.56, z: 0.10 });
+    w.box(0.92, 0.80, 0.16, 0.22, { color: CROC_RIDGE, h: 0.15, z: 0.66 });
+    w.box(0.92, 1.04, 0.16, 0.22, { color: CROC_RIDGE, h: 0.19, z: 0.66 });
+    w.box(0.92, 1.28, 0.16, 0.22, { color: CROC_RIDGE, h: 0.15, z: 0.66 });
 
-    w.box(0.20, 1.30, 0.30, 0.32, { color: CROC, h: 0.24 });
-    w.box(1.50, 1.30, 0.30, 0.32, { color: CROC, h: 0.24 });
+    w.box(0.50, 1.30, 0.24, 0.32, { color: CROC, h: 0.24 });
+    w.box(1.26, 1.30, 0.24, 0.32, { color: CROC, h: 0.24 });
 
-    w.box(0.72 + tailSway, 1.56, 0.56, 0.34, { color: CROC, h: 0.19, z: 0.04 });
-    w.box(0.85 + tailSway, 1.62, 0.30, 0.24, { color: CROC_RIDGE, h: 0.09, z: 0.22 });
-    w.box(0.86 + tailSway * 1.4, 1.78, 0.28, 0.20, { color: CROC, h: 0.13, z: 0.05 });
+    w.box(0.84 + tailSway, 1.56, 0.32, 0.34, { color: CROC, h: 0.19, z: 0.04 });
+    w.box(0.92 + tailSway, 1.62, 0.16, 0.24, { color: CROC_RIDGE, h: 0.09, z: 0.22 });
+    w.box(0.92 + tailSway * 1.4, 1.78, 0.16, 0.20, { color: CROC, h: 0.13, z: 0.05 });
 
   } else if (facing === 2) {
     // ── East: Facing +gx — tail far (low x), head near (high x). ──
-    w.box(0.02, 0.86 + tailSway * 1.4, 0.20, 0.28, { color: CROC, h: 0.13, z: 0.05 });
-    w.box(0.10, 0.72 + tailSway, 0.34, 0.56, { color: CROC, h: 0.19, z: 0.04 });
-    w.box(0.14, 0.85 + tailSway, 0.24, 0.30, { color: CROC_RIDGE, h: 0.09, z: 0.22 });
+    w.box(0.02, 0.92 + tailSway * 1.4, 0.20, 0.16, { color: CROC, h: 0.13, z: 0.05 });
+    w.box(0.10, 0.84 + tailSway, 0.34, 0.32, { color: CROC, h: 0.19, z: 0.04 });
+    w.box(0.14, 0.92 + tailSway, 0.24, 0.16, { color: CROC_RIDGE, h: 0.09, z: 0.22 });
 
-    w.box(0.38, 0.20, 0.32, 0.30, { color: CROC, h: 0.24 });
-    w.box(0.38, 1.50, 0.32, 0.30, { color: CROC, h: 0.24 });
+    w.box(0.38, 0.50, 0.32, 0.24, { color: CROC, h: 0.24 });
+    w.box(0.38, 1.26, 0.32, 0.24, { color: CROC, h: 0.24 });
 
-    w.box(0.40 + lunge * 0.35, 0.42, 0.85, 1.16, { color: CROC, h: 0.56, z: 0.10 });
-    w.box(0.46 + lunge * 0.35, 0.86, 0.22, 0.28, { color: CROC_RIDGE, h: 0.15, z: 0.66 });
-    w.box(0.70 + lunge * 0.35, 0.86, 0.22, 0.28, { color: CROC_RIDGE, h: 0.19, z: 0.66 });
-    w.box(0.94 + lunge * 0.35, 0.86, 0.22, 0.28, { color: CROC_RIDGE, h: 0.15, z: 0.66 });
+    w.box(0.40 + lunge * 0.35, 0.68, 0.85, 0.64, { color: CROC, h: 0.56, z: 0.10 });
+    w.box(0.46 + lunge * 0.35, 0.92, 0.22, 0.16, { color: CROC_RIDGE, h: 0.15, z: 0.66 });
+    w.box(0.70 + lunge * 0.35, 0.92, 0.22, 0.16, { color: CROC_RIDGE, h: 0.19, z: 0.66 });
+    w.box(0.94 + lunge * 0.35, 0.92, 0.22, 0.16, { color: CROC_RIDGE, h: 0.15, z: 0.66 });
 
-    w.box(1.06 + lunge * 0.3, 0.20, 0.32, 0.30, { color: CROC, h: 0.24 });
-    w.box(1.06 + lunge * 0.3, 1.50, 0.32, 0.30, { color: CROC, h: 0.24 });
+    w.box(1.06 + lunge * 0.3, 0.50, 0.32, 0.24, { color: CROC, h: 0.24 });
+    w.box(1.06 + lunge * 0.3, 1.26, 0.32, 0.24, { color: CROC, h: 0.24 });
 
-    head(1.20 + lunge, 0.48, true);
+    head(1.20 + lunge, 0.69, true);
 
   } else {
     // ── West: Facing -gx — tail far (high x), head near (low x). ──
-    head(0.32 - lunge, 0.48, true);
+    head(0.32 - lunge, 0.69, true);
 
-    w.box(1.50, 0.20, 0.32, 0.30, { color: CROC, h: 0.24 });
-    w.box(1.50, 1.50, 0.32, 0.30, { color: CROC, h: 0.24 });
+    w.box(1.50, 0.50, 0.32, 0.24, { color: CROC, h: 0.24 });
+    w.box(1.50, 1.26, 0.32, 0.24, { color: CROC, h: 0.24 });
 
-    w.box(0.75, 0.42, 0.85, 1.16, { color: CROC, h: 0.56, z: 0.10 });
-    w.box(0.86, 0.86, 0.22, 0.28, { color: CROC_RIDGE, h: 0.15, z: 0.66 });
-    w.box(1.10, 0.86, 0.22, 0.28, { color: CROC_RIDGE, h: 0.19, z: 0.66 });
-    w.box(1.34, 0.86, 0.22, 0.28, { color: CROC_RIDGE, h: 0.15, z: 0.66 });
+    w.box(0.75, 0.68, 0.85, 0.64, { color: CROC, h: 0.56, z: 0.10 });
+    w.box(0.86, 0.92, 0.22, 0.16, { color: CROC_RIDGE, h: 0.15, z: 0.66 });
+    w.box(1.10, 0.92, 0.22, 0.16, { color: CROC_RIDGE, h: 0.19, z: 0.66 });
+    w.box(1.34, 0.92, 0.22, 0.16, { color: CROC_RIDGE, h: 0.15, z: 0.66 });
 
-    w.box(0.82, 0.20, 0.32, 0.30, { color: CROC, h: 0.24 });
-    w.box(0.82, 1.50, 0.32, 0.30, { color: CROC, h: 0.24 });
+    w.box(0.82, 0.50, 0.32, 0.24, { color: CROC, h: 0.24 });
+    w.box(0.82, 1.26, 0.32, 0.24, { color: CROC, h: 0.24 });
 
-    w.box(1.56 + tailSway, 0.72 + tailSway, 0.34, 0.56, { color: CROC, h: 0.19, z: 0.04 });
-    w.box(1.62 + tailSway, 0.85 + tailSway, 0.24, 0.30, { color: CROC_RIDGE, h: 0.09, z: 0.22 });
-    w.box(1.78 + tailSway * 1.4, 0.86 + tailSway, 0.20, 0.28, { color: CROC, h: 0.13, z: 0.05 });
+    w.box(1.56 + tailSway, 0.84 + tailSway, 0.34, 0.32, { color: CROC, h: 0.19, z: 0.04 });
+    w.box(1.62 + tailSway, 0.92 + tailSway, 0.24, 0.16, { color: CROC_RIDGE, h: 0.09, z: 0.22 });
+    w.box(1.78 + tailSway * 1.4, 0.92 + tailSway, 0.20, 0.16, { color: CROC, h: 0.13, z: 0.05 });
   }
 };
 
