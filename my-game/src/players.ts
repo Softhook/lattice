@@ -10,14 +10,17 @@
  */
 
 import { clamp } from '@latticekit/core';
+import { heightAt } from '@latticekit/iso';
+import { hex, type Ink } from '@latticekit/draw';
 import type { WorldTerrain } from './world.js';
 import { dig, raise, isWalkable, W, H } from './world.js';
 import type { Building, BuildingKind } from './buildings.js';
-import { placeBuilding, isTileOccupiedBySolidBuilding, BUILDING_COSTS } from './buildings.js';
+import { placeBuilding, isTileOccupiedBySolidBuilding, BUILDING_COSTS, BUILDING_REGISTRY } from './buildings.js';
 import type { FloraItem } from './flora.js';
 import { harvestFloraAt, FLORA_REGISTRY } from './flora.js';
 import type { WeaponKind } from './combat.js';
 import { WEAPONS, CRAFTABLE_WEAPONS } from './combat.js';
+import type { Creature } from './creatures.js';
 
 // ── Player state ───────────────────────────────────────────────────────────────
 
@@ -36,6 +39,12 @@ export interface Player {
   /** Current tile position (non-integer while walking). */
   gx: number;
   gy: number;
+  /** Current smoothed velocity vector for tactile physics momentum. */
+  vx: number;
+  vy: number;
+  /** Smoothed visual cursor tile position (eliminates jitter on rapid turns). */
+  cursorGx: number;
+  cursorGy: number;
   /** Which grid direction the player is facing. Affects action target tile. */
   facing: Facing;
   /** Current active tool/mode. Defaults to 'move'. */
@@ -70,8 +79,14 @@ export interface Player {
   msgTimer: number;
 }
 
-/** Tiles per second at normal walk speed. */
-const WALK_SPEED = 3.2;
+/** Max tiles per second at normal walk speed. */
+const MAX_WALK_SPEED = 3.3;
+
+/** Acceleration rate in tiles/sec^2 for smooth movement weight. */
+const ACCEL = 22.0;
+
+/** Deceleration/friction rate when releasing keys. */
+const FRICTION = 16.0;
 
 /** Max player HP. */
 const MAX_HP = 100;
@@ -84,6 +99,7 @@ const RESPAWN_TIME = 3;
 
 export const PLAYER_MODES: readonly PlayerMode[] = [
   'move',
+  'campfire',
   'wood_wall',
   'stone_wall',
   'wood_tower',
@@ -92,6 +108,7 @@ export const PLAYER_MODES: readonly PlayerMode[] = [
 ];
 
 export const BUILD_KINDS: readonly BuildingKind[] = [
+  'campfire',
   'wood_wall',
   'stone_wall',
   'wood_tower',
@@ -115,6 +132,10 @@ function makePlayer(index: 0 | 1, gx: number, gy: number): Player {
     index,
     gx,
     gy,
+    vx: 0,
+    vy: 0,
+    cursorGx: gx,
+    cursorGy: gy + 1,
     facing: 's',
     mode: 'move',
     buildKind: 'wood_wall',
@@ -215,71 +236,130 @@ export interface MoveResult {
 }
 
 /**
- * Move a player by (dx, dy) grid directions this tick.
+ * Move a player with tactile momentum physics, stable turn hysteresis, and smooth cursor interpolation.
  * Returns true if footstep trigger fired.
  */
 export function movePlayer(
   player: Player,
-  dx: number,
-  dy: number,
+  inputDx: number,
+  inputDy: number,
   world: WorldTerrain,
   buildings: readonly Building[],
   dt: number,
 ): boolean {
   if (player.respawnTimer > 0) {
     player.isMoving = false;
+    player.vx = 0;
+    player.vy = 0;
     return false;
   }
-  if (dx === 0 && dy === 0) {
-    player.isMoving = false;
+
+  // Target input velocity
+  let targetVx = 0;
+  let targetVy = 0;
+
+  if (inputDx !== 0 || inputDy !== 0) {
+    const mag = inputDx !== 0 && inputDy !== 0 ? 0.7071 : 1.0;
+    targetVx = inputDx * MAX_WALK_SPEED * mag;
+    targetVy = inputDy * MAX_WALK_SPEED * mag;
+
+    // Stable turning with directional hysteresis (prevents rapid/glitchy flipping)
+    const absX = Math.abs(inputDx);
+    const absY = Math.abs(inputDy);
+    if (absX > absY * 1.25) {
+      player.facing = inputDx > 0 ? 'e' : 'w';
+    } else if (absY > absX * 1.25) {
+      player.facing = inputDy > 0 ? 's' : 'n';
+    } else {
+      // Near-equal diagonal: preserve current axis if still holding that direction
+      if (player.facing === 'n' && inputDy < 0) { /* keep n */ }
+      else if (player.facing === 's' && inputDy > 0) { /* keep s */ }
+      else if (player.facing === 'e' && inputDx > 0) { /* keep e */ }
+      else if (player.facing === 'w' && inputDx < 0) { /* keep w */ }
+      else if (absY >= absX) {
+        player.facing = inputDy > 0 ? 's' : 'n';
+      } else {
+        player.facing = inputDx > 0 ? 'e' : 'w';
+      }
+    }
+  }
+
+  // Smooth acceleration & deceleration (adds tactile weight)
+  const accelRate = (inputDx !== 0 || inputDy !== 0) ? ACCEL : FRICTION;
+  player.vx += (targetVx - player.vx) * Math.min(1.0, accelRate * dt);
+  player.vy += (targetVy - player.vy) * Math.min(1.0, accelRate * dt);
+
+  // Velocity deadzone
+  if (Math.abs(player.vx) < 0.01 && inputDx === 0) player.vx = 0;
+  if (Math.abs(player.vy) < 0.01 && inputDy === 0) player.vy = 0;
+
+  const currentSpeed = Math.sqrt(player.vx * player.vx + player.vy * player.vy);
+  player.isMoving = currentSpeed > 0.08;
+
+  if (player.isMoving) {
+    player.walkCycle = (player.walkCycle + currentSpeed * dt * 0.9) % 1;
+  } else {
     player.walkCycle = 0;
-    return false;
   }
 
-  // Update facing from movement direction
-  if      (dy < 0) player.facing = 'n';
-  else if (dy > 0) player.facing = 's';
-  else if (dx < 0) player.facing = 'w';
-  else             player.facing = 'e';
+  // Position integration
+  const nx = player.gx + player.vx * dt;
+  const ny = player.gy + player.vy * dt;
 
-  player.isMoving = true;
-  player.walkCycle = (player.walkCycle + dt * 1.8) % 1;
+  const tileX = clamp(Math.floor(nx), 0, W - 1);
+  const tileY = clamp(Math.floor(ny), 0, H - 1);
 
-  const speed  = WALK_SPEED * dt;
-  const mag    = dx !== 0 && dy !== 0 ? 0.7071 : 1; // diagonal normalisation
-  const nx     = player.gx + dx * speed * mag;
-  const ny     = player.gy + dy * speed * mag;
-
-  // Check walkability and solid building obstacles for the destination tile
-  const tileX  = clamp(Math.floor(nx), 0, W - 1);
-  const tileY  = clamp(Math.floor(ny), 0, H - 1);
-
+  let stepped = false;
   if (isWalkable(world, tileX, tileY) && !isTileOccupiedBySolidBuilding(tileX, tileY, buildings)) {
     player.gx = clamp(nx, 0, W - 1);
     player.gy = clamp(ny, 0, H - 1);
 
-    player.moveAccum += speed * mag;
+    player.moveAccum += currentSpeed * dt;
     if (player.moveAccum >= 0.85) {
       player.moveAccum = 0;
-      return true; // Footstep sound trigger
+      stepped = true;
+    }
+  } else {
+    // Collision slide along one axis if possible
+    const curTileX = clamp(Math.floor(player.gx), 0, W - 1);
+    const curTileY = clamp(Math.floor(player.gy), 0, H - 1);
+
+    if (isWalkable(world, curTileX, tileY) && !isTileOccupiedBySolidBuilding(curTileX, tileY, buildings)) {
+      player.gy = clamp(ny, 0, H - 1);
+      player.vx = 0;
+    } else if (isWalkable(world, tileX, curTileY) && !isTileOccupiedBySolidBuilding(tileX, curTileY, buildings)) {
+      player.gx = clamp(nx, 0, W - 1);
+      player.vy = 0;
+    } else {
+      player.vx = 0;
+      player.vy = 0;
     }
   }
 
-  return false;
+  // Smooth cursor tracking with exponential damp (eliminates snappy cursor glitches)
+  const targetTilePos = facingTile(player);
+  player.cursorGx += (targetTilePos.gx - player.cursorGx) * Math.min(1.0, dt * 18.0);
+  player.cursorGy += (targetTilePos.gy - player.cursorGy) * Math.min(1.0, dt * 18.0);
+
+  return stepped;
 }
 
 // ── Actions ────────────────────────────────────────────────────────────────────
 
-/** The tile the player is facing — where their action lands. */
-export function facingTile(player: Player): { gx: number; gy: number } {
-  const gx = Math.floor(player.gx);
-  const gy = Math.floor(player.gy);
+/** The tile immediately in front of the player (an additional square ahead so it is clearly in front of the character model). */
+export function facingTile(player: Player, dist = 1.6): { gx: number; gy: number } {
+  let targetGx = player.gx;
+  let targetGy = player.gy;
   switch (player.facing) {
-    case 'n': return { gx, gy: Math.max(0, gy - 1) };
-    case 's': return { gx, gy: Math.min(H - 1, gy + 1) };
-    case 'e': return { gx: Math.min(W - 1, gx + 1), gy };
-    case 'w': return { gx: Math.max(0, gx - 1), gy };
+    case 'n': targetGy -= dist; break;
+    case 's': targetGy += dist; break;
+    case 'e': targetGx += dist; break;
+    case 'w': targetGx -= dist; break;
   }
+  return {
+    gx: clamp(Math.round(targetGx), 0, W - 1),
+    gy: clamp(Math.round(targetGy), 0, H - 1),
+  };
 }
 
 /** Build the currently selected structure at the player's facing tile if affordable. */
@@ -307,14 +387,14 @@ export function buildAtFacing(
     player.inventory.stone -= cost.stone;
     if (cost.fiber !== undefined) player.inventory.fiber -= cost.fiber;
 
-    player.lastActionMsg = `BUILT ${kind.replace('_', ' ').toUpperCase()}`;
+    player.lastActionMsg = `PLACED ${kind.replace('_', ' ').toUpperCase()}!`;
     player.msgTimer = 2.0;
   }
 
   return placed;
 }
 
-export type InteractType = 'chop' | 'mine' | 'forage' | 'repair' | 'none';
+export type InteractType = 'chop' | 'mine' | 'forage' | 'repair' | 'stoke' | 'none';
 
 export interface InteractResult {
   type: InteractType;
@@ -322,13 +402,14 @@ export interface InteractResult {
 }
 
 /**
- * Interact / Harvest / Mine / Repair at the player's facing tile.
- *
- * - Chops down trees (yields Wood)
- * - Mines boulders (yields Stone)
- * - Gathers bushes & flowers (yields Wood / Fiber)
- * - Repairs damaged buildings
- */
+  * Interact / Harvest / Mine / Repair / Stoke at the player's facing tile.
+  *
+  * - Chops down trees (yields Wood)
+  * - Mines boulders (yields Stone)
+  * - Gathers bushes & flowers (yields Wood / Fiber)
+  * - Stokes campfire with wood (+40s fuel)
+  * - Repairs damaged buildings
+  */
 export function interactAtFacing(
   player: Player,
   world: WorldTerrain,
@@ -336,56 +417,81 @@ export function interactAtFacing(
   buildings: Building[],
 ): InteractResult {
   if (player.respawnTimer > 0) return { type: 'none', label: '' };
-  const { gx, gy } = facingTile(player);
 
-  // 1. Check for flora at the facing tile to harvest
-  const harvest = harvestFloraAt(flora, gx, gy);
-  if (harvest !== undefined) {
-    const def = FLORA_REGISTRY[harvest.item.kind];
-    const isTree = def.category === 'tree';
-    const isRock = def.category === 'rock';
-    const axeBonus = (player.weapon === 'axe' && isTree) ? 2 : 0;
+  const primary = facingTile(player, 1.6);
+  const close = facingTile(player, 0.9);
+  const candidates = [primary, close];
 
-    player.hurtFlash = 0.12;
-    player.inventory.wood += harvest.wood + axeBonus;
-    player.inventory.stone += harvest.stone;
-    player.inventory.fiber += harvest.fiber;
+  for (let ci = 0; ci < candidates.length; ci++) {
+    const tile = candidates[ci];
+    if (tile === undefined) continue;
+    const { gx, gy } = tile;
 
-    const label = axeBonus > 0 ? `${harvest.label} (+2 AXE BONUS)` : harvest.label;
-    player.lastActionMsg = label;
-    player.msgTimer = 2.2;
+    // 1. Check for flora at the tile to harvest
+    const harvest = harvestFloraAt(flora, gx, gy);
+    if (harvest !== undefined) {
+      const def = FLORA_REGISTRY[harvest.item.kind];
+      const isTree = def.category === 'tree';
+      const isRock = def.category === 'rock';
+      const axeBonus = (player.weapon === 'axe' && isTree) ? 2 : 0;
 
-    const soundType: InteractType =
-      isTree ? 'chop' :
-      isRock ? 'mine' : 'forage';
+      player.hurtFlash = 0.12;
+      player.inventory.wood += harvest.wood + axeBonus;
+      player.inventory.stone += harvest.stone;
+      player.inventory.fiber += harvest.fiber;
 
-    return { type: soundType, label };
-  }
+      const label = axeBonus > 0 ? `${harvest.label} (+2 AXE BONUS)` : harvest.label;
+      player.lastActionMsg = label;
+      player.msgTimer = 2.2;
 
-  // 2. Check if facing a building (can repair building if damaged)
-  for (let i = 0; i < buildings.length; i++) {
-    const b = buildings[i];
-    if (b === undefined || b.hp <= 0) continue;
-    if (gx >= b.gx && gx < b.gx + b.w && gy >= b.gy && gy < b.gy + b.d) {
-      if (b.hp < b.maxHp) {
-        if (player.inventory.wood > 0 || player.inventory.stone > 0) {
-          if (b.kind.includes('stone') && player.inventory.stone > 0) {
-            player.inventory.stone -= 1;
-          } else if (player.inventory.wood > 0) {
+      const soundType: InteractType =
+        isTree ? 'chop' :
+        isRock ? 'mine' : 'forage';
+
+      return { type: soundType, label };
+    }
+
+    // 2. Check for buildings / campfires at the tile to repair / stoke
+    for (let i = 0; i < buildings.length; i++) {
+      const b = buildings[i];
+      if (b === undefined || b.hp <= 0) continue;
+      if (gx >= b.gx && gx < b.gx + b.w && gy >= b.gy && gy < b.gy + b.d) {
+        if (b.kind === 'campfire') {
+          if (player.inventory.wood > 0 && b.hp < b.maxHp) {
             player.inventory.wood -= 1;
+            b.hp = Math.min(b.maxHp, b.hp + 40);
+            player.hurtFlash = 0.08;
+            const msg = 'STOKED FIRE (+40s FUEL)';
+            player.lastActionMsg = msg;
+            player.msgTimer = 2.0;
+            return { type: 'stoke', label: msg };
           }
-          b.hp = Math.min(b.maxHp, b.hp + 40);
-          player.hurtFlash = 0.1;
-          const msg = `REPAIRED ${b.kind.replace('_', ' ').toUpperCase()} (+40 HP)`;
-          player.lastActionMsg = msg;
-          player.msgTimer = 2.0;
-          return { type: 'repair', label: msg };
+          const statusMsg = `CAMPFIRE (${Math.round(b.hp)}s FUEL)`;
+          player.lastActionMsg = statusMsg;
+          player.msgTimer = 1.5;
+          return { type: 'none', label: statusMsg };
         }
+
+        if (b.hp < b.maxHp) {
+          if (player.inventory.wood > 0 || player.inventory.stone > 0) {
+            if (b.kind.includes('stone') && player.inventory.stone > 0) {
+              player.inventory.stone -= 1;
+            } else if (player.inventory.wood > 0) {
+              player.inventory.wood -= 1;
+            }
+            b.hp = Math.min(b.maxHp, b.hp + 40);
+            player.hurtFlash = 0.1;
+            const msg = `REPAIRED ${b.kind.replace('_', ' ').toUpperCase()} (+40 HP)`;
+            player.lastActionMsg = msg;
+            player.msgTimer = 2.0;
+            return { type: 'repair', label: msg };
+          }
+        }
+        const statusMsg = `${b.kind.replace('_', ' ').toUpperCase()} (HP: ${Math.round(b.hp)}/${b.maxHp})`;
+        player.lastActionMsg = statusMsg;
+        player.msgTimer = 1.5;
+        return { type: 'none', label: statusMsg };
       }
-      const statusMsg = `${b.kind.replace('_', ' ').toUpperCase()} (HP: ${Math.round(b.hp)}/${b.maxHp})`;
-      player.lastActionMsg = statusMsg;
-      player.msgTimer = 1.5;
-      return { type: 'none', label: statusMsg };
     }
   }
 
@@ -406,15 +512,207 @@ export function raiseAtFacing(player: Player, world: WorldTerrain): boolean {
   return raise(world, gx, gy);
 }
 
-/** Cycle through player modes: move -> wood_wall -> stone_wall -> wood_tower -> stone_tower -> floor -> move. */
+/**
+ * Cycle through available player build/craft modes that the player can actually afford.
+ * Skips options the player does not have materials for.
+ * If no crafting options are affordable, stays in 'move' mode.
+ */
 export function cycleBuildKind(player: Player): PlayerMode {
-  const idx = PLAYER_MODES.indexOf(player.mode);
-  const nextMode = PLAYER_MODES[(idx + 1) % PLAYER_MODES.length] as PlayerMode;
-  player.mode = nextMode;
-  if (nextMode !== 'move') {
-    player.buildKind = nextMode;
+  const currentIdx = PLAYER_MODES.indexOf(player.mode);
+  const total = PLAYER_MODES.length;
+
+  for (let offset = 1; offset <= total; offset++) {
+    const candidate = PLAYER_MODES[(currentIdx + offset) % total] as PlayerMode;
+    if (candidate === 'move') {
+      player.mode = 'move';
+      return 'move';
+    }
+    if (canAffordBuilding(player, candidate)) {
+      player.mode = candidate;
+      player.buildKind = candidate;
+      return candidate;
+    }
   }
-  return player.mode;
+
+  player.mode = 'move';
+  player.lastActionMsg = 'NO MATERIALS TO BUILD (GATHER WOOD/STONE/FIBER)';
+  player.msgTimer = 2.0;
+  return 'move';
+}
+
+// ── Target & Context Cursor ───────────────────────────────────────────────────
+
+export type TargetContextKind = 'creature' | 'flora' | 'campfire' | 'repair' | 'building' | 'build' | 'terrain' | 'none';
+
+export interface TargetContext {
+  kind: TargetContextKind;
+  gx: number;
+  gy: number;
+  basePx: number;
+  actionKey: string;
+  actionLabel: string;
+  subLabel: string;
+  color: Ink;
+}
+
+const TARGET_SCRATCH: TargetContext = {
+  kind: 'none',
+  gx: 0,
+  gy: 0,
+  basePx: 0,
+  actionKey: '[Space]',
+  actionLabel: '',
+  subLabel: '',
+  color: 0xffffffff,
+};
+
+/**
+ * Compute what the player is currently facing and targeting in the world.
+ * Checks target tile situated an additional square ahead in front of character model.
+ * Zero heap allocations on the 60 Hz frame path.
+ */
+export function getTargetContext(
+  player: Player,
+  world: WorldTerrain,
+  flora: readonly FloraItem[],
+  creatures: readonly Creature[],
+  buildings: readonly Building[],
+): TargetContext {
+  const actKey = player.index === 0 ? '[Space]' : '[N]';
+
+  if (player.respawnTimer > 0) {
+    TARGET_SCRATCH.kind = 'none';
+    TARGET_SCRATCH.actionLabel = '';
+    TARGET_SCRATCH.subLabel = '';
+    return TARGET_SCRATCH;
+  }
+
+  const primary = facingTile(player, 1.6);
+  const close = facingTile(player, 0.9);
+  const candidates = [primary, close];
+
+  // 1. Build mode active: target is the placement ghost tile (visual ghost rendered without redundant text)
+  if (player.mode !== 'move') {
+    TARGET_SCRATCH.kind = 'build';
+    TARGET_SCRATCH.gx = primary.gx;
+    TARGET_SCRATCH.gy = primary.gy;
+    TARGET_SCRATCH.basePx = heightAt(world.field, primary.gx, primary.gy);
+    TARGET_SCRATCH.actionKey = actKey;
+    TARGET_SCRATCH.actionLabel = '';
+    TARGET_SCRATCH.subLabel = '';
+    TARGET_SCRATCH.color = hex('#f1c40f');
+    return TARGET_SCRATCH;
+  }
+
+  // 2. Combat: check if a living creature is in melee attack reach & facing cone
+  const weapon = WEAPONS[player.weapon];
+  if (!weapon.isRanged) {
+    for (let i = 0; i < creatures.length; i++) {
+      const c = creatures[i];
+      if (c === undefined || c.hp <= 0) continue;
+      const dx = c.gx - player.gx;
+      const dy = c.gy - player.gy;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist <= weapon.reach) {
+        let inCone = false;
+        switch (player.facing) {
+          case 'n': inCone = dy < 0 && Math.abs(dx) < 1.1; break;
+          case 's': inCone = dy > 0 && Math.abs(dx) < 1.1; break;
+          case 'e': inCone = dx > 0 && Math.abs(dy) < 1.1; break;
+          case 'w': inCone = dx < 0 && Math.abs(dy) < 1.1; break;
+        }
+        if (inCone) {
+          TARGET_SCRATCH.kind = 'creature';
+          TARGET_SCRATCH.gx = c.gx;
+          TARGET_SCRATCH.gy = c.gy;
+          TARGET_SCRATCH.basePx = heightAt(world.field, c.gx, c.gy);
+          TARGET_SCRATCH.actionKey = actKey;
+          TARGET_SCRATCH.actionLabel = `ATTACK ${c.species.toUpperCase()}`;
+          TARGET_SCRATCH.subLabel = `HP: ${Math.round(c.hp)}`;
+          TARGET_SCRATCH.color = hex('#e74c3c');
+          return TARGET_SCRATCH;
+        }
+      }
+    }
+  }
+
+  // 3. Flora at target or adjacent tile
+  for (let ci = 0; ci < candidates.length; ci++) {
+    const tile = candidates[ci];
+    if (tile === undefined) continue;
+    for (let i = 0; i < flora.length; i++) {
+      const f = flora[i];
+      if (f !== undefined && f.gx === tile.gx && f.gy === tile.gy) {
+        const fDef = FLORA_REGISTRY[f.kind];
+        const isTree = fDef.category === 'tree';
+        const isRock = fDef.category === 'rock';
+        TARGET_SCRATCH.kind = 'flora';
+        TARGET_SCRATCH.gx = tile.gx;
+        TARGET_SCRATCH.gy = tile.gy;
+        TARGET_SCRATCH.basePx = heightAt(world.field, tile.gx, tile.gy);
+        TARGET_SCRATCH.actionKey = actKey;
+        TARGET_SCRATCH.actionLabel = isTree ? 'CHOP' : isRock ? 'MINE' : 'FORAGE';
+        TARGET_SCRATCH.subLabel = fDef.name.toUpperCase();
+        TARGET_SCRATCH.color = isTree ? hex('#d4a373') : isRock ? hex('#b0bec5') : hex('#2ecc71');
+        return TARGET_SCRATCH;
+      }
+    }
+  }
+
+  // 4. Buildings at target or adjacent tile
+  for (let ci = 0; ci < candidates.length; ci++) {
+    const tile = candidates[ci];
+    if (tile === undefined) continue;
+    for (let i = 0; i < buildings.length; i++) {
+      const b = buildings[i];
+      if (b === undefined || b.hp <= 0) continue;
+      if (tile.gx >= b.gx && tile.gx < b.gx + b.w && tile.gy >= b.gy && tile.gy < b.gy + b.d) {
+        if (b.kind === 'campfire') {
+          TARGET_SCRATCH.kind = 'campfire';
+          TARGET_SCRATCH.gx = b.gx;
+          TARGET_SCRATCH.gy = b.gy;
+          TARGET_SCRATCH.basePx = b.basePx;
+          TARGET_SCRATCH.actionKey = actKey;
+          TARGET_SCRATCH.actionLabel = player.inventory.wood > 0 && b.hp < b.maxHp ? 'STOKE FIRE' : 'CAMPFIRE';
+          TARGET_SCRATCH.subLabel = `${Math.round(b.hp)}s FUEL`;
+          TARGET_SCRATCH.color = hex('#ff9f43');
+          return TARGET_SCRATCH;
+        }
+        if (b.hp < b.maxHp) {
+          TARGET_SCRATCH.kind = 'repair';
+          TARGET_SCRATCH.gx = b.gx;
+          TARGET_SCRATCH.gy = b.gy;
+          TARGET_SCRATCH.basePx = b.basePx;
+          TARGET_SCRATCH.actionKey = actKey;
+          TARGET_SCRATCH.actionLabel = `REPAIR (+40 HP)`;
+          TARGET_SCRATCH.subLabel = `${b.kind.replace('_', ' ').toUpperCase()} (${Math.round(b.hp)}/${b.maxHp})`;
+          TARGET_SCRATCH.color = hex('#3498db');
+          return TARGET_SCRATCH;
+        }
+        // Full health buildings are static props (not interactable with action key)
+        TARGET_SCRATCH.kind = 'building';
+        TARGET_SCRATCH.gx = b.gx;
+        TARGET_SCRATCH.gy = b.gy;
+        TARGET_SCRATCH.basePx = b.basePx;
+        TARGET_SCRATCH.actionKey = actKey;
+        TARGET_SCRATCH.actionLabel = '';
+        TARGET_SCRATCH.subLabel = '';
+        TARGET_SCRATCH.color = hex('#78909c');
+        return TARGET_SCRATCH;
+      }
+    }
+  }
+
+  // 5. Open ground / Terrain (no interactive object under focus)
+  TARGET_SCRATCH.kind = 'terrain';
+  TARGET_SCRATCH.gx = primary.gx;
+  TARGET_SCRATCH.gy = primary.gy;
+  TARGET_SCRATCH.basePx = heightAt(world.field, primary.gx, primary.gy);
+  TARGET_SCRATCH.actionKey = actKey;
+  TARGET_SCRATCH.actionLabel = '';
+  TARGET_SCRATCH.subLabel = '';
+  TARGET_SCRATCH.color = hex('#95a5a6');
+  return TARGET_SCRATCH;
 }
 
 // ── HP and respawn ─────────────────────────────────────────────────────────────

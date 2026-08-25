@@ -67,11 +67,22 @@ import { drawSky, farRanges } from './sky.js';
 import { drawAmbientEffects } from './ambient.js';
 import { drawPlayerHud, drawSplitDivider } from './hud.js';
 import type { Projectile } from './combat.js';
+import { getTargetContext } from './players.js';
+import { screenText, DEFAULT_TEXT } from '@latticekit/draw';
 
-// ── Scratch for Projectiles (Zero Allocation) ──────────────────────────────────
+// ── Scratch for Projectiles and Target Cursor (Zero Allocation) ────────────────
 
 const ARROW_LINE_SCRATCH = new Float64Array(4);
 const SHADOW_BOX_SCRATCH = new Float64Array(8);
+const TARGET_BOX_SCRATCH = new Float64Array(8);
+
+function setTargetBox(x: number, y: number, w: number, h: number): Float64Array {
+  TARGET_BOX_SCRATCH[0] = x;     TARGET_BOX_SCRATCH[1] = y;
+  TARGET_BOX_SCRATCH[2] = x + w; TARGET_BOX_SCRATCH[3] = y;
+  TARGET_BOX_SCRATCH[4] = x + w; TARGET_BOX_SCRATCH[5] = y + h;
+  TARGET_BOX_SCRATCH[6] = x;     TARGET_BOX_SCRATCH[7] = y + h;
+  return TARGET_BOX_SCRATCH;
+}
 
 // ── Palette ────────────────────────────────────────────────────────────────────
 
@@ -328,6 +339,8 @@ function drawViewport(
 
   const ghostIndex = ghostDef !== undefined ? liveBldCount + liveFloraCount + liveCreCount + numPlayers : -1;
 
+  // 6. Compute contextual target under the player's focus
+  const target = getTargetContext(activePlayer, world, flora, creatures, buildings);
 
   const passes: Passes = {
     maxHeightPx: world.currentMaxHeightPx,
@@ -368,6 +381,20 @@ function drawViewport(
       // Draw ground footprint boundary on ground plane
       if (ghostDef !== undefined) {
         drawFootprint(pen, ghostTile.gx, ghostTile.gy, ghostDef.w, ghostDef.d, isLegal ? 'ok' : 'bad', SELECT_LIFT, ghostBasePx);
+      } else if (target.kind !== 'none') {
+        const cgx = Math.round(activePlayer.cursorGx);
+        const cgy = Math.round(activePlayer.cursorGy);
+        const cH = heightAt(world.field, cgx, cgy);
+        drawFootprint(
+          pen,
+          cgx,
+          cgy,
+          1,
+          1,
+          target.kind === 'creature' ? 'bad' : 'ok',
+          SELECT_LIFT,
+          cH,
+        );
       }
     },
 
@@ -383,15 +410,28 @@ function drawViewport(
           const b = realIdx >= 0 ? buildings[realIdx] : undefined;
           if (b === undefined) continue;
           const def  = defFor(b.kind);
-          const v = setScratchVariant(b.id, 0, 0, 1, '');
-          drawSprite(pen, def, b.gx, b.gy, v, b.basePx);
 
-          // Towers emit warm protective beacon light pools at night
-          if (darkness > 0) {
-            if (b.kind === 'wood_tower') {
-              light.add(b.gx + 1, b.gy + 1, b.basePx + 48, 6.0, darkness * 0.95, LANTERN_GLOW);
-            } else if (b.kind === 'stone_tower') {
-              light.add(b.gx + 1, b.gy + 1, b.basePx + 65, 7.5, darkness * 1.0, LANTERN_GLOW);
+          if (b.kind === 'campfire') {
+            // Campfire has animated flame flickers driven by time
+            const v = setScratchVariant(b.id, 0, 0, (t * 3) % 1, '');
+            drawSprite(pen, def, b.gx, b.gy, v, b.basePx);
+
+            // Campfire casts a massive warm light pool at night (14+ tile radius)
+            if (darkness > 0) {
+              const flicker = Math.sin(t * 8 + b.id * 7) * 0.7; // @tier-b visual light flicker
+              light.add(b.gx + 0.5, b.gy + 0.5, b.basePx + 6, 14.0 + flicker, darkness * 1.15, hex('#ff9f43'));
+            }
+          } else {
+            const v = setScratchVariant(b.id, 0, 0, 1, '');
+            drawSprite(pen, def, b.gx, b.gy, v, b.basePx);
+
+            // Towers emit warm protective beacon light pools at night
+            if (darkness > 0) {
+              if (b.kind === 'wood_tower') {
+                light.add(b.gx + 1, b.gy + 1, b.basePx + 48, 6.0, darkness * 0.95, LANTERN_GLOW);
+              } else if (b.kind === 'stone_tower') {
+                light.add(b.gx + 1, b.gy + 1, b.basePx + 65, 7.5, darkness * 1.0, LANTERN_GLOW);
+              }
             }
           }
 
@@ -493,6 +533,49 @@ function drawViewport(
         drawSplitDivider(pen);
       }
       drawPlayerHud(pen, activePlayer, world, seed);
+
+      // In-world contextual action prompt pill floating over targeted object
+      // ONLY shown when an actual interaction/action is available (harvest, stoke, attack, repair)
+      if (target.kind !== 'none' && target.kind !== 'build' && target.kind !== 'terrain' && target.actionLabel.length > 0) {
+        const cx = activePlayer.cursorGx;
+        const cy = activePlayer.cursorGy;
+        const twx = (cx + 0.5 - (cy + 0.5)) * 32;
+        const twy = (cx + 0.5 + (cy + 0.5)) * 16 - target.basePx - 26;
+        const tsx = (twx - pen.camera.x) * pen.camera.zoom + pen.camera.viewW * 0.5;
+        const tsy = (twy - pen.camera.y) * pen.camera.zoom + pen.camera.viewH * 0.5;
+
+        if (tsx >= 40 && tsx <= pen.camera.viewW - 40 && tsy >= 30 && tsy <= pen.camera.viewH - 30) {
+          const mainText = `${target.actionKey} ${target.actionLabel}`;
+          const hasSub = target.subLabel.length > 0;
+          const boxW = Math.max(mainText.length * 6.8 + 18, target.subLabel.length * 6.0 + 18);
+          const boxH = hasSub ? 30 : 20;
+          const boxX = tsx - boxW * 0.5;
+          const boxY = tsy - boxH * 0.5;
+
+          pen.surface.poly(setTargetBox(boxX, boxY, boxW, boxH), 4, withAlpha(hex('#0c130e'), 0.88));
+          pen.surface.stroke(setTargetBox(boxX, boxY, boxW, boxH), 4, true, target.color, 1.5);
+
+          screenText(
+            pen,
+            tsx,
+            hasSub ? boxY + 10 : boxY + 10,
+            mainText,
+            target.color,
+            { ...DEFAULT_TEXT, size: 9, weight: 800, align: 0, baseline: 0 },
+          );
+
+          if (hasSub) {
+            screenText(
+              pen,
+              tsx,
+              boxY + 22,
+              target.subLabel,
+              hex('#bdc3c7'),
+              { ...DEFAULT_TEXT, size: 8, weight: 600, align: 0, baseline: 0 },
+            );
+          }
+        }
+      }
     },
 
   };

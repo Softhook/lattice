@@ -243,10 +243,11 @@ loop.onUpdate((dt, tick) => {
   movePlayer(p1, moveVec1.dx, moveVec1.dy, world, buildings, dt);
   movePlayer(p2, moveVec2.dx, moveVec2.dy, world, buildings, dt);
 
-  // ── Player 1 Actions ─────────────────────────────────────────────────────────
+  // ── Player 1 Actions (Contextual Spacebar Model) ─────────────────────────────
   if (edges.p1CycleWeapon) {
-    cycleWeapon(p1);
-    audio.play('click');
+    const res = craftNextAvailable(p1);
+    if (res.crafted) audio.play('craft');
+    else audio.play('click');
     updateDomHud();
   }
   if (edges.p1CraftWeapon) {
@@ -255,38 +256,36 @@ loop.onUpdate((dt, tick) => {
     else audio.play('deny');
     updateDomHud();
   }
-  if (edges.p1Attack) {
-    if (p1.attackCooldown <= 0 && p1.respawnTimer <= 0) {
-      const baseH = heightAt(world.field, p1.gx, p1.gy);
-      const res = executeAttack(p1, creatures, projectiles, baseH);
-      if (res.isRanged) audio.play('bow_shoot');
-      else if (res.hit) audio.play('hit_meat');
-      else audio.play('attack');
-      updateDomHud();
-    }
-  }
-  if (edges.p1Cycle) {
+  if (edges.p1Cycle || edges.p1Build) {
     cycleBuildKind(p1);
     audio.play('click');
     updateDomHud();
   }
-  if (edges.p1Build) {
-    if (p1.mode === 'move') {
-      const res = interactAtFacing(p1, world, flora, buildings);
-      if (res.type !== 'none') {
-        audio.play(res.type);
-        updateDomHud();
+  if (edges.p1Attack) {
+    if (p1.respawnTimer <= 0) {
+      if (p1.mode !== 'move') {
+        const placed = buildAtFacing(p1, world, buildings);
+        if (placed !== undefined) {
+          buildings.push(placed);
+          audio.play(placed.kind === 'campfire' ? 'ignite' : 'build');
+          updateDomHud();
+        } else {
+          audio.play('deny');
+        }
       } else {
-        audio.play('attack');
-      }
-    } else {
-      const placed = buildAtFacing(p1, world, buildings);
-      if (placed !== undefined) {
-        buildings.push(placed);
-        audio.play('build');
-        updateDomHud();
-      } else {
-        audio.play('deny');
+        // Contextual: Interact (Flora harvest, building repair, campfire stoke) or Combat Attack
+        const interact = interactAtFacing(p1, world, flora, buildings);
+        if (interact.type !== 'none') {
+          audio.play(interact.type);
+          updateDomHud();
+        } else if (p1.attackCooldown <= 0) {
+          const baseH = heightAt(world.field, p1.gx, p1.gy);
+          const res = executeAttack(p1, creatures, projectiles, baseH);
+          if (res.isRanged) audio.play('bow_shoot');
+          else if (res.hit) audio.play('hit_meat');
+          else audio.play('attack');
+          updateDomHud();
+        }
       }
     }
   }
@@ -309,10 +308,11 @@ loop.onUpdate((dt, tick) => {
     }
   }
 
-  // ── Player 2 Actions ─────────────────────────────────────────────────────────
+  // ── Player 2 Actions (Contextual KeyN Model) ─────────────────────────────────
   if (edges.p2CycleWeapon) {
-    cycleWeapon(p2);
-    audio.play('click');
+    const res = craftNextAvailable(p2);
+    if (res.crafted) audio.play('craft');
+    else audio.play('click');
     updateDomHud();
   }
   if (edges.p2CraftWeapon) {
@@ -321,38 +321,35 @@ loop.onUpdate((dt, tick) => {
     else audio.play('deny');
     updateDomHud();
   }
-  if (edges.p2Attack) {
-    if (p2.attackCooldown <= 0 && p2.respawnTimer <= 0) {
-      const baseH = heightAt(world.field, p2.gx, p2.gy);
-      const res = executeAttack(p2, creatures, projectiles, baseH);
-      if (res.isRanged) audio.play('bow_shoot');
-      else if (res.hit) audio.play('hit_meat');
-      else audio.play('attack');
-      updateDomHud();
-    }
-  }
-  if (edges.p2Cycle) {
+  if (edges.p2Cycle || edges.p2Build) {
     cycleBuildKind(p2);
     audio.play('click');
     updateDomHud();
   }
-  if (edges.p2Build) {
-    if (p2.mode === 'move') {
-      const res = interactAtFacing(p2, world, flora, buildings);
-      if (res.type !== 'none') {
-        audio.play(res.type);
-        updateDomHud();
+  if (edges.p2Attack) {
+    if (p2.respawnTimer <= 0) {
+      if (p2.mode !== 'move') {
+        const placed = buildAtFacing(p2, world, buildings);
+        if (placed !== undefined) {
+          buildings.push(placed);
+          audio.play(placed.kind === 'campfire' ? 'ignite' : 'build');
+          updateDomHud();
+        } else {
+          audio.play('deny');
+        }
       } else {
-        audio.play('attack');
-      }
-    } else {
-      const placed = buildAtFacing(p2, world, buildings);
-      if (placed !== undefined) {
-        buildings.push(placed);
-        audio.play('build');
-        updateDomHud();
-      } else {
-        audio.play('deny');
+        const interact = interactAtFacing(p2, world, flora, buildings);
+        if (interact.type !== 'none') {
+          audio.play(interact.type);
+          updateDomHud();
+        } else if (p2.attackCooldown <= 0) {
+          const baseH = heightAt(world.field, p2.gx, p2.gy);
+          const res = executeAttack(p2, creatures, projectiles, baseH);
+          if (res.isRanged) audio.play('bow_shoot');
+          else if (res.hit) audio.play('hit_meat');
+          else audio.play('attack');
+          updateDomHud();
+        }
       }
     }
   }
@@ -414,7 +411,17 @@ loop.onUpdate((dt, tick) => {
     }
   }
 
-  // ── Remove destroyed buildings in place ────────────────────────────────────────
+  // ── Campfire Burn Duration Decay ─────────────────────────────────────────────
+  for (let i = 0; i < buildings.length; i++) {
+    const b = buildings[i];
+    if (b !== undefined && b.kind === 'campfire' && b.hp > 0) {
+      // Campfire consumes 1.0 fuel per second (~120s base burn duration)
+      b.hp -= dt;
+      if (b.hp <= 0) b.hp = 0;
+    }
+  }
+
+  // ── Remove destroyed / extinguished buildings in place ─────────────────────────
   let bi = buildings.length;
   while (bi--) {
     const b = buildings[bi];

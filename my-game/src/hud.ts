@@ -176,19 +176,20 @@ export function drawPlayerHud(
 
   pen.surface.poly(setBox(toolX, toolY, toolW, toolH), 4, hex('#132110'));
 
-  const actKey = pIdx === 0 ? '[E]' : '[O]';
-  const cycleKey = pIdx === 0 ? '[F] Build' : '[H] Build';
+  const actKey = pIdx === 0 ? '[Space]' : '[N]';
+  const cycleKey = pIdx === 0 ? '[E/F] Build' : '[O/H] Build';
 
   let modeText = '';
   let modeColor = hex('#bdc3c7');
 
   if (player.mode === 'move') {
-    modeText = `TERRAFORM [Q]Dig [R]Raise`;
+    modeText = `EXPLORE / ACTION ${actKey}`;
   } else {
     const cost = BUILDING_COSTS[player.mode];
     const affordable = canAffordBuilding(player, player.mode);
-    const name = player.mode.replace('_', ' ').toUpperCase();
-    modeText = `${name} (${cost.wood}W, ${cost.stone}S) ${actKey}`;
+    const name = player.mode === 'campfire' ? 'CAMPFIRE 🔥' : player.mode.replace('_', ' ').toUpperCase();
+    const fiberCost = cost.fiber ? ` ${cost.fiber}F` : '';
+    modeText = `${name} (${cost.wood}W ${cost.stone}S${fiberCost}) ${actKey}`;
     modeColor = affordable ? UI_TOOL_GOLD : hex('#e74c3c');
   }
 
@@ -227,34 +228,23 @@ export function drawPlayerHud(
   pen.surface.poly(setBox(wepX, wepY, wepW, wepH), 4, hex('#181a24'));
   pen.surface.stroke(setBox(wepX, wepY, wepW, wepH), 4, true, hex('#3d5a80'), 1);
 
-  const atkKey = pIdx === 0 ? '[Space]' : '[N]';
-  const wepCycleKey = pIdx === 0 ? '[C] Swap' : '[,] Swap';
-  const wepCraftKey = pIdx === 0 ? '[V] Craft' : '[.] Craft';
-
+  const wepCycleKey = pIdx === 0 ? '[C] Tool / Craft' : '[,] Tool / Craft';
   const wName = player.weapon.toUpperCase();
+
   screenText(
     pen,
     wepX + 8,
     wepY + 14,
-    `${atkKey} ${wName}`,
+    `EQUIPPED: ${wName}`,
     hex('#90caf9'),
     { ...DEFAULT_TEXT, size: 10, weight: 800, align: -1, baseline: 0 },
   );
 
   screenText(
     pen,
-    wepX + wepW - 75,
+    wepX + wepW - 8,
     wepY + 14,
     wepCycleKey,
-    hex('#b0bec5'),
-    { ...DEFAULT_TEXT, size: 9, weight: 600, align: -1, baseline: 0 },
-  );
-
-  screenText(
-    pen,
-    wepX + wepW - 6,
-    wepY + 14,
-    wepCraftKey,
     hex('#ffe082'),
     { ...DEFAULT_TEXT, size: 9, weight: 700, align: 1, baseline: 0 },
   );

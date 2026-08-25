@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { createWorld, W, H, isWalkable, dig, raise, BIOME_REGISTRY } from '../src/world.js';
-import { createPlayers, movePlayer, interactAtFacing, cycleBuildKind, buildAtFacing, canAffordBuilding, tickPlayer } from '../src/players.js';
+import { createPlayers, movePlayer, interactAtFacing, cycleBuildKind, buildAtFacing, canAffordBuilding, tickPlayer, getTargetContext } from '../src/players.js';
 import { populateFlora, FLORA_REGISTRY } from '../src/flora.js';
 import { BUILDING_COSTS, BUILDING_REGISTRY } from '../src/buildings.js';
 import { populateWorld, updateCreatures, SPECIES_REGISTRY } from '../src/creatures.js';
@@ -41,13 +41,31 @@ describe('Verdant Gameplay Logic', () => {
     expect(p1.facing).toBe('w');
   });
 
-  it('cycles player build modes', () => {
+  it('cycles player build modes only for affordable recipes', () => {
     const [p1] = createPlayers();
     expect(p1.mode).toBe('move');
+
+    // With 0 materials, cycling skips all and stays in 'move' mode
+    p1.inventory.wood = 0;
+    p1.inventory.stone = 0;
+    p1.inventory.fiber = 0;
+    cycleBuildKind(p1);
+    expect(p1.mode).toBe('move');
+
+    // With 4 wood only (can afford wood_wall (4W) and floor (2W), but not campfire (4W 2S 2F))
+    p1.inventory.wood = 4;
     cycleBuildKind(p1);
     expect(p1.mode).toBe('wood_wall');
     cycleBuildKind(p1);
-    expect(p1.mode).toBe('stone_wall');
+    expect(p1.mode).toBe('floor');
+    cycleBuildKind(p1);
+    expect(p1.mode).toBe('move');
+
+    // With materials for campfire (4W, 2S, 2F)
+    p1.inventory.stone = 2;
+    p1.inventory.fiber = 2;
+    cycleBuildKind(p1);
+    expect(p1.mode).toBe('campfire');
   });
 
   it('validates affordability and constructs buildings', () => {
@@ -65,7 +83,7 @@ describe('Verdant Gameplay Logic', () => {
     const placed = buildAtFacing(p1, world, buildings);
     expect(placed).toBeDefined();
     expect(placed?.kind).toBe('wood_wall');
-    expect(placed?.gx).toBe(16);
+    expect(placed?.gx).toBe(17);
     expect(placed?.gy).toBe(15);
     expect(p1.inventory.wood).toBe(10 - BUILDING_COSTS.wood_wall.wood);
   });
@@ -203,7 +221,8 @@ describe('Verdant Gameplay Logic', () => {
 
     // 4. Building Registry
     const buildingKeys = Object.keys(BUILDING_REGISTRY);
-    expect(buildingKeys.length).toBe(5);
+    expect(buildingKeys.length).toBe(6);
+    expect(buildingKeys.includes('campfire')).toBe(true);
     for (const key of buildingKeys) {
       const bld = BUILDING_REGISTRY[key as keyof typeof BUILDING_REGISTRY];
       expect(bld.maxHp).toBeGreaterThan(0);
@@ -211,6 +230,99 @@ describe('Verdant Gameplay Logic', () => {
       expect(bld.footprint.d).toBeGreaterThan(0);
       expect(bld.spriteDef).toBeDefined();
     }
+  });
+
+  it('crafts, places, and stokes a campfire', () => {
+    const world = createWorld(42);
+    const [p1] = createPlayers();
+    p1.gx = 20;
+    p1.gy = 20;
+    p1.facing = 's';
+    p1.mode = 'campfire';
+    p1.inventory.wood = 10;
+    p1.inventory.stone = 5;
+    p1.inventory.fiber = 5;
+
+    const buildings: any[] = [];
+    expect(canAffordBuilding(p1, 'campfire')).toBe(true);
+
+    const placed = buildAtFacing(p1, world, buildings);
+    expect(placed).toBeDefined();
+    expect(placed?.kind).toBe('campfire');
+    expect(placed?.gx).toBe(20);
+    expect(placed?.gy).toBe(22);
+    expect(placed?.hp).toBe(120);
+
+    // Verify inventory cost deduction: 4 wood, 2 stone, 2 fiber
+    expect(p1.inventory.wood).toBe(6);
+    expect(p1.inventory.stone).toBe(3);
+    expect(p1.inventory.fiber).toBe(3);
+
+    buildings.push(placed);
+
+    // Simulate campfire burning down to 60s
+    placed.hp = 60;
+
+    // Player in move mode faces campfire and stokes it with wood
+    p1.mode = 'move';
+    const stokeRes = interactAtFacing(p1, world, [], buildings);
+    expect(stokeRes.type).toBe('stoke');
+    expect(placed.hp).toBe(100);
+    expect(p1.inventory.wood).toBe(5); // 1 wood consumed to stoke
+  });
+
+  it('computes contextual cursor target for flora, creatures, and campfires', () => {
+    const world = createWorld(42);
+    const [p1] = createPlayers();
+    p1.gx = 10;
+    p1.gy = 10;
+    p1.facing = 's'; // facing tile is (10, 11)
+
+    const flora = [
+      { id: 1, kind: 'pine' as const, gx: 10, gy: 11, w: 1, d: 1, scale: 1, subType: 0, basePx: 0 },
+    ];
+
+    // 1. Facing Pine Tree -> Flora target CHOP
+    const targetFlora = getTargetContext(p1, world, flora, [], []);
+    expect(targetFlora.kind).toBe('flora');
+    expect(targetFlora.actionLabel).toBe('CHOP');
+    expect(targetFlora.actionKey).toBe('[Space]');
+
+    // 2. Facing Campfire -> Campfire target
+    const campfire = { id: 9, kind: 'campfire' as const, gx: 10, gy: 11, w: 1, d: 1, hp: 80, maxHp: 120, basePx: 0 };
+    const targetFire = getTargetContext(p1, world, [], [], [campfire]);
+    expect(targetFire.kind).toBe('campfire');
+    expect(targetFire.actionLabel).toContain('STOKE');
+
+    // 3. Enemy creature in reach -> Creature target ATTACK
+    const troll = {
+      id: 5,
+      species: 'troll' as const,
+      gx: 10,
+      gy: 10.8,
+      hp: 150,
+      maxHp: 150,
+      hunger: 0,
+      fear: 0,
+      wanderTimer: 0,
+      actionCooldown: 0,
+      targetGx: 10,
+      targetGy: 10.8,
+      targetEntityId: 0,
+      animPhase: 0,
+      traits: { speed: 1, aggro: 1, courage: 1, sight: 1 },
+      generation: 1,
+    };
+    const targetEnemy = getTargetContext(p1, world, [], [troll], []);
+    expect(targetEnemy.kind).toBe('creature');
+    expect(targetEnemy.actionLabel).toBe('ATTACK TROLL');
+    expect(targetEnemy.subLabel).toBe('HP: 150');
+
+    // 4. In build mode -> Build target (ghost sprite preview only, no text pill)
+    p1.mode = 'wood_wall';
+    const targetBuild = getTargetContext(p1, world, [], [], []);
+    expect(targetBuild.kind).toBe('build');
+    expect(targetBuild.actionLabel).toBe('');
   });
 });
 

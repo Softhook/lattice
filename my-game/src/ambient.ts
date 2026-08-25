@@ -43,12 +43,14 @@ export function drawAmbientEffects(
   // 3. Floating sun motes in the daylight (around active viewport)
   motes(pen, seed, world, daylight);
 
-  // 4. Smoke from watchtowers and fortress towers
+  // 4. Smoke and embers from watchtowers, fortresses, and campfires
   for (let i = 0; i < buildings.length; i++) {
     const b = buildings[i];
     if (b === undefined || b.hp <= 0) continue;
     if (b.kind === 'wood_tower' || b.kind === 'stone_tower') {
       towerSmoke(pen, b.gx + 1, b.gy + 1, b.basePx + (b.kind === 'wood_tower' ? 52 : 68), seed ^ b.id);
+    } else if (b.kind === 'campfire') {
+      campfireEmbers(pen, b.gx + 0.5, b.gy + 0.5, b.basePx + 8, seed ^ b.id);
     }
   }
 }
@@ -183,5 +185,19 @@ function towerSmoke(pen: Pen, gx: number, gy: number, zPx: number, seed: number)
       withAlpha(SMOKE_COL, (1 - phase) * 0.25),
       withAlpha(SMOKE_COL, 0),
     );
+  }
+}
+
+/** Campfire floating embers and light woodsmoke. */
+function campfireEmbers(pen: Pen, gx: number, gy: number, zPx: number, seed: number): void {
+  const s = pen.surface;
+  for (let i = 0; i < 5; i++) {
+    const phase = (pen.t * 0.8 + i / 5 + toUnit(hash2(seed, i, 9))) % 1;
+    const driftX = noise2(seed ^ 0x3c, i * 3.1, pen.t * 0.5) * 0.4;
+    const driftY = noise2(seed ^ 0x9a, i * 4.7, pen.t * 0.45) * 0.4;
+    gridToScreen(pen.camera, gx + driftX * phase, gy + driftY * phase, zPx + phase * 32, pt);
+    const r = (1.2 + (1 - phase) * 1.5) * pen.camera.zoom;
+    const col = phase < 0.5 ? hex('#ff9f43') : hex('#ee5253');
+    s.ellipse(pt.x + pen.snapX, pt.y + pen.snapY, r, r, withAlpha(col, (1 - phase) * 0.85));
   }
 }

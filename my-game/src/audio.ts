@@ -159,6 +159,23 @@ export const VERDANT_SOUNDS = {
       { wave: 'sine', hz: 1174, gain: 0.08, hold: 0.20, delay: 0.04, cutoff: 3200 },
     ],
   },
+  ignite: {
+    bus: 'sfx',
+    minGapMs: 200,
+    layers: [
+      { wave: 'noise', hz: 0, gain: 0.14, hold: 0.22, attack: 0.02, cutoff: 3200, highpass: 450 },
+      { wave: 'triangle', hz: 330, toHz: 660, gain: 0.16, hold: 0.15, cutoff: 1800 },
+      { wave: 'sine', hz: 220, toHz: 440, gain: 0.10, hold: 0.25, cutoff: 1200 },
+    ],
+  },
+  stoke: {
+    bus: 'sfx',
+    minGapMs: 150,
+    layers: [
+      { wave: 'triangle', hz: 180, toHz: 120, gain: 0.15, hold: 0.10, cutoff: 900 },
+      { wave: 'noise', hz: 0, gain: 0.10, hold: 0.18, attack: 0.03, cutoff: 2400, highpass: 350 },
+    ],
+  },
   dusk_chime: {
     bus: 'music',
     minGapMs: 3000,

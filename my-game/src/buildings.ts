@@ -32,10 +32,15 @@ export const ROOF_GOLD    = hex('#f39c12');
 export const LANTERN_GLOW = hex('#f1c40f');
 export const BANNER_RED   = hex('#e74c3c');
 export const BANNER_BLUE  = hex('#3498db');
+export const FIRE_ORANGE  = hex('#ff793f');
+export const FIRE_YELLOW  = hex('#f6b93b');
+export const FIRE_CORE    = hex('#fff275');
+export const ASH_DARK     = hex('#2f3542');
+export const EMBER_RED    = hex('#eb2f06');
 
 // ── Building kinds ─────────────────────────────────────────────────────────────
 
-export type BuildingKind = 'wood_wall' | 'stone_wall' | 'wood_tower' | 'stone_tower' | 'floor';
+export type BuildingKind = 'campfire' | 'wood_wall' | 'stone_wall' | 'wood_tower' | 'stone_tower' | 'floor';
 
 export interface BuildingCost {
   readonly wood: number;
@@ -44,6 +49,7 @@ export interface BuildingCost {
 }
 
 export const BUILDING_COSTS: Record<BuildingKind, BuildingCost> = {
+  campfire:    { wood: 4,  stone: 2, fiber: 2 },
   wood_wall:   { wood: 4,  stone: 0 },
   stone_wall:  { wood: 0,  stone: 4 },
   wood_tower:  { wood: 12, stone: 2 },
@@ -164,6 +170,34 @@ const floorMassing: Massing = (w: SolidWriter, _v: Variant, _rng: Rng) => {
 
 export const FLOOR_DEF: SpriteDef = defineSprite({ id: 'bld_floor', w: 1, d: 1, massing: floorMassing });
 
+/** Campfire: Stone fire pit ring, crossed timber kindling logs, and warm animated flames. */
+const campfireMassing: Massing = (w: SolidWriter, v: Variant, _rng: Rng) => {
+  w.shadow(0.1, 0.1, 0.8, 0.8, 0.45);
+  // Dark soot & ash base
+  w.box(0.18, 0.18, 0.64, 0.64, { color: ASH_DARK, h: 0.08, outline: false });
+  // Cobblestone hearth ring (8 stone cobbles surrounding the pit)
+  w.box(0.12, 0.12, 0.22, 0.22, { color: STONE_DARK, h: 0.18, z: 0.04 });
+  w.box(0.39, 0.08, 0.22, 0.22, { color: WALL_STONE, h: 0.16, z: 0.04 });
+  w.box(0.66, 0.12, 0.22, 0.22, { color: STONE_DARK, h: 0.18, z: 0.04 });
+  w.box(0.08, 0.39, 0.22, 0.22, { color: WALL_STONE, h: 0.16, z: 0.04 });
+  w.box(0.70, 0.39, 0.22, 0.22, { color: STONE_DARK, h: 0.18, z: 0.04 });
+  w.box(0.12, 0.66, 0.22, 0.22, { color: STONE_DARK, h: 0.18, z: 0.04 });
+  w.box(0.39, 0.70, 0.22, 0.22, { color: WALL_STONE, h: 0.16, z: 0.04 });
+  w.box(0.66, 0.66, 0.22, 0.22, { color: STONE_DARK, h: 0.18, z: 0.04 });
+  // Crossed kindling logs
+  w.box(0.20, 0.38, 0.60, 0.24, { color: WALL_WOOD, h: 0.18, z: 0.10, outline: false });
+  w.box(0.38, 0.20, 0.24, 0.60, { color: WALL_BEAM, h: 0.18, z: 0.18, outline: false });
+  // Red glowing ember bed
+  w.box(0.30, 0.30, 0.40, 0.40, { color: EMBER_RED, h: 0.20, z: 0.22 });
+  // Animated glowing flame flickers driven by progress / level (@tier-b visual)
+  const flameFlicker = Math.sin((v.progress || 0) * Math.PI * 6 + (v.seed % 100)) * 0.04;
+  w.box(0.32 + flameFlicker, 0.32, 0.36, 0.36, { color: FIRE_ORANGE, h: 0.60 + flameFlicker * 2, z: 0.30 });
+  w.box(0.38, 0.38 + flameFlicker, 0.24, 0.24, { color: FIRE_YELLOW, h: 0.52, z: 0.45 });
+  w.box(0.42, 0.42, 0.16, 0.16, { color: FIRE_CORE, h: 0.38, z: 0.60 });
+};
+
+export const CAMPFIRE_DEF: SpriteDef = defineSprite({ id: 'bld_campfire', w: 1, d: 1, massing: campfireMassing });
+
 // ── Declarative Building Registry ─────────────────────────────────────────────
 
 export interface BuildingDefinition {
@@ -177,6 +211,15 @@ export interface BuildingDefinition {
 }
 
 export const BUILDING_REGISTRY: Record<BuildingKind, BuildingDefinition> = {
+  campfire: {
+    kind: 'campfire',
+    name: 'Campfire',
+    cost: { wood: 4, stone: 2, fiber: 2 },
+    footprint: { w: 1, d: 1 },
+    maxHp: 120,
+    isSolid: false,
+    spriteDef: CAMPFIRE_DEF,
+  },
   wood_wall: {
     kind: 'wood_wall',
     name: 'Wood Palisade Wall',
