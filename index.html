@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Verdant — Living World</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌲</text></svg>" />
+    <style>
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body {
+        background: #060d05;
+        color: #d2e8bf;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        height: 100%;
+        overflow: hidden;
+        user-select: none;
+      }
+      body {
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+      }
+
+      /* ── Top Action Buttons ─────────────────────────────────────────── */
+      #top-nav {
+        position: absolute;
+        top: 12px;
+        right: 14px;
+        z-index: 100;
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+
+      .top-btn {
+        background: rgba(10, 20, 9, 0.85);
+        color: #d2e8bf;
+        border: 1px solid #233a1e;
+        border-radius: 8px;
+        padding: 6px 12px;
+        font-size: 11px;
+        font-weight: 700;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        backdrop-filter: blur(10px);
+        transition: all 0.15s ease;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+      }
+      .top-btn:hover {
+        background: rgba(22, 45, 18, 0.95);
+        color: #ffffff;
+        border-color: #3f6834;
+        transform: translateY(-1px);
+        box-shadow: 0 6px 16px rgba(0, 0, 0, 0.5);
+      }
+      .top-btn:active {
+        transform: translateY(1px);
+      }
+      .top-btn.btn-accent {
+        background: rgba(16, 48, 28, 0.88);
+        border-color: #27ae60;
+        color: #86efac;
+      }
+      .top-btn.btn-accent:hover {
+        background: rgba(22, 68, 38, 0.98);
+        color: #ffffff;
+        border-color: #2ecc71;
+      }
+      .btn-icon {
+        font-size: 13px;
+      }
+      .btn-kbd {
+        font-size: 9px;
+        padding: 1px 4px;
+        opacity: 0.7;
+        margin-left: 2px;
+      }
+
+      /* ── Canvas App Viewport ─────────────────────────────────────────── */
+      #app {
+        position: relative;
+        flex: 1;
+        min-height: 0;
+        width: 100%;
+        height: 100%;
+      }
+      #app canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+
+      /* ── Bottom Inventory Bar ────────────────────────────────────────── */
+      #inventory-bar {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        background: rgba(7, 14, 6, 0.92);
+        border-top: 1px solid #1c3018;
+        padding: 6px 16px;
+        flex-shrink: 0;
+        backdrop-filter: blur(12px);
+      }
+
+      .inv-slot-group {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .p1-inv {
+        border-right: 1px solid #1c3018;
+      }
+
+      /* Single-player view (Player 2 hidden, [2] brings them back) */
+      #inventory-bar.single-player {
+        grid-template-columns: 1fr;
+      }
+
+      #inventory-bar.single-player .p1-inv {
+        border-right: none;
+      }
+
+      #inventory-bar.single-player .p2-inv {
+        display: none;
+      }
+
+      .inv-item {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        background: rgba(18, 32, 14, 0.75);
+        border: 1px solid #284420;
+        border-radius: 6px;
+        padding: 4px 12px;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+      }
+
+      .inv-icon {
+        font-size: 15px;
+        line-height: 1;
+      }
+
+      .inv-count {
+        font-size: 13px;
+        font-weight: 800;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-variant-numeric: tabular-nums;
+        color: #ffffff;
+      }
+    </style>
+    <script type="module" crossorigin src="./assets/index-D0hfB1qL.js"></script>
+  </head>
+  <body>
+    <div id="top-nav">
+      <button id="btn-new-world" class="top-btn" title="Generate a fresh new world (F2)">
+        <span class="btn-icon">↺</span> New World <kbd class="btn-kbd">F2</kbd>
+      </button>
+      <button id="btn-fullscreen" class="top-btn btn-accent" title="Toggle Fullscreen (F11)">
+        <span class="btn-icon">⛶</span> Fullscreen <kbd class="btn-kbd">F11</kbd>
+      </button>
+    </div>
+
+    <div id="app">
+      <canvas id="viewport"></canvas>
+    </div>
+
+    <div id="inventory-bar">
+      <div class="inv-slot-group p1-inv">
+        <div class="inv-item" title="Wood">
+          <span class="inv-icon">🪵</span>
+          <span id="p1-wood" class="inv-count">0</span>
+        </div>
+        <div class="inv-item" title="Stone">
+          <span class="inv-icon">🪨</span>
+          <span id="p1-stone" class="inv-count">0</span>
+        </div>
+        <div class="inv-item" title="Fiber">
+          <span class="inv-icon">🌿</span>
+          <span id="p1-fiber" class="inv-count">0</span>
+        </div>
+      </div>
+      <div class="inv-slot-group p2-inv">
+        <div class="inv-item" title="Wood">
+          <span class="inv-icon">🪵</span>
+          <span id="p2-wood" class="inv-count">0</span>
+        </div>
+        <div class="inv-item" title="Stone">
+          <span class="inv-icon">🪨</span>
+          <span id="p2-stone" class="inv-count">0</span>
+        </div>
+        <div class="inv-item" title="Fiber">
+          <span class="inv-icon">🌿</span>
+          <span id="p2-fiber" class="inv-count">0</span>
+        </div>
+      </div>
+    </div>
+
+  </body>
+</html>
+
