@@ -30,6 +30,7 @@
     "verify": "npm run build && npm run lint && npm run docs && npm run skills && npm run test:counted && npm run measured && npm run gallery && npm run looking",
     "dev": "npm run dev --workspace=@latticekit/demo",
     "game": "npm run dev --workspace=my-game",
+    "game:deploy": "npm run build --workspace=my-game && rm -rf assets && cp -r my-game/dist/assets assets && cp my-game/dist/index.html index.html",
     "size": "node tools/size.mjs",
     "gallery": "node tools/gallery.mjs",
     "docs": "node tools/check-docs.mjs",

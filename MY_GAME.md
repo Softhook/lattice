@@ -41,6 +41,27 @@ Players cooperate to shape the world (dig and build), gather procedural resource
 
 ---
 
+## Deploying to GitHub Pages
+
+GitHub Pages for this repo serves the raw `main` branch (not a CI build), so the game is
+live at [https://softhook.github.io/lattice/](https://softhook.github.io/lattice/) as a
+**committed build** of `my-game/` sitting at the repo root (`index.html`, `assets/`,
+`.nojekyll`). That build does not update itself — `my-game/src` and the root build are two
+separate things until someone rebuilds and re-commits.
+
+**Rule: any push to `main` that changes anything under `my-game/` must rebuild and
+recommit the root build in the same push.** Before pushing:
+
+```bash
+npm run game:deploy   # builds my-game and copies dist/index.html + dist/assets to repo root
+git add index.html assets
+git commit -m "Rebuild my-game for Pages"
+```
+
+Skipping this leaves the live site out of sync with `my-game/src`.
+
+---
+
 ## Technical Architecture
 
 The game is modularized inside the `my-game/` workspace:
