@@ -14,7 +14,7 @@ import { clamp } from '@latticekit/core';
 import { heightAt } from '@latticekit/iso';
 import type { WorldTerrain } from './world.js';
 import { W, H } from './world.js';
-import type { Creature } from './creatures.js';
+import { SPECIES_REGISTRY, type Species, type Creature } from './creatures.js';
 import type { Player } from './players.js';
 import { facingTile } from './players.js';
 
@@ -356,42 +356,13 @@ export function stepProjectiles(
 
 /** Drop material rewards directly into player inventory upon creature defeat. */
 function dropCreatureLoot(player: Player, species: string): void {
-  switch (species) {
-    case 'rabbit':
-      player.inventory.fiber += 4;
-      break;
-    case 'deer':
-      player.inventory.wood += 6;
-      player.inventory.fiber += 8;
-      break;
-    case 'boar':
-      player.inventory.wood += 8;
-      player.inventory.fiber += 10;
-      break;
-    case 'fox':
-      player.inventory.fiber += 6;
-      player.inventory.stone += 4;
-      break;
-    case 'wolf':
-      player.inventory.stone += 8;
-      player.inventory.fiber += 10;
-      break;
-    case 'croc':
-      player.inventory.stone += 14;
-      player.inventory.fiber += 12;
-      break;
-    case 'bear':
-      player.inventory.wood += 16;
-      player.inventory.stone += 18;
-      player.inventory.fiber += 16;
-      break;
-    case 'troll':
-      player.inventory.wood += 20;
-      player.inventory.stone += 24;
-      player.inventory.fiber += 12;
-      break;
-  }
+  const spec = SPECIES_REGISTRY[species as Species];
+  if (spec === undefined) return;
+  if (spec.loot.wood) player.inventory.wood += spec.loot.wood;
+  if (spec.loot.stone) player.inventory.stone += spec.loot.stone;
+  if (spec.loot.fiber) player.inventory.fiber += spec.loot.fiber;
 }
+
 
 
 export { canAffordWeapon, craftWeapon, craftNextAvailable, cycleWeapon } from './players.js';

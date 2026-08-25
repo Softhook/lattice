@@ -1,13 +1,13 @@
 {
   "$comment": "Every number the landing page prints, with the command that produced it. Nothing on the page may state a figure that is not in this file or read live off the running kit. If you cannot name the command, the number does not go on the page. `npm run measured` re-runs every command here and fails the build when this file disagrees with the repository \u2014 the rule above was stated from the first day and drifted anyway, in nine figures, because nothing re-ran the commands.",
   "commit": "b9ed713",
-  "measuredOn": "2026-08-22",
+  "measuredOn": "2026-08-25",
   "machine": "Apple Silicon, Node v24.18",
   "figures": {
     "packages": {
       "value": 9,
       "unit": "",
-      "source": ".lattice/kit.json \u2014 packages"
+      "source": ".lattice/kit.json — packages"
     },
     "dependencies": {
       "value": 0,
@@ -20,9 +20,9 @@
       "source": "find packages -type f -not -path '*/node_modules/*' -not -path '*/dist/*' -not -path '*/coverage/*' — 207 .ts, 19 .json, 9 .md, nothing else"
     },
     "tests": {
-      "value": 2693,
+      "value": 2694,
       "unit": "",
-      "source": "npx vitest run — 2693 passed (2693)"
+      "source": "npx vitest run — 2694 passed (2694)"
     },
 
     "testFiles": {

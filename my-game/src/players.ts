@@ -15,7 +15,7 @@ import { dig, raise, isWalkable, W, H } from './world.js';
 import type { Building, BuildingKind } from './buildings.js';
 import { placeBuilding, isTileOccupiedBySolidBuilding, BUILDING_COSTS } from './buildings.js';
 import type { FloraItem } from './flora.js';
-import { harvestFloraAt } from './flora.js';
+import { harvestFloraAt, FLORA_REGISTRY } from './flora.js';
 import type { WeaponKind } from './combat.js';
 import { WEAPONS, CRAFTABLE_WEAPONS } from './combat.js';
 
@@ -341,9 +341,9 @@ export function interactAtFacing(
   // 1. Check for flora at the facing tile to harvest
   const harvest = harvestFloraAt(flora, gx, gy);
   if (harvest !== undefined) {
-    const kind = harvest.item.kind;
-    const isTree = kind === 'pine' || kind === 'oak' || kind === 'spruce' || kind === 'birch' || kind === 'swamp_tree';
-    const isRock = kind === 'rock' || kind === 'rock_spire';
+    const def = FLORA_REGISTRY[harvest.item.kind];
+    const isTree = def.category === 'tree';
+    const isRock = def.category === 'rock';
     const axeBonus = (player.weapon === 'axe' && isTree) ? 2 : 0;
 
     player.hurtFlash = 0.12;
@@ -358,7 +358,6 @@ export function interactAtFacing(
     const soundType: InteractType =
       isTree ? 'chop' :
       isRock ? 'mine' : 'forage';
-
 
     return { type: soundType, label };
   }

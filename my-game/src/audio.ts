@@ -18,26 +18,6 @@ import {
   type SoundDef,
 } from '@latticekit/audio';
 
-export type SoundName =
-  | 'dig'
-  | 'raise'
-  | 'chop'
-  | 'mine'
-  | 'forage'
-  | 'build'
-  | 'repair'
-  | 'deny'
-  | 'attack'
-  | 'hurt'
-  | 'respawn'
-  | 'roar'
-  | 'stomp'
-  | 'howl'
-  | 'dusk_chime'
-  | 'dawn_chime'
-  | 'wake'
-  | 'click';
-
 export const VERDANT_SOUNDS = {
   dig: {
     bus: 'sfx',
@@ -214,6 +194,8 @@ export const VERDANT_SOUNDS = {
     ],
   },
 } as const satisfies Record<string, SoundDef>;
+ 
+export type SoundName = keyof typeof VERDANT_SOUNDS;
 
 export const BED_LAYERS: readonly BedLayer[] = [
   /** Organic sub-bass ground presence with gentle low-frequency beat. */

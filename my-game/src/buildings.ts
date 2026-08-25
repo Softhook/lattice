@@ -164,32 +164,81 @@ const floorMassing: Massing = (w: SolidWriter, _v: Variant, _rng: Rng) => {
 
 export const FLOOR_DEF: SpriteDef = defineSprite({ id: 'bld_floor', w: 1, d: 1, massing: floorMassing });
 
+// ── Declarative Building Registry ─────────────────────────────────────────────
+
+export interface BuildingDefinition {
+  readonly kind: BuildingKind;
+  readonly name: string;
+  readonly cost: BuildingCost;
+  readonly footprint: { readonly w: number; readonly d: number };
+  readonly maxHp: number;
+  readonly isSolid: boolean;
+  readonly spriteDef: SpriteDef;
+}
+
+export const BUILDING_REGISTRY: Record<BuildingKind, BuildingDefinition> = {
+  wood_wall: {
+    kind: 'wood_wall',
+    name: 'Wood Palisade Wall',
+    cost: { wood: 4, stone: 0 },
+    footprint: { w: 1, d: 1 },
+    maxHp: 180,
+    isSolid: true,
+    spriteDef: WOOD_WALL_DEF,
+  },
+  stone_wall: {
+    kind: 'stone_wall',
+    name: 'Stone Masonry Wall',
+    cost: { wood: 0, stone: 4 },
+    footprint: { w: 1, d: 1 },
+    maxHp: 360,
+    isSolid: true,
+    spriteDef: STONE_WALL_DEF,
+  },
+  wood_tower: {
+    kind: 'wood_tower',
+    name: 'Wood Watchtower',
+    cost: { wood: 12, stone: 2 },
+    footprint: { w: 2, d: 2 },
+    maxHp: 380,
+    isSolid: true,
+    spriteDef: WOOD_TOWER_DEF,
+  },
+  stone_tower: {
+    kind: 'stone_tower',
+    name: 'Stone Fortress Tower',
+    cost: { wood: 6, stone: 14 },
+    footprint: { w: 2, d: 2 },
+    maxHp: 750,
+    isSolid: true,
+    spriteDef: STONE_TOWER_DEF,
+  },
+  floor: {
+    kind: 'floor',
+    name: 'Timber Decking',
+    cost: { wood: 2, stone: 0 },
+    footprint: { w: 1, d: 1 },
+    maxHp: 80,
+    isSolid: false,
+    spriteDef: FLOOR_DEF,
+  },
+};
+
 // ── Building Lookup & Placement ────────────────────────────────────────────────
 
 export function defFor(kind: BuildingKind): SpriteDef {
-  switch (kind) {
-    case 'wood_wall':   return WOOD_WALL_DEF;
-    case 'stone_wall':  return STONE_WALL_DEF;
-    case 'wood_tower':  return WOOD_TOWER_DEF;
-    case 'stone_tower': return STONE_TOWER_DEF;
-    case 'floor':       return FLOOR_DEF;
-  }
+  return BUILDING_REGISTRY[kind].spriteDef;
 }
 
 export function hpFor(kind: BuildingKind): number {
-  switch (kind) {
-    case 'wood_wall':   return 180;
-    case 'stone_wall':  return 360;
-    case 'wood_tower':  return 380;
-    case 'stone_tower': return 750;
-    case 'floor':       return 80;
-  }
+  return BUILDING_REGISTRY[kind].maxHp;
 }
 
 /** Whether a building kind is a solid barrier that blocks movement. */
 export function isBuildingSolid(kind: BuildingKind): boolean {
-  return kind !== 'floor';
+  return BUILDING_REGISTRY[kind].isSolid;
 }
+
 
 /** Check if any active solid building occupies tile (gx, gy). */
 export function isTileOccupiedBySolidBuilding(

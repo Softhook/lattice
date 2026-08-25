@@ -5,7 +5,7 @@
  * No game logic lives here. This file is the ordering that cannot be wrong.
  */
 
-import { hashString, clamp } from '@latticekit/core';
+import { hashString, hashStep, toUnit, clamp } from '@latticekit/core';
 import {
   createCamera,
   tileBounds,
@@ -526,8 +526,8 @@ function toggleFullscreen(): void {
 
 function createNewWorld(): void {
   if (confirm('Create a brand new world from scratch? (Current progress will be reset)')) {
-    localStorage.removeItem('verdant-v1');
-    const newSeed = Math.floor(Math.random() * 900000) + 100000;
+    store.reset();
+    const newSeed = Math.floor(toUnit(hashStep(SEED, Date.now())) * 900000) + 100000;
     const url = new URL(window.location.href);
     url.searchParams.set('seed', String(newSeed));
     window.location.href = url.toString();

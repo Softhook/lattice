@@ -28,9 +28,83 @@ export const MAX_HEIGHT_UNITS = 24;
 /** Maximum terrain height in world pixels — what cameras and input.setTerrain need. */
 export const MAX_HEIGHT_PX = MAX_HEIGHT_UNITS * STEP_PX;
 
-// ── Biome Definitions ──────────────────────────────────────────────────────────
+// ── Biome Registry & Definitions ──────────────────────────────────────────────
 
 export type BiomeKind = 'alpine' | 'taiga' | 'meadow' | 'badlands' | 'wetlands' | 'coastal';
+
+export interface BiomeDefinition {
+  readonly kind: BiomeKind;
+  readonly name: string;
+  readonly icon: string;
+  readonly description: string;
+  readonly minElevation: number;
+  readonly maxElevation: number;
+  readonly idealTemperature: number;
+  readonly idealMoisture: number;
+}
+
+export const BIOME_REGISTRY: Record<BiomeKind, BiomeDefinition> = {
+  alpine: {
+    kind: 'alpine',
+    name: 'Alpine Peaks',
+    icon: '🏔️',
+    description: 'Towering razor-sharp granite spires and glacial snowcaps',
+    minElevation: 14,
+    maxElevation: 24,
+    idealTemperature: 0.15,
+    idealMoisture: 0.35,
+  },
+  taiga: {
+    kind: 'taiga',
+    name: 'Deep Taiga',
+    icon: '🌲',
+    description: 'Cold northern boreal forest with towering spruce and slate outcrops',
+    minElevation: 4,
+    maxElevation: 18,
+    idealTemperature: 0.25,
+    idealMoisture: 0.65,
+  },
+  meadow: {
+    kind: 'meadow',
+    name: 'Temperate Meadows',
+    icon: '🌳',
+    description: 'Rolling pastoral glades with silver birch, broadleaf oaks, and wildflowers',
+    minElevation: 2,
+    maxElevation: 14,
+    idealTemperature: 0.55,
+    idealMoisture: 0.50,
+  },
+  badlands: {
+    kind: 'badlands',
+    name: 'Arid Badlands',
+    icon: '🏜️',
+    description: 'Stepped terracotta mesas, sandstone spires, and desert scrub',
+    minElevation: 3,
+    maxElevation: 16,
+    idealTemperature: 0.85,
+    idealMoisture: 0.15,
+  },
+  wetlands: {
+    kind: 'wetlands',
+    name: 'Lush Wetlands',
+    icon: '🌿',
+    description: 'Waterlogged bayous with weeping willows and shallow peat marshes',
+    minElevation: 1,
+    maxElevation: 6,
+    idealTemperature: 0.60,
+    idealMoisture: 0.85,
+  },
+  coastal: {
+    kind: 'coastal',
+    name: 'Coastal Archipelago',
+    icon: '🏖️',
+    description: 'Golden sandy shorelines and sea-level shallows',
+    minElevation: 0,
+    maxElevation: 2,
+    idealTemperature: 0.50,
+    idealMoisture: 0.70,
+  },
+};
 
 export interface BiomeInfo {
   readonly kind: BiomeKind;
@@ -63,21 +137,14 @@ export function getBiomeBlendAt(gx: number, gy: number, seed: number, elevation:
   const moistNoise = fbm2(seed ^ 0x3333, gx * 0.014, gy * 0.014, 3);
   const moist = clamp(0.5 + moistNoise * 0.45, 0, 1);
 
-  const nameMap: Record<BiomeKind, { name: string; icon: string }> = {
-    alpine: { name: 'Alpine Peaks', icon: '🏔️' },
-    taiga: { name: 'Deep Taiga', icon: '🌲' },
-    meadow: { name: 'Temperate Meadows', icon: '🌳' },
-    badlands: { name: 'Arid Badlands', icon: '🏜️' },
-    wetlands: { name: 'Lush Wetlands', icon: '🌿' },
-    coastal: { name: 'Coastal Archipelago', icon: '🏖️' },
-  };
-
   if (elevation <= 1) {
-    const info = { kind: 'coastal' as BiomeKind, name: 'Coastal Archipelago', icon: '🏖️', temperature: temp, moisture: moist };
+    const def = BIOME_REGISTRY.coastal;
+    const info: BiomeInfo = { kind: 'coastal', name: def.name, icon: def.icon, temperature: temp, moisture: moist };
     return { primary: 'coastal', secondary: 'meadow', blend: 0, info };
   }
   if (elevation >= 14) {
-    const info = { kind: 'alpine' as BiomeKind, name: 'Alpine Peaks', icon: '🏔️', temperature: temp, moisture: moist };
+    const def = BIOME_REGISTRY.alpine;
+    const info: BiomeInfo = { kind: 'alpine', name: def.name, icon: def.icon, temperature: temp, moisture: moist };
     return { primary: 'alpine', secondary: 'taiga', blend: clamp((17 - elevation) / 3, 0, 1), info };
   }
 
@@ -117,17 +184,17 @@ export function getBiomeBlendAt(gx: number, gy: number, seed: number, elevation:
     }
   }
 
+  const def = BIOME_REGISTRY[primary];
   const info: BiomeInfo = {
     kind: primary,
-    name: nameMap[primary].name,
-    icon: nameMap[primary].icon,
+    name: def.name,
+    icon: def.icon,
     temperature: temp,
     moisture: moist,
   };
 
   return { primary, secondary, blend: secondaryWeight, info };
 }
-
 
 /**
  * Determine the primary biome and environmental climate at (gx, gy).

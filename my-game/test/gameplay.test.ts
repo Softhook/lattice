@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { createWorld, W, H, isWalkable, dig, raise } from '../src/world.js';
+import { createWorld, W, H, isWalkable, dig, raise, BIOME_REGISTRY } from '../src/world.js';
 import { createPlayers, movePlayer, interactAtFacing, cycleBuildKind, buildAtFacing, canAffordBuilding, tickPlayer } from '../src/players.js';
-import { populateFlora } from '../src/flora.js';
-import { BUILDING_COSTS } from '../src/buildings.js';
-import { populateWorld, updateCreatures } from '../src/creatures.js';
+import { populateFlora, FLORA_REGISTRY } from '../src/flora.js';
+import { BUILDING_COSTS, BUILDING_REGISTRY } from '../src/buildings.js';
+import { populateWorld, updateCreatures, SPECIES_REGISTRY } from '../src/creatures.js';
 
 describe('Verdant Gameplay Logic', () => {
   it('initializes world and terrain grid with bounds', () => {
@@ -167,6 +167,52 @@ describe('Verdant Gameplay Logic', () => {
       expect(world.tileColors[i]).toBeGreaterThan(0);
     }
   });
+
+  it('validates all registries (Biomes, Flora, Species, Buildings) are clean and expandable', () => {
+    // 1. Biome Registry
+    const biomeKeys = Object.keys(BIOME_REGISTRY);
+    expect(biomeKeys.length).toBe(6);
+    for (const key of biomeKeys) {
+      const b = BIOME_REGISTRY[key as keyof typeof BIOME_REGISTRY];
+      expect(b.name.length).toBeGreaterThan(0);
+      expect(b.icon.length).toBeGreaterThan(0);
+      expect(b.maxElevation).toBeGreaterThanOrEqual(b.minElevation);
+    }
+
+    // 2. Flora Registry
+    const floraKeys = Object.keys(FLORA_REGISTRY);
+    expect(floraKeys.length).toBe(12);
+    for (const key of floraKeys) {
+      const f = FLORA_REGISTRY[key as keyof typeof FLORA_REGISTRY];
+      expect(f.name.length).toBeGreaterThan(0);
+      expect(f.harvestVerb.length).toBeGreaterThan(0);
+      expect(f.preferredBiomes.length).toBeGreaterThan(0);
+      expect(f.spriteDef).toBeDefined();
+    }
+
+    // 3. Species Registry
+    const speciesKeys = Object.keys(SPECIES_REGISTRY);
+    expect(speciesKeys.length).toBe(8);
+    for (const key of speciesKeys) {
+      const s = SPECIES_REGISTRY[key as keyof typeof SPECIES_REGISTRY];
+      expect(s.baseHp).toBeGreaterThan(0);
+      expect(s.baseTraits.speed).toBeGreaterThan(0);
+      expect(s.minPopulation).toBeGreaterThan(0);
+      expect(s.preferredBiomes.length).toBeGreaterThan(0);
+    }
+
+    // 4. Building Registry
+    const buildingKeys = Object.keys(BUILDING_REGISTRY);
+    expect(buildingKeys.length).toBe(5);
+    for (const key of buildingKeys) {
+      const bld = BUILDING_REGISTRY[key as keyof typeof BUILDING_REGISTRY];
+      expect(bld.maxHp).toBeGreaterThan(0);
+      expect(bld.footprint.w).toBeGreaterThan(0);
+      expect(bld.footprint.d).toBeGreaterThan(0);
+      expect(bld.spriteDef).toBeDefined();
+    }
+  });
 });
+
 
 

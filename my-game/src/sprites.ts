@@ -899,20 +899,22 @@ export const CROC_SPRITE: SpriteDef = defineSprite({
   id: 'croc', w: 1, d: 1, massing: crocMassing,
 });
 
-// ── Helpers ────────────────────────────────────────────────────────────────────
+// ── Declarative Creature Sprite Registry ──────────────────────────────────────
 
-/** Map a creature species to its cached SpriteDef. */
+export const CREATURE_SPRITES: Record<Creature['species'], SpriteDef> = {
+  rabbit: RABBIT_SPRITE,
+  deer:   DEER_SPRITE,
+  fox:    FOX_SPRITE,
+  wolf:   WOLF_SPRITE,
+  troll:  TROLL_SPRITE,
+  bear:   BEAR_SPRITE,
+  boar:   BOAR_SPRITE,
+  croc:   CROC_SPRITE,
+};
+
+/** Map a creature species to its cached SpriteDef via declarative registry. */
 export function spriteForCreature(species: Creature['species']): SpriteDef {
-  switch (species) {
-    case 'rabbit': return RABBIT_SPRITE;
-    case 'deer':   return DEER_SPRITE;
-    case 'fox':    return FOX_SPRITE;
-    case 'wolf':   return WOLF_SPRITE;
-    case 'troll':  return TROLL_SPRITE;
-    case 'bear':   return BEAR_SPRITE;
-    case 'boar':   return BOAR_SPRITE;
-    case 'croc':   return CROC_SPRITE;
-  }
+  return CREATURE_SPRITES[species] ?? RABBIT_SPRITE;
 }
 
 
