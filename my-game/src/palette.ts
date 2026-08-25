@@ -100,6 +100,22 @@ export const TROLL_EYE    = hex('#e74c3c');
 export const FOX          = hex('#d35400');
 export const FOX_WHITE    = hex('#fdfefe');
 export const FOX_DARK     = hex('#2c3e50');
+/** Grizzly Bear — large, territorial apex omnivore. */
+export const BEAR         = hex('#4a2e18');
+export const BEAR_MUZZLE  = hex('#7c5230');
+export const BEAR_NOSE    = hex('#1c120c');
+export const BEAR_CLAW    = hex('#1a1a1a');
+/** Wild Boar — sturdy, aggressive herd beast with sharp tusks. */
+export const BOAR         = hex('#5c3826');
+export const BOAR_SNOUT   = hex('#8c5942');
+export const BOAR_TUSK    = hex('#f2efe9');
+export const BOAR_MANE    = hex('#362116');
+/** Marsh Crocodile — armored aquatic ambush predator. */
+export const CROC         = hex('#2d502a');
+export const CROC_BELLY   = hex('#58753a');
+export const CROC_RIDGE   = hex('#1f3a1d');
+export const CROC_TOOTH   = hex('#fdfefe');
+
 
 // ── Player & Tool colors ───────────────────────────────────────────────────────
 

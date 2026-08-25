@@ -26,7 +26,7 @@ import { SpatialGrid } from './spatial.js';
 
 // ── Species ────────────────────────────────────────────────────────────────────
 
-export type Species = 'rabbit' | 'deer' | 'fox' | 'wolf' | 'troll';
+export type Species = 'rabbit' | 'deer' | 'fox' | 'wolf' | 'troll' | 'bear' | 'boar' | 'croc';
 
 /** Trait vector. These are the "genes" that evolve each generation. */
 export interface Traits {
@@ -84,6 +84,9 @@ const BASE_HP: Record<Species, number> = {
   deer:   12,
   fox:    9,
   wolf:   22,
+  boar:   26,
+  croc:   42,
+  bear:   68,
   troll:  55,
 };
 
@@ -103,6 +106,9 @@ const BASE_TRAITS: Record<Species, Traits> = {
   deer:   { speed: 1.4, aggression: 0.10, size: 1.1,  fertility: 1.5 },
   fox:    { speed: 1.7, aggression: 0.55, size: 0.85, fertility: 1.4 },
   wolf:   { speed: 1.75, aggression: 0.75, size: 1.2,  fertility: 0.9 },
+  boar:   { speed: 1.5, aggression: 0.45, size: 1.15, fertility: 1.3 },
+  croc:   { speed: 1.1, aggression: 0.80, size: 1.35, fertility: 0.8 },
+  bear:   { speed: 1.2, aggression: 0.70, size: 1.7,  fertility: 0.7 },
   troll:  { speed: 0.8, aggression: 0.90, size: 1.9,  fertility: 0.5 },
 };
 
@@ -165,7 +171,10 @@ export function populateWorld(worldSeed: number, world: WorldTerrain): Creature[
 
       // Biome affinity checks
       if (species === 'troll' && biome.kind !== 'alpine' && h < 14) continue;
+      if (species === 'bear' && biome.kind !== 'alpine' && biome.kind !== 'taiga') continue;
       if (species === 'wolf' && biome.kind !== 'taiga' && biome.kind !== 'alpine') continue;
+      if (species === 'croc' && biome.kind !== 'wetlands' && biome.kind !== 'coastal' && h > 4) continue;
+      if (species === 'boar' && biome.kind !== 'meadow' && biome.kind !== 'wetlands') continue;
       if (species === 'deer' && biome.kind !== 'meadow' && biome.kind !== 'wetlands') continue;
       if (species === 'rabbit' && biome.kind !== 'meadow' && biome.kind !== 'wetlands' && biome.kind !== 'taiga') continue;
       if (species === 'fox' && biome.kind === 'alpine') continue;
@@ -175,14 +184,18 @@ export function populateWorld(worldSeed: number, world: WorldTerrain): Creature[
     }
   };
 
-  push('rabbit', 180,  2, 16);
-  push('deer',   120,  3, 16);
-  push('fox',     90,  2, 18);
-  push('wolf',    60,  6, 22);
-  push('troll',   30, 14, 24);
+  push('rabbit', 120,  2, 16);
+  push('deer',    75,  3, 16);
+  push('boar',    65,  2, 14);
+  push('fox',     55,  2, 18);
+  push('wolf',    45,  6, 22);
+  push('croc',    40,  1,  5);
+  push('bear',    30,  7, 22);
+  push('troll',   20, 14, 24);
 
   return creatures;
 }
+
 
 
 // ── Update ─────────────────────────────────────────────────────────────────────
@@ -253,24 +266,25 @@ function updateOne(
   events: CreatureEvents,
 ): void {
   // Slow natural idle/breathing cadence
-  const idleRate = c.species === 'rabbit' ? 0.15 : 0.3;
+  const idleRate = c.species === 'rabbit' ? 0.15 : c.species === 'croc' ? 0.08 : 0.3;
   c.walkCycle = (c.walkCycle + dt * idleRate) % 1;
 
   const speed = c.traits.speed;
   // Nighttime increases predator hunting speed and perception range
-  const isApex = c.species === 'wolf' || c.species === 'troll';
+  const isApex = c.species === 'wolf' || c.species === 'troll' || c.species === 'bear' || c.species === 'croc';
   const nightAggressionBonus = isApex && darkness > 0.1 ? darkness * 0.4 : 0;
   const effectiveAggression = c.traits.aggression + nightAggressionBonus;
-  const isCreatureHostile = isApex && effectiveAggression > 0.55;
+  const isCreatureHostile = (c.species === 'wolf' || c.species === 'troll' || c.species === 'bear' || c.species === 'croc') && effectiveAggression > 0.55;
   const huntSpeed = isApex ? speed * (1.3 + darkness * 0.35) : speed * 1.3;
-  const noticeRange = NOTICE_RANGE + (isApex ? darkness * 10 : 0);
+  const noticeRange = NOTICE_RANGE + (isApex ? darkness * 8 : 0);
 
   // 1. Check for immediate predator threats to flee from
   let threatDx = 0;
   let threatDy = 0;
   let threatCount = 0;
 
-  if (!isCreatureHostile) {
+  const shouldFleeFromPlayers = !isCreatureHostile && c.species !== 'bear' && c.species !== 'troll' && c.species !== 'croc';
+  if (shouldFleeFromPlayers) {
     for (let i = 0; i < players.length; i++) {
       const p = players[i];
       if (p === undefined || p.respawnTimer > 0) continue;
@@ -286,7 +300,7 @@ function updateOne(
   }
 
   // Check predator creatures via spatial query
-  if (c.species === 'rabbit' || c.species === 'deer' || c.species === 'fox') {
+  if (c.species === 'rabbit' || c.species === 'deer' || c.species === 'fox' || (c.species === 'boar' && c.hp < 12)) {
     const nearbyCount = CREATURE_SPATIAL.queryRadius(c.gx, c.gy, noticeRange);
     for (let q = 0; q < nearbyCount; q++) {
       const otherIdx = CREATURE_SPATIAL.queryBuffer[q];
@@ -294,9 +308,10 @@ function updateOne(
       const other = allCreatures[otherIdx];
       if (other === undefined || other.hp <= 0 || other.id === c.id) continue;
       const isPredator =
-        (c.species === 'rabbit' && (other.species === 'fox' || other.species === 'wolf' || other.species === 'troll')) ||
-        (c.species === 'deer' && (other.species === 'wolf' || other.species === 'troll')) ||
-        (c.species === 'fox' && (other.species === 'wolf' || other.species === 'troll'));
+        (c.species === 'rabbit' && (other.species === 'fox' || other.species === 'wolf' || other.species === 'croc' || other.species === 'troll')) ||
+        (c.species === 'deer' && (other.species === 'wolf' || other.species === 'bear' || other.species === 'croc' || other.species === 'troll')) ||
+        (c.species === 'fox' && (other.species === 'wolf' || other.species === 'bear' || other.species === 'troll')) ||
+        (c.species === 'boar' && (other.species === 'bear' || other.species === 'troll' || other.species === 'wolf'));
 
       if (isPredator) {
         const dx = other.gx - c.gx;
@@ -324,11 +339,11 @@ function updateOne(
     return;
   }
 
-  // 2. Carnivore Hunting (Foxes hunt rabbits; Wolves hunt deer/rabbits/players; Trolls siege buildings/players)
-  if (c.species === 'fox' || c.species === 'wolf' || c.species === 'troll') {
+  // 2. Carnivore & Predator Hunting / Ambush / Territorial Defense
+  if (c.species === 'fox' || c.species === 'wolf' || c.species === 'troll' || c.species === 'bear' || c.species === 'croc' || (c.species === 'boar' && c.traits.aggression > 0.5)) {
     let bestTargetGx = 0;
     let bestTargetGy = 0;
-    let bestDist = 12 + (darkness > 0 ? darkness * 10 : 0);
+    let bestDist = 12 + (darkness > 0 ? darkness * 8 : 0);
     let targetType: 'none' | 'creature' | 'player' | 'building' = 'none';
     let targetCreature: Creature | undefined = undefined;
     let targetPlayer: Player | undefined = undefined;
@@ -343,7 +358,10 @@ function updateOne(
       if (other === undefined || other.hp <= 0 || other.id === c.id) continue;
       const isPrey =
         (c.species === 'fox' && other.species === 'rabbit') ||
-        (c.species === 'wolf' && (other.species === 'deer' || other.species === 'rabbit'));
+        (c.species === 'wolf' && (other.species === 'deer' || other.species === 'rabbit' || other.species === 'boar')) ||
+        (c.species === 'croc' && (other.species === 'deer' || other.species === 'rabbit' || other.species === 'boar')) ||
+        (c.species === 'bear' && (other.species === 'deer' || other.species === 'boar' || other.species === 'wolf')) ||
+        (c.species === 'boar' && other.species === 'wolf'); // Boar counter-attacks aggressive wolves
 
       if (isPrey) {
         const dx = other.gx - c.gx;
@@ -359,15 +377,16 @@ function updateOne(
       }
     }
 
-    // Hostile wolves and trolls also target nearby active players
-    if (isCreatureHostile) {
+    // Hostile apex predators and territorial beasts target nearby active players
+    if (isCreatureHostile || c.species === 'bear') {
+      const playerDetectRange = c.species === 'bear' ? 5.5 : bestDist;
       for (let i = 0; i < players.length; i++) {
         const p = players[i];
         if (p === undefined || p.respawnTimer > 0) continue;
         const dx = p.gx - c.gx;
         const dy = p.gy - c.gy;
         const d = Math.sqrt(dx * dx + dy * dy); // @tier-b — player chase distance, pixels only
-        if (d < bestDist) {
+        if (d < playerDetectRange && d < bestDist) {
           bestDist = d;
           bestTargetGx = p.gx;
           bestTargetGy = p.gy;
@@ -398,35 +417,37 @@ function updateOne(
     }
 
     if (targetType !== 'none') {
-      const attackRangeThreshold = ATTACK_RANGE + (targetType === 'building' ? 1.0 : 0);
+      const attackRangeThreshold = ATTACK_RANGE + (targetType === 'building' ? 1.0 : c.species === 'bear' ? 0.4 : 0);
       if (bestDist < attackRangeThreshold) {
         c.state = 'attack';
 
         if (targetType === 'player' && targetPlayer !== undefined) {
-          const baseDmg = c.species === 'troll' ? 36 : 22;
+          const baseDmg = c.species === 'bear' ? 44 : c.species === 'troll' ? 36 : c.species === 'croc' ? 32 : c.species === 'boar' ? 24 : 22;
           const nightDmg = baseDmg * (1 + darkness * 0.4);
           damagePlayer(targetPlayer, dt * nightDmg * c.traits.size);
           events.playerAttacked = true;
-          if (c.species === 'troll') events.roarOccurred = true;
+          if (c.species === 'troll' || c.species === 'bear') events.roarOccurred = true;
           if (c.species === 'wolf' && darkness > 0.3) events.howlOccurred = true;
         } else if (targetType === 'creature' && targetCreature !== undefined) {
-          targetCreature.hp -= dt * 18 * c.traits.size;
+          const huntDmg = c.species === 'bear' ? 36 : c.species === 'croc' ? 30 : 18;
+          targetCreature.hp -= dt * huntDmg * c.traits.size;
           if (targetCreature.hp <= 0) {
-            c.hp = Math.min(c.maxHp, c.hp + 6); // Carnivore heals from kill
+            c.hp = Math.min(c.maxHp, c.hp + 8); // Predator heals from kill
           }
         } else if (targetType === 'building' && targetBuilding !== undefined) {
           targetBuilding.hp -= dt * 32 * c.traits.size;
         }
       } else {
         c.state = 'chase';
-        moveWithSeparation(c, bestTargetGx, bestTargetGy, huntSpeed, dt, world, allCreatures, buildings);
+        const attackRunSpeed = c.species === 'croc' ? huntSpeed * 1.5 : c.species === 'bear' ? huntSpeed * 1.15 : huntSpeed;
+        moveWithSeparation(c, bestTargetGx, bestTargetGy, attackRunSpeed, dt, world, allCreatures, buildings);
       }
       return;
     }
   }
 
-  // 3. Herbivore Plant Foraging (Rabbits & Deer seek out and eat flora via spatial index)
-  if (c.species === 'rabbit' || c.species === 'deer') {
+  // 3. Herbivore & Omnivore Plant Foraging (Rabbits, Deer, Boars & Bears forage for plants)
+  if (c.species === 'rabbit' || c.species === 'deer' || c.species === 'boar' || c.species === 'bear') {
     const edible = findClosestEdibleFlora(flora, c.gx, c.gy, 8, undefined, FLORA_SPATIAL);
     if (edible !== undefined) {
       const dx = edible.gx - c.gx;
@@ -442,7 +463,7 @@ function updateOne(
             flora.splice(fIdx, 1);
             rebuildFloraSpatial(flora);
           }
-          c.hp = Math.min(c.maxHp, c.hp + 5);
+          c.hp = Math.min(c.maxHp, c.hp + 6);
           c.eatTimer = 0;
           c.targetGx = NaN;
           c.targetGy = NaN;
@@ -547,7 +568,7 @@ function moveWithSeparation(
   }
 
   const step = speed * dt;
-  const cycleSpeed = c.species === 'troll' ? 0.6 : c.species === 'rabbit' ? 0.45 : 0.9;
+  const cycleSpeed = c.species === 'troll' || c.species === 'bear' ? 0.6 : c.species === 'rabbit' ? 0.45 : 0.9;
   c.walkCycle = (c.walkCycle + step * cycleSpeed) % 1;
 
   const nx = c.gx + dirX * step;
@@ -578,17 +599,18 @@ function moveWithSeparation(
   }
 }
 
-
 // ── Evolution ──────────────────────────────────────────────────────────────────
 
 const SPECIES_MINIMA: readonly { species: Species; min: number }[] = [
-  { species: 'rabbit', min: 40 },
-  { species: 'deer', min: 24 },
-  { species: 'fox', min: 16 },
-  { species: 'wolf', min: 12 },
+  { species: 'rabbit', min: 30 },
+  { species: 'deer', min: 20 },
+  { species: 'boar', min: 16 },
+  { species: 'fox', min: 14 },
+  { species: 'wolf', min: 10 },
+  { species: 'croc', min: 10 },
+  { species: 'bear', min: 8 },
   { species: 'troll', min: 6 },
 ];
-
 
 /**
  * Evolve the population. Called every GENERATION_TICKS ticks.
@@ -670,5 +692,6 @@ export function damageCreature(c: Creature, amount: number): void {
 
 /** True if a creature is hostile and will attack players. */
 export function isHostile(c: Creature): boolean {
-  return (c.species === 'wolf' || c.species === 'troll') && c.traits.aggression > 0.65;
+  return (c.species === 'wolf' || c.species === 'troll' || c.species === 'bear' || c.species === 'croc') && c.traits.aggression > 0.65;
 }
+

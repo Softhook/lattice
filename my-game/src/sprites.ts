@@ -39,6 +39,18 @@ import {
   FOX,
   FOX_WHITE,
   FOX_DARK,
+  BEAR,
+  BEAR_MUZZLE,
+  BEAR_NOSE,
+  BEAR_CLAW,
+  BOAR,
+  BOAR_SNOUT,
+  BOAR_TUSK,
+  BOAR_MANE,
+  CROC,
+  CROC_BELLY,
+  CROC_RIDGE,
+  CROC_TOOTH,
   BOOTS_DARK,
   SKIN_TONE,
   HAIR_DARK,
@@ -46,6 +58,7 @@ import {
   TOOL_GOLD,
   TOOL_STEEL,
 } from './palette.js';
+
 
 // ── Player Sprite ─────────────────────────────────────────────────────────────
 
@@ -695,6 +708,197 @@ export const TROLL_SPRITE: SpriteDef = defineSprite({
   id: 'troll', w: 2, d: 2, massing: trollMassing,
 });
 
+// ── 5. Bear (Massive Grizzly / Brown Bear with 4-Way Facing) ───────────────────
+
+const bearMassing: Massing = (w, v, _rng) => {
+  const facing = v.flags & 3;
+  const phase = ((v.level % 1000) / 1000);
+  // @tier-b — lumbering heavy quad gait
+  const legSwing = Math.sin(phase * Math.PI * 2) * 0.08;
+  const headSway = Math.sin(phase * Math.PI * 2) * 0.03;
+
+  w.shadow(0.1, 0.1, 1.4, 1.4, 0.45);
+
+  if (facing === 1) {
+    // South: Facing camera
+    w.box(0.24, 0.24 + legSwing, 0.26, 0.28, { color: BEAR, h: 0.55 });
+    w.box(0.24, 0.24 + legSwing, 0.26, 0.28, { color: BEAR_CLAW, h: 0.12, z: 0 });
+    w.box(0.90, 0.24 - legSwing, 0.26, 0.28, { color: BEAR, h: 0.55 });
+    w.box(0.90, 0.24 - legSwing, 0.26, 0.28, { color: BEAR_CLAW, h: 0.12, z: 0 });
+    w.box(0.24, 0.88 - legSwing, 0.26, 0.28, { color: BEAR, h: 0.55 });
+    w.box(0.24, 0.88 - legSwing, 0.26, 0.28, { color: BEAR_CLAW, h: 0.12, z: 0 });
+    w.box(0.90, 0.88 + legSwing, 0.26, 0.28, { color: BEAR, h: 0.55 });
+    w.box(0.90, 0.88 + legSwing, 0.26, 0.28, { color: BEAR_CLAW, h: 0.12, z: 0 });
+
+    w.box(0.26, 0.22, 0.88, 0.96, { color: BEAR, h: 0.70, z: 0.50 });
+    w.box(0.32, 0.48, 0.76, 0.58, { color: BEAR, h: 0.85, z: 0.58 });
+
+    w.box(0.38, 0.76, 0.64, 0.48, { color: BEAR, h: 0.50, z: 0.85 + headSway });
+    w.box(0.48, 1.08, 0.44, 0.28, { color: BEAR_MUZZLE, h: 0.28, z: 0.88 + headSway });
+    w.box(0.62, 1.30, 0.16, 0.10, { color: BEAR_NOSE, h: 0.12, z: 0.98 + headSway });
+
+    w.box(0.32, 0.70, 0.18, 0.18, { color: BEAR, h: 0.20, z: 1.35 + headSway });
+    w.box(0.90, 0.70, 0.18, 0.18, { color: BEAR, h: 0.20, z: 1.35 + headSway });
+  } else if (facing === 0) {
+    // North: Facing away
+    w.box(0.38, 0.16, 0.64, 0.48, { color: BEAR, h: 0.50, z: 0.85 + headSway });
+    w.box(0.32, 0.20, 0.18, 0.18, { color: BEAR, h: 0.20, z: 1.35 + headSway });
+    w.box(0.90, 0.20, 0.18, 0.18, { color: BEAR, h: 0.20, z: 1.35 + headSway });
+
+    w.box(0.24, 0.24 - legSwing, 0.26, 0.28, { color: BEAR, h: 0.55 });
+    w.box(0.90, 0.24 + legSwing, 0.26, 0.28, { color: BEAR, h: 0.55 });
+    w.box(0.24, 0.88 + legSwing, 0.26, 0.28, { color: BEAR, h: 0.55 });
+    w.box(0.90, 0.88 - legSwing, 0.26, 0.28, { color: BEAR, h: 0.55 });
+
+    w.box(0.26, 0.22, 0.88, 0.96, { color: BEAR, h: 0.70, z: 0.50 });
+    w.box(0.32, 0.34, 0.76, 0.58, { color: BEAR, h: 0.85, z: 0.58 });
+  } else if (facing === 2) {
+    // East: Facing +gx
+    w.box(0.24 + legSwing, 0.24, 0.28, 0.26, { color: BEAR, h: 0.55 });
+    w.box(0.24 - legSwing, 0.90, 0.28, 0.26, { color: BEAR, h: 0.55 });
+    w.box(0.88 - legSwing, 0.24, 0.28, 0.26, { color: BEAR, h: 0.55 });
+    w.box(0.88 + legSwing, 0.90, 0.28, 0.26, { color: BEAR, h: 0.55 });
+
+    w.box(0.22, 0.26, 0.96, 0.88, { color: BEAR, h: 0.70, z: 0.50 });
+    w.box(0.48, 0.32, 0.58, 0.76, { color: BEAR, h: 0.85, z: 0.58 });
+
+    w.box(0.76, 0.38, 0.48, 0.64, { color: BEAR, h: 0.50, z: 0.85 + headSway });
+    w.box(1.08, 0.48, 0.28, 0.44, { color: BEAR_MUZZLE, h: 0.28, z: 0.88 + headSway });
+    w.box(1.30, 0.62, 0.10, 0.16, { color: BEAR_NOSE, h: 0.12, z: 0.98 + headSway });
+  } else {
+    // West: Facing -gx
+    w.box(0.24 - legSwing, 0.24, 0.28, 0.26, { color: BEAR, h: 0.55 });
+    w.box(0.24 + legSwing, 0.90, 0.28, 0.26, { color: BEAR, h: 0.55 });
+    w.box(0.88 + legSwing, 0.24, 0.28, 0.26, { color: BEAR, h: 0.55 });
+    w.box(0.88 - legSwing, 0.90, 0.28, 0.26, { color: BEAR, h: 0.55 });
+
+    w.box(0.22, 0.26, 0.96, 0.88, { color: BEAR, h: 0.70, z: 0.50 });
+    w.box(0.34, 0.32, 0.58, 0.76, { color: BEAR, h: 0.85, z: 0.58 });
+
+    w.box(0.16, 0.38, 0.48, 0.64, { color: BEAR, h: 0.50, z: 0.85 + headSway });
+    w.box(0.04, 0.48, 0.28, 0.44, { color: BEAR_MUZZLE, h: 0.28, z: 0.88 + headSway });
+    w.box(0.00, 0.62, 0.10, 0.16, { color: BEAR_NOSE, h: 0.12, z: 0.98 + headSway });
+  }
+};
+
+export const BEAR_SPRITE: SpriteDef = defineSprite({
+  id: 'bear', w: 2, d: 2, massing: bearMassing,
+});
+
+// ── 6. Wild Boar (Stout Russet Quadruped with Protruding Tusks) ────────────────
+
+const boarMassing: Massing = (w, v, _rng) => {
+  const facing = v.flags & 3;
+  const phase = ((v.level % 1000) / 1000);
+  const legSwing = Math.sin(phase * Math.PI * 2) * 0.08;
+
+  w.shadow(0.12, 0.12, 0.76, 0.76, 0.32);
+
+  if (facing === 1) {
+    // South: Facing Camera
+    w.box(0.20, 0.20 + legSwing, 0.16, 0.18, { color: BOAR_MANE, h: 0.38 });
+    w.box(0.64, 0.20 - legSwing, 0.16, 0.18, { color: BOAR_MANE, h: 0.38 });
+    w.box(0.20, 0.62 - legSwing, 0.16, 0.18, { color: BOAR_MANE, h: 0.38 });
+    w.box(0.64, 0.62 + legSwing, 0.16, 0.18, { color: BOAR_MANE, h: 0.38 });
+
+    w.box(0.20, 0.18, 0.60, 0.64, { color: BOAR, h: 0.48, z: 0.32 });
+    w.box(0.38, 0.18, 0.24, 0.60, { color: BOAR_MANE, h: 0.18, z: 0.78 });
+
+    w.box(0.26, 0.52, 0.48, 0.38, { color: BOAR, h: 0.42, z: 0.56 });
+    w.box(0.32, 0.78, 0.36, 0.22, { color: BOAR_SNOUT, h: 0.26, z: 0.56 });
+
+    w.post(0.24, 0.82, 0.62, 0.22, BOAR_TUSK, 0.04);
+    w.post(0.76, 0.82, 0.62, 0.22, BOAR_TUSK, 0.04);
+  } else if (facing === 0) {
+    // North: Facing Away
+    w.box(0.26, 0.12, 0.48, 0.38, { color: BOAR, h: 0.42, z: 0.56 });
+    w.box(0.20, 0.20 - legSwing, 0.16, 0.18, { color: BOAR_MANE, h: 0.38 });
+    w.box(0.64, 0.20 + legSwing, 0.16, 0.18, { color: BOAR_MANE, h: 0.38 });
+    w.box(0.20, 0.62 + legSwing, 0.16, 0.18, { color: BOAR_MANE, h: 0.38 });
+    w.box(0.64, 0.62 - legSwing, 0.16, 0.18, { color: BOAR_MANE, h: 0.38 });
+    w.box(0.20, 0.18, 0.60, 0.64, { color: BOAR, h: 0.48, z: 0.32 });
+    w.box(0.38, 0.22, 0.24, 0.60, { color: BOAR_MANE, h: 0.18, z: 0.78 });
+  } else if (facing === 2) {
+    // East: Facing +gx
+    w.box(0.20 + legSwing, 0.20, 0.18, 0.16, { color: BOAR_MANE, h: 0.38 });
+    w.box(0.20 - legSwing, 0.64, 0.18, 0.16, { color: BOAR_MANE, h: 0.38 });
+    w.box(0.62 - legSwing, 0.20, 0.18, 0.16, { color: BOAR_MANE, h: 0.38 });
+    w.box(0.62 + legSwing, 0.64, 0.18, 0.16, { color: BOAR_MANE, h: 0.38 });
+
+    w.box(0.18, 0.20, 0.64, 0.60, { color: BOAR, h: 0.48, z: 0.32 });
+    w.box(0.50, 0.26, 0.38, 0.48, { color: BOAR, h: 0.42, z: 0.56 });
+    w.box(0.76, 0.32, 0.22, 0.36, { color: BOAR_SNOUT, h: 0.26, z: 0.56 });
+    w.post(0.82, 0.24, 0.62, 0.22, BOAR_TUSK, 0.04);
+    w.post(0.82, 0.76, 0.62, 0.22, BOAR_TUSK, 0.04);
+  } else {
+    // West: Facing -gx
+    w.box(0.20 - legSwing, 0.20, 0.18, 0.16, { color: BOAR_MANE, h: 0.38 });
+    w.box(0.20 + legSwing, 0.64, 0.18, 0.16, { color: BOAR_MANE, h: 0.38 });
+    w.box(0.62 + legSwing, 0.20, 0.18, 0.16, { color: BOAR_MANE, h: 0.38 });
+    w.box(0.62 - legSwing, 0.64, 0.18, 0.16, { color: BOAR_MANE, h: 0.38 });
+
+    w.box(0.18, 0.20, 0.64, 0.60, { color: BOAR, h: 0.48, z: 0.32 });
+    w.box(0.12, 0.26, 0.38, 0.48, { color: BOAR, h: 0.42, z: 0.56 });
+    w.box(0.02, 0.32, 0.22, 0.36, { color: BOAR_SNOUT, h: 0.26, z: 0.56 });
+    w.post(0.18, 0.24, 0.62, 0.22, BOAR_TUSK, 0.04);
+    w.post(0.18, 0.76, 0.62, 0.22, BOAR_TUSK, 0.04);
+  }
+};
+
+export const BOAR_SPRITE: SpriteDef = defineSprite({
+  id: 'boar', w: 1, d: 1, massing: boarMassing,
+});
+
+// ── 7. Marsh Crocodile (Armored Aquatic Reptile with Tail Sway) ────────────────
+
+const crocMassing: Massing = (w, v, _rng) => {
+  const facing = v.flags & 3;
+  const phase = ((v.level % 1000) / 1000);
+  const tailSway = Math.sin(phase * Math.PI * 2) * 0.12;
+
+  w.shadow(0.06, 0.06, 0.88, 0.88, 0.35);
+
+  if (facing === 1) {
+    // South: Facing Camera
+    w.box(0.42 + tailSway, 0.02, 0.16, 0.34, { color: CROC, h: 0.18, z: 0.08 });
+    w.box(0.45 + tailSway * 1.5, 0.00, 0.10, 0.20, { color: CROC_RIDGE, h: 0.14, z: 0.24 });
+
+    w.box(0.08, 0.26, 0.18, 0.18, { color: CROC, h: 0.16, z: 0 });
+    w.box(0.74, 0.26, 0.18, 0.18, { color: CROC, h: 0.16, z: 0 });
+    w.box(0.08, 0.58, 0.18, 0.18, { color: CROC, h: 0.16, z: 0 });
+    w.box(0.74, 0.58, 0.18, 0.18, { color: CROC, h: 0.16, z: 0 });
+
+    w.box(0.20, 0.20, 0.60, 0.58, { color: CROC, h: 0.24, z: 0.06 });
+    w.box(0.36, 0.22, 0.28, 0.52, { color: CROC_RIDGE, h: 0.14, z: 0.28 });
+
+    w.box(0.26, 0.68, 0.48, 0.38, { color: CROC, h: 0.20, z: 0.08 });
+    w.box(0.28, 0.94, 0.06, 0.08, { color: CROC_TOOTH, h: 0.10, z: 0.16 });
+    w.box(0.66, 0.94, 0.06, 0.08, { color: CROC_TOOTH, h: 0.10, z: 0.16 });
+  } else if (facing === 0) {
+    // North: Facing Away
+    w.box(0.26, 0.04, 0.48, 0.38, { color: CROC, h: 0.20, z: 0.08 });
+    w.box(0.20, 0.22, 0.60, 0.58, { color: CROC, h: 0.24, z: 0.06 });
+    w.box(0.36, 0.26, 0.28, 0.52, { color: CROC_RIDGE, h: 0.14, z: 0.28 });
+    w.box(0.42 + tailSway, 0.64, 0.16, 0.34, { color: CROC, h: 0.18, z: 0.08 });
+  } else if (facing === 2) {
+    // East: Facing +gx
+    w.box(0.02, 0.42 + tailSway, 0.34, 0.16, { color: CROC, h: 0.18, z: 0.08 });
+    w.box(0.20, 0.20, 0.58, 0.60, { color: CROC, h: 0.24, z: 0.06 });
+    w.box(0.24, 0.36, 0.52, 0.28, { color: CROC_RIDGE, h: 0.14, z: 0.28 });
+    w.box(0.68, 0.26, 0.38, 0.48, { color: CROC, h: 0.20, z: 0.08 });
+  } else {
+    // West: Facing -gx
+    w.box(0.64, 0.42 + tailSway, 0.34, 0.16, { color: CROC, h: 0.18, z: 0.08 });
+    w.box(0.22, 0.20, 0.58, 0.60, { color: CROC, h: 0.24, z: 0.06 });
+    w.box(0.24, 0.36, 0.52, 0.28, { color: CROC_RIDGE, h: 0.14, z: 0.28 });
+    w.box(0.04, 0.26, 0.38, 0.48, { color: CROC, h: 0.20, z: 0.08 });
+  }
+};
+
+export const CROC_SPRITE: SpriteDef = defineSprite({
+  id: 'croc', w: 1, d: 1, massing: crocMassing,
+});
+
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 /** Map a creature species to its cached SpriteDef. */
@@ -705,8 +909,12 @@ export function spriteForCreature(species: Creature['species']): SpriteDef {
     case 'fox':    return FOX_SPRITE;
     case 'wolf':   return WOLF_SPRITE;
     case 'troll':  return TROLL_SPRITE;
+    case 'bear':   return BEAR_SPRITE;
+    case 'boar':   return BOAR_SPRITE;
+    case 'croc':   return CROC_SPRITE;
   }
 }
+
 
 export interface MutableVariant {
   seed: number;

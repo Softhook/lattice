@@ -108,6 +108,17 @@ describe('Verdant Gameplay Logic', () => {
     const initialCount = creatures.length;
     expect(initialCount).toBeGreaterThan(0);
 
+    // Verify all 8 species are present in the world ecosystem
+    const speciesPresent = new Set(creatures.map((c) => c.species));
+    expect(speciesPresent.has('rabbit')).toBe(true);
+    expect(speciesPresent.has('deer')).toBe(true);
+    expect(speciesPresent.has('boar')).toBe(true);
+    expect(speciesPresent.has('fox')).toBe(true);
+    expect(speciesPresent.has('wolf')).toBe(true);
+    expect(speciesPresent.has('croc')).toBe(true);
+    expect(speciesPresent.has('bear')).toBe(true);
+    expect(speciesPresent.has('troll')).toBe(true);
+
     const events = updateCreatures(creatures, world, [p1, p2], flora, [], 0, 1 / 60);
     expect(typeof events.playerAttacked).toBe('boolean');
     for (const c of creatures) {
@@ -157,4 +168,5 @@ describe('Verdant Gameplay Logic', () => {
     }
   });
 });
+
 

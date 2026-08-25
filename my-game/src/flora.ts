@@ -384,11 +384,15 @@ export function floraVariant(f: FloraItem): Variant {
 
 let floraIdSeq = 1;
 
-/** Populate the massive 640x640 world with lush procedural trees, bushes, flowers, and stones. */
+/** Populate the massive 640x640 world with organic procedural forest groves, copses, and wildflower glades. */
 export function populateFlora(seed: number, world: WorldTerrain): FloraItem[] {
   const rng = createRng(seed ^ 0x5a5a5a5a);
   const items: FloraItem[] = [];
 
+  // Reset spatial index for population collision checks
+  FLORA_SPATIAL.clear();
+
+  // Multi-frequency candidate sampling across the continent
   for (let gy = 6; gy < H - 6; gy += 4) {
     for (let gx = 6; gx < W - 6; gx += 4) {
       // Small 3-tile exclusion directly around player spawn centers
@@ -400,38 +404,68 @@ export function populateFlora(seed: number, world: WorldTerrain): FloraItem[] {
       const mat = world.surface.get(gx, gy);
       if (mat === MAT_WATER) continue;
 
-      const jitterX = gx + (rng.next() * 2.2 - 1.1);
-      const jitterY = gy + (rng.next() * 2.2 - 1.1);
-      const tgx = clamp(Math.floor(jitterX), 4, W - 5);
-      const tgy = clamp(Math.floor(jitterY), 4, H - 5);
+      // Multi-octave forest grove noise: determines dense forest stands vs open glades vs sunny meadows
+      const canopyGrove = fbm2(seed ^ 0x2468, gx * 0.016, gy * 0.016, 3) * 0.65 +
+                          fbm2(seed ^ 0x9753, gx * 0.045, gy * 0.045, 2) * 0.35;
+
+      const elevation = world.heights.get(gx, gy);
+      const blend = getBiomeBlendAt(gx, gy, seed, elevation);
+
+      // Local stand coherence: species naturally group together in tree stands
+      const standRoll = fbm2(seed ^ 0x8642, gx * 0.035, gy * 0.035, 2);
+
+      // Organic natural jitter
+      const jx = gx + (rng.next() * 2.8 - 1.4);
+      const jy = gy + (rng.next() * 2.8 - 1.4);
+      const tgx = clamp(Math.floor(jx), 4, W - 5);
+      const tgy = clamp(Math.floor(jy), 4, H - 5);
 
       const tMat = world.surface.get(tgx, tgy);
       if (tMat === MAT_WATER) continue;
 
-      const elevation = world.heights.get(tgx, tgy);
-      const blend = getBiomeBlendAt(tgx, tgy, seed, elevation);
+      const tElev = world.heights.get(tgx, tgy);
 
-      // Noise density creates natural clusters and clearings
-      const density = fbm2(seed ^ 0x3333, tgx * 0.04, tgy * 0.04, 3);
-      if (density < -0.35) continue;
-
+      // Decide if this candidate tile generates a tree, shrub, rock, or flowerbed based on grove canopy
       const roll = rng.next();
+      const isDenseGrove = canopyGrove > 0.06;
+      const isGlade = canopyGrove >= -0.16 && canopyGrove <= 0.06;
+      const isOpenMeadow = canopyGrove < -0.16;
+
+      // Spawn acceptance probability based on landscape structure
+      if (isDenseGrove) {
+        if (roll > 0.85) continue; // High density in groves
+      } else if (isGlade) {
+        if (roll > 0.55) continue; // Medium density in glades
+      } else if (isOpenMeadow) {
+        if (roll > 0.35) continue; // Open meadow scattering
+      }
+
+
+      // Check spatial clearance: maintain natural clearance so trees don't overlap awkwardly
+      const minClearance = isDenseGrove ? 1.4 : 1.8;
+      if (FLORA_SPATIAL.queryRadius(tgx, tgy, minClearance) > 0) {
+        continue;
+      }
+
+      // Independent roll for species selection on accepted tiles
+      const kindRoll = rng.next();
+
       // In transition ecotones, seamlessly intermingle species from secondary biome
-      const activeKind = (blend.blend > 0.2 && roll < blend.blend * 0.65) ? blend.secondary : blend.primary;
+      const activeKind = (blend.blend > 0.2 && kindRoll < blend.blend * 0.65) ? blend.secondary : blend.primary;
 
       let kind: FloraKind | undefined = undefined;
-      let scale = 0.85 + rng.next() * 0.35;
+      let scale = isDenseGrove ? (1.0 + rng.next() * 0.4) : (0.85 + rng.next() * 0.35);
       let subType = 0;
 
       // 1. Water shoreline flora (within 1-2 tiles of water level)
-      if (elevation <= 2) {
-        if (roll < 0.35) {
+      if (tElev <= 2) {
+        if (kindRoll < 0.36) {
           kind = 'swamp_tree';
           scale = 1.1 + rng.next() * 0.4;
-        } else if (roll < 0.65) {
+        } else if (kindRoll < 0.68) {
           kind = 'flowers';
           subType = Math.floor(rng.next() * 3);
-        } else if (roll < 0.85) {
+        } else if (kindRoll < 0.86) {
           kind = 'bush';
           subType = 1;
         } else {
@@ -440,11 +474,11 @@ export function populateFlora(seed: number, world: WorldTerrain): FloraItem[] {
         }
       }
       // 2. High altitude rocky spires and mountain pines
-      else if (elevation >= 13) {
-        if (roll < 0.40) {
+      else if (tElev >= 13) {
+        if (kindRoll < 0.42) {
           kind = 'rock_spire';
-          scale = 1.1 + rng.next() * 0.5;
-        } else if (roll < 0.75) {
+          scale = 1.1 + rng.next() * 0.55;
+        } else if (kindRoll < 0.78) {
           kind = 'pine';
           scale = 0.95 + rng.next() * 0.4;
         } else {
@@ -452,98 +486,113 @@ export function populateFlora(seed: number, world: WorldTerrain): FloraItem[] {
           subType = 1;
         }
       }
-      // 3. Biome-specific vegetation
+      // 3. Biome-specific vegetation & stand grouping
       else if (activeKind === 'badlands') {
-        // Arid badlands & mesas: Saguaro cacti, stepped rock spires, and tumbleweed dead bushes
-        if (roll < 0.42) {
+        if (kindRoll < 0.44) {
           kind = 'cactus';
           scale = 0.95 + rng.next() * 0.5;
-        } else if (roll < 0.70) {
+        } else if (kindRoll < 0.72) {
           kind = 'rock_spire';
           scale = 1.05 + rng.next() * 0.55;
-        } else if (roll < 0.90) {
+        } else if (kindRoll < 0.90) {
           kind = 'dead_bush';
           scale = 0.75 + rng.next() * 0.4;
         } else {
           kind = 'rock';
         }
       } else if (activeKind === 'wetlands') {
-        // Lush wetlands & bayous: giant weeping swamp willows, flower carpets, and mushrooms
-        if (roll < 0.42) {
+        if (isDenseGrove && kindRoll < 0.65) {
           kind = 'swamp_tree';
           scale = 1.15 + rng.next() * 0.45;
-        } else if (roll < 0.68) {
+        } else if (kindRoll < 0.42) {
+          kind = 'swamp_tree';
+          scale = 1.15 + rng.next() * 0.45;
+        } else if (kindRoll < 0.68) {
           kind = 'flowers';
           subType = Math.floor(rng.next() * 3);
-        } else if (roll < 0.84) {
+        } else if (kindRoll < 0.84) {
           kind = 'mushroom';
         } else {
           kind = 'bush';
           subType = 1;
         }
       } else if (activeKind === 'taiga') {
-        // Deep northern taiga: towering spruce, evergreen pines, mushrooms, and mossy granite boulders
-        if (roll < 0.45) {
-          kind = 'spruce';
+        // Taiga stand cohesion: spruce stands vs evergreen pine ridges
+        const isSpruceStand = standRoll > -0.1;
+        if (isDenseGrove && kindRoll < 0.65) {
+          kind = isSpruceStand ? 'spruce' : 'pine';
           scale = 1.1 + rng.next() * 0.45;
-        } else if (roll < 0.70) {
-          kind = 'pine';
-          scale = 0.95 + rng.next() * 0.35;
-        } else if (roll < 0.82) {
+        } else if (kindRoll < 0.46) {
+          kind = isSpruceStand ? 'spruce' : 'pine';
+        } else if (kindRoll < 0.68) {
           kind = 'rock';
           subType = 1;
-        } else if (roll < 0.92) {
+        } else if (kindRoll < 0.84) {
           kind = 'mushroom';
         } else {
           kind = 'bush';
         }
       } else if (activeKind === 'alpine') {
-        // Alpine high peaks: hardy mountain pines, sharp rock spires, and granite boulders
-        if (roll < 0.42) {
+        if (kindRoll < 0.44) {
           kind = 'pine';
           scale = 0.95 + rng.next() * 0.4;
-        } else if (roll < 0.75) {
+        } else if (kindRoll < 0.75) {
           kind = 'rock_spire';
           scale = 1.1 + rng.next() * 0.55;
         } else {
           kind = 'rock';
         }
       } else if (activeKind === 'coastal') {
-        // Coastal dunes & shallows
-        if (roll < 0.35) {
+        if (kindRoll < 0.35) {
           kind = 'rock_spire';
           scale = 0.85 + rng.next() * 0.4;
-        } else if (roll < 0.60) {
+        } else if (kindRoll < 0.60) {
           kind = 'dead_bush';
-        } else if (roll < 0.80) {
+        } else if (kindRoll < 0.80) {
           kind = 'rock';
         } else {
           kind = 'bush';
         }
       } else {
-        // Temperate Meadows: white-barked birch trees, broadleaf oaks, pines, wildflower carpets, and bushes
-        if (roll < 0.32) {
-          kind = 'birch';
-          scale = 1.0 + rng.next() * 0.4;
-        } else if (roll < 0.58) {
-          kind = 'oak';
-          scale = 1.0 + rng.next() * 0.4;
-        } else if (roll < 0.70) {
-          kind = 'pine';
-          scale = 0.9 + rng.next() * 0.35;
-        } else if (roll < 0.82) {
-          kind = 'flowers';
-          subType = Math.floor(rng.next() * 3);
-        } else if (roll < 0.92) {
-          kind = 'bush';
-          subType = roll > 0.85 ? 1 : 0;
+        // Temperate Meadows: Stand clustering between silver birch copses and broadleaf oak groves
+        const isBirchGrove = standRoll > 0.05;
+        if (isDenseGrove && kindRoll < 0.65) {
+          kind = isBirchGrove ? 'birch' : 'oak';
+          scale = 1.05 + rng.next() * 0.45;
+        } else if (isGlade) {
+          if (kindRoll < 0.42) {
+            kind = isBirchGrove ? 'birch' : 'oak';
+          } else if (kindRoll < 0.68) {
+            kind = 'flowers';
+            subType = Math.floor(rng.next() * 3);
+          } else if (kindRoll < 0.85) {
+            kind = 'bush';
+            subType = kindRoll > 0.76 ? 1 : 0;
+          } else {
+            kind = 'mushroom';
+          }
         } else {
-          kind = 'mushroom';
+          // Open meadow
+          if (kindRoll < 0.20) {
+            kind = 'oak'; // Majestic solitary old-growth oak
+            scale = 1.25 + rng.next() * 0.35;
+          } else if (kindRoll < 0.62) {
+            kind = 'flowers';
+            subType = Math.floor(rng.next() * 3);
+          } else if (kindRoll < 0.82) {
+            kind = 'bush';
+          } else if (kindRoll < 0.92) {
+            kind = 'mushroom';
+          } else {
+            kind = 'rock';
+          }
         }
       }
 
+
       if (kind !== undefined) {
-        items.push({
+        const itemIdx = items.length;
+        const item: FloraItem = {
           id: floraIdSeq++,
           kind,
           gx: tgx,
@@ -553,7 +602,9 @@ export function populateFlora(seed: number, world: WorldTerrain): FloraItem[] {
           basePx: 0,
           scale,
           subType,
-        });
+        };
+        items.push(item);
+        FLORA_SPATIAL.insert(itemIdx, tgx, tgy);
       }
     }
   }
@@ -561,6 +612,7 @@ export function populateFlora(seed: number, world: WorldTerrain): FloraItem[] {
   rebuildFloraSpatial(items);
   return items;
 }
+
 
 
 

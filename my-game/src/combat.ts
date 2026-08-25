@@ -364,6 +364,10 @@ function dropCreatureLoot(player: Player, species: string): void {
       player.inventory.wood += 6;
       player.inventory.fiber += 8;
       break;
+    case 'boar':
+      player.inventory.wood += 8;
+      player.inventory.fiber += 10;
+      break;
     case 'fox':
       player.inventory.fiber += 6;
       player.inventory.stone += 4;
@@ -372,6 +376,15 @@ function dropCreatureLoot(player: Player, species: string): void {
       player.inventory.stone += 8;
       player.inventory.fiber += 10;
       break;
+    case 'croc':
+      player.inventory.stone += 14;
+      player.inventory.fiber += 12;
+      break;
+    case 'bear':
+      player.inventory.wood += 16;
+      player.inventory.stone += 18;
+      player.inventory.fiber += 16;
+      break;
     case 'troll':
       player.inventory.wood += 20;
       player.inventory.stone += 24;
@@ -379,5 +392,6 @@ function dropCreatureLoot(player: Player, species: string): void {
       break;
   }
 }
+
 
 export { canAffordWeapon, craftWeapon, craftNextAvailable, cycleWeapon } from './players.js';
