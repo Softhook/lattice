@@ -224,7 +224,7 @@ describe('Verdant Gameplay Logic', () => {
 
     // 4. Building Registry
     const buildingKeys = Object.keys(BUILDING_REGISTRY);
-    expect(buildingKeys.length).toBe(6);
+    expect(buildingKeys.length).toBe(7);
     expect(buildingKeys.includes('campfire')).toBe(true);
     for (const key of buildingKeys) {
       const bld = BUILDING_REGISTRY[key as keyof typeof BUILDING_REGISTRY];

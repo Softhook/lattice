@@ -1,8 +1,11 @@
 /**
  * Buildings: catalogue, massings, placement, costs, and collision logic.
  *
- * A building is a placed structure on a tile. Solid buildings (walls and towers)
- * physically block movement and keep wild animals and predators out of player bases.
+ * A building is a placed structure on a tile. Walls block both players and animals. Towers
+ * block animals but not players — walking onto a tower's footprint climbs onto its lookout
+ * platform (extended bow range, extended personal torchlight) instead of being stopped by it.
+ * Gates block animals but not players, letting a player pass a perimeter wall line while
+ * keeping wildlife and predators out.
  *
  * Sprite massings use `SolidWriter` — the declarative emitter — so the same
  * massing drives both drawing and thumbnail generation.
@@ -10,6 +13,7 @@
 
 import {
   defineSprite,
+  levelsToPx,
   type SpriteDef,
   type Massing,
   type SolidWriter,
@@ -39,7 +43,7 @@ export const EMBER_RED    = hex('#eb2f06');
 
 // ── Building kinds ─────────────────────────────────────────────────────────────
 
-export type BuildingKind = 'campfire' | 'wood_wall' | 'stone_wall' | 'wood_tower' | 'stone_tower' | 'floor';
+export type BuildingKind = 'campfire' | 'wood_wall' | 'stone_wall' | 'wood_tower' | 'stone_tower' | 'floor' | 'gate';
 
 export interface BuildingCost {
   readonly wood: number;
@@ -54,6 +58,7 @@ export const BUILDING_COSTS: Record<BuildingKind, BuildingCost> = {
   wood_tower:  { wood: 12, stone: 2 },
   stone_tower: { wood: 6,  stone: 14 },
   floor:       { wood: 2,  stone: 0 },
+  gate:        { wood: 4,  stone: 8 },
 };
 
 /** A placed structure in the world. */
@@ -169,6 +174,28 @@ const floorMassing: Massing = (w: SolidWriter, _v: Variant, _rng: Rng) => {
 
 export const FLOOR_DEF: SpriteDef = defineSprite({ id: 'bld_floor', w: 1, d: 1, massing: floorMassing });
 
+/** Stone Gate: An open archway in a stone perimeter — passable to players, blocked to animals. */
+const gateMassing: Massing = (w: SolidWriter, _v: Variant, _rng: Rng) => {
+  w.shadow(0, 0, 1, 1, 0.35);
+  // Threshold sill
+  w.box(0, 0.38, 1, 0.24, { color: STONE_DARK, h: 0.12, outline: false });
+  // Stone gate posts (left & right pillars) flanking an open passage
+  w.box(0.04, 0.04, 0.22, 0.92, { color: WALL_STONE, h: 2.1, outline: true });
+  w.box(0.74, 0.04, 0.22, 0.92, { color: WALL_STONE, h: 2.1, outline: true });
+  // Post capstones
+  w.box(0.02, 0.02, 0.26, 0.96, { color: STONE_DARK, h: 0.2, z: 2.1, outline: false });
+  w.box(0.72, 0.02, 0.26, 0.96, { color: STONE_DARK, h: 0.2, z: 2.1, outline: false });
+  // Arched lintel spanning the opening overhead
+  w.box(0, 0.06, 1, 0.88, { color: STONE_DARK, h: 0.3, z: 2.3, outline: true });
+  // Iron-banded doors folded open against each post
+  w.box(0.06, 0.06, 0.16, 0.22, { color: WALL_WOOD, h: 1.7, z: 0.15, outline: false });
+  w.box(0.78, 0.06, 0.16, 0.22, { color: WALL_WOOD, h: 1.7, z: 0.15, outline: false });
+  w.box(0.06, 0.06, 0.16, 0.05, { color: WALL_BEAM, h: 1.7, z: 0.15, outline: false });
+  w.box(0.78, 0.06, 0.16, 0.05, { color: WALL_BEAM, h: 1.7, z: 0.15, outline: false });
+};
+
+export const GATE_DEF: SpriteDef = defineSprite({ id: 'bld_gate', w: 1, d: 1, massing: gateMassing });
+
 /** Campfire: Stone fire pit ring, crossed timber kindling logs, and warm animated flames. */
 const campfireMassing: Massing = (w: SolidWriter, v: Variant, _rng: Rng) => {
   w.shadow(0.1, 0.1, 0.8, 0.8, 0.45);
@@ -210,7 +237,10 @@ export interface BuildingDefinition {
   readonly cost: BuildingCost;
   readonly footprint: { readonly w: number; readonly d: number };
   readonly maxHp: number;
-  readonly isSolid: boolean;
+  /** Whether this kind physically blocks players from entering its footprint tiles. */
+  readonly blocksPlayers: boolean;
+  /** Whether this kind physically blocks wild animals and predators from entering its footprint tiles. */
+  readonly blocksAnimals: boolean;
   readonly spriteDef: SpriteDef;
 }
 
@@ -221,7 +251,8 @@ export const BUILDING_REGISTRY: Record<BuildingKind, BuildingDefinition> = {
     cost: { wood: 4, stone: 2, fiber: 2 },
     footprint: { w: 1, d: 1 },
     maxHp: 120,
-    isSolid: false,
+    blocksPlayers: false,
+    blocksAnimals: false,
     spriteDef: CAMPFIRE_DEF,
   },
   wood_wall: {
@@ -230,7 +261,8 @@ export const BUILDING_REGISTRY: Record<BuildingKind, BuildingDefinition> = {
     cost: { wood: 4, stone: 0 },
     footprint: { w: 1, d: 1 },
     maxHp: 180,
-    isSolid: true,
+    blocksPlayers: true,
+    blocksAnimals: true,
     spriteDef: WOOD_WALL_DEF,
   },
   stone_wall: {
@@ -239,7 +271,8 @@ export const BUILDING_REGISTRY: Record<BuildingKind, BuildingDefinition> = {
     cost: { wood: 0, stone: 4 },
     footprint: { w: 1, d: 1 },
     maxHp: 360,
-    isSolid: true,
+    blocksPlayers: true,
+    blocksAnimals: true,
     spriteDef: STONE_WALL_DEF,
   },
   wood_tower: {
@@ -248,7 +281,9 @@ export const BUILDING_REGISTRY: Record<BuildingKind, BuildingDefinition> = {
     cost: { wood: 12, stone: 2 },
     footprint: { w: 2, d: 2 },
     maxHp: 380,
-    isSolid: true,
+    // Climbable: players walk onto its lookout platform instead of being blocked.
+    blocksPlayers: false,
+    blocksAnimals: true,
     spriteDef: WOOD_TOWER_DEF,
   },
   stone_tower: {
@@ -257,7 +292,8 @@ export const BUILDING_REGISTRY: Record<BuildingKind, BuildingDefinition> = {
     cost: { wood: 6, stone: 14 },
     footprint: { w: 2, d: 2 },
     maxHp: 750,
-    isSolid: true,
+    blocksPlayers: false,
+    blocksAnimals: true,
     spriteDef: STONE_TOWER_DEF,
   },
   floor: {
@@ -266,8 +302,20 @@ export const BUILDING_REGISTRY: Record<BuildingKind, BuildingDefinition> = {
     cost: { wood: 2, stone: 0 },
     footprint: { w: 1, d: 1 },
     maxHp: 80,
-    isSolid: false,
+    blocksPlayers: false,
+    blocksAnimals: false,
     spriteDef: FLOOR_DEF,
+  },
+  gate: {
+    kind: 'gate',
+    name: 'Stone Gate',
+    cost: { wood: 4, stone: 8 },
+    footprint: { w: 1, d: 1 },
+    maxHp: 260,
+    // Passable to players, closed to animals — a controlled opening in a wall line.
+    blocksPlayers: false,
+    blocksAnimals: true,
+    spriteDef: GATE_DEF,
   },
 };
 
@@ -284,26 +332,63 @@ export function hpFor(kind: BuildingKind): number {
   return BUILDING_REGISTRY[kind].maxHp;
 }
 
-/** Whether a building kind is a solid barrier that blocks movement. */
-export function isBuildingSolid(kind: BuildingKind): boolean {
-  return BUILDING_REGISTRY[kind].isSolid;
+/** Which kind of mover is asking `isTileOccupiedBySolidBuilding` whether a tile is blocked —
+ *  towers and gates answer that question differently for players than for wild animals. */
+export type BuildingActor = 'player' | 'animal';
+
+/** Whether a building kind physically blocks the given actor kind. */
+export function blocksActor(kind: BuildingKind, actor: BuildingActor): boolean {
+  const def = BUILDING_REGISTRY[kind];
+  return actor === 'animal' ? def.blocksAnimals : def.blocksPlayers;
 }
 
-
-/** Check if any active solid building occupies tile (gx, gy). */
+/** Check if any active building occupies tile (gx, gy) that blocks `actor`. Defaults to
+ *  'player' so the many existing call sites (all originally player movement) read unchanged. */
 export function isTileOccupiedBySolidBuilding(
   gx: number,
   gy: number,
   buildings: readonly Building[],
+  actor: BuildingActor = 'player',
 ): boolean {
   for (let i = 0; i < buildings.length; i++) {
     const b = buildings[i];
-    if (b === undefined || b.hp <= 0 || !isBuildingSolid(b.kind)) continue;
+    if (b === undefined || b.hp <= 0 || !blocksActor(b.kind, actor)) continue;
     if (gx >= b.gx && gx < b.gx + b.w && gy >= b.gy && gy < b.gy + b.d) {
       return true;
     }
   }
   return false;
+}
+
+/** Height, in storeys, of each tower kind's lookout platform surface above its own base —
+ *  matches the top of the decking box in that tower's massing, so a standing player's feet
+ *  line up with the platform they climbed onto. */
+const TOWER_PLATFORM_LEVELS: Partial<Record<BuildingKind, number>> = {
+  wood_tower: 4.5,
+  stone_tower: 5.65,
+};
+
+/** World-pixel height above a building's own base at which a player stands while atop it.
+ *  0 for every kind that isn't a climbable tower. */
+export function towerPlatformPx(kind: BuildingKind): number {
+  const levels = TOWER_PLATFORM_LEVELS[kind];
+  return levels === undefined ? 0 : levelsToPx(levels);
+}
+
+/** The active, undamaged tower (if any) whose footprint contains tile (gx, gy) — what a
+ *  player's movement update checks each tick to decide whether they're standing on a
+ *  lookout platform. */
+export function findTowerAt(
+  gx: number,
+  gy: number,
+  buildings: readonly Building[],
+): Building | undefined {
+  for (let i = 0; i < buildings.length; i++) {
+    const b = buildings[i];
+    if (b === undefined || b.hp <= 0 || TOWER_PLATFORM_LEVELS[b.kind] === undefined) continue;
+    if (gx >= b.gx && gx < b.gx + b.w && gy >= b.gy && gy < b.gy + b.d) return b;
+  }
+  return undefined;
 }
 
 let nextId = 1;

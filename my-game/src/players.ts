@@ -2,7 +2,9 @@
  * Player state, inventory, movement, and actions.
  *
  * Two players, each with tile position, facing, action mode, HP, and Inventory.
- * Movement is continuous at fixed speed, blocked by water and solid buildings (walls, towers).
+ * Movement is continuous at fixed speed, blocked by water and walls. Towers and gates let a
+ * player through (climbing onto a tower's lookout platform, or through a gate's archway) even
+ * though they block wild animals — see `buildings.ts`.
  * Actions (harvest, build, dig) fire at the tile the player is currently facing.
  *
  * Chopping trees and mining rocks adds Wood and Stone to inventory.
@@ -15,7 +17,7 @@ import { hex, type Rgba } from '@latticekit/draw';
 import type { WorldTerrain } from './world.js';
 import { dig, raise, isWalkable, W, H } from './world.js';
 import type { Building, BuildingKind } from './buildings.js';
-import { placeBuilding, isTileOccupiedBySolidBuilding, BUILDING_COSTS } from './buildings.js';
+import { placeBuilding, isTileOccupiedBySolidBuilding, BUILDING_COSTS, findTowerAt, towerPlatformPx } from './buildings.js';
 import type { FloraItem } from './flora.js';
 import { harvestFloraAt, FLORA_REGISTRY } from './flora.js';
 import type { WeaponKind } from './combat.js';
@@ -60,6 +62,9 @@ export interface Player {
   cursorGy: number;
   /** Which grid direction the player is facing. Affects action target tile. */
   facing: Facing;
+  /** World-pixel height standing above the tower footprint they're currently on, 0 at ground
+   *  level. Extends bow arrow range (fired from higher up) and personal torchlight radius. */
+  elevationPx: number;
   /** Current active tool/mode. Defaults to 'move'. */
   mode: PlayerMode;
   /** What to build when pressing build action key. */
@@ -135,6 +140,7 @@ export const PLAYER_MODES: readonly PlayerMode[] = [
   'wood_tower',
   'stone_tower',
   'floor',
+  'gate',
 ];
 
 // ── Factory ────────────────────────────────────────────────────────────────────
@@ -158,6 +164,7 @@ function makePlayer(index: 0 | 1, gx: number, gy: number): Player {
     cursorGx: gx,
     cursorGy: gy + 1,
     facing: 's',
+    elevationPx: 0,
     mode: 'move',
     buildKind: 'wood_wall',
     weapon: 'hands',
@@ -370,6 +377,13 @@ export function movePlayer(
       player.vy = 0;
     }
   }
+
+  // Standing on a tower's footprint climbs onto its lookout platform — recomputed every tick
+  // so walking off the edge drops the player back to ground level immediately.
+  const standTileX = clamp(Math.floor(player.gx), 0, W - 1);
+  const standTileY = clamp(Math.floor(player.gy), 0, H - 1);
+  const tower = findTowerAt(standTileX, standTileY, buildings);
+  player.elevationPx = tower !== undefined ? towerPlatformPx(tower.kind) : 0;
 
   // Cursor position directly tracks the facing tile on the integer isometric grid
   facingTileInto(player, MOVE_FACING_SCRATCH);

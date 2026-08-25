@@ -46,7 +46,7 @@ import { CREATURE_SPATIAL, type Creature } from './creatures.js';
 import type { Player } from './players.js';
 import { facingTileInto, canAffordBuilding, type TileCoord } from './players.js';
 import type { Building, BuildingKind } from './buildings.js';
-import { defFor, canPlaceBuilding, LANTERN_GLOW } from './buildings.js';
+import { defFor, canPlaceBuilding, findTowerAt, LANTERN_GLOW } from './buildings.js';
 import { FLORA_SPATIAL, defForFlora, floraVariant, type FloraItem } from './flora.js';
 import {
   spriteForCreature,
@@ -353,12 +353,29 @@ function drawViewport(
 
 
   // 4. Add players
+  //
+  // DepthSorter's occlusion test is ground-plane only — it deliberately never reads height —
+  // so a player's actual 1x1 footprint only ties with a 2x2 tower's footprint (and so is
+  // guaranteed to paint after it, i.e. in front) on the tower's near corner. On every other
+  // tile of the platform the player's own footprint ends strictly before the tower's does on
+  // one axis, so the ready-set sees them as behind it and the tower's walls painted over them.
+  // Standing on a tower's platform is the one place this game genuinely stacks two solids on
+  // the same ground tiles, so an elevated player is entered under the tower's own footprint —
+  // matching (gx, gy, w, d) exactly forces the tie the sorter's insertion-order rule then
+  // always breaks the same way: buildings are added before players every frame, so the earlier
+  // insertion index paints first (behind) and the player paints after (in front) on every side.
   const numPlayers = players.length;
   for (let i = 0; i < numPlayers; i++) {
     const p = players[i];
     if (p === undefined || p.respawnTimer > 0 || !p.active) continue;
-    const basePx = heightAt(world.field, p.gx, p.gy);
-    ORDER.add(p.gx, p.gy, 1, 1, basePx + spriteHeightPx(PLAYER_SPRITES[p.index], playerVariant(p)));
+    const basePx = heightAt(world.field, p.gx, p.gy) + p.elevationPx;
+    const topPx = basePx + spriteHeightPx(PLAYER_SPRITES[p.index], playerVariant(p));
+    const tower = p.elevationPx > 0 ? findTowerAt(Math.floor(p.gx), Math.floor(p.gy), buildings) : undefined;
+    if (tower !== undefined) {
+      ORDER.add(tower.gx, tower.gy, tower.w, tower.d, topPx);
+    } else {
+      ORDER.add(p.gx, p.gy, 1, 1, topPx);
+    }
   }
 
   // 5. Add placement ghost building into DepthSorter for correct Z-ordering
@@ -524,13 +541,15 @@ function drawViewport(
           if (p === undefined || p.respawnTimer > 0) continue;
           const def    = PLAYER_SPRITES[p.index];
           const v      = playerVariant(p);
-          const basePx = heightAt(world.field, p.gx, p.gy);
+          const basePx = heightAt(world.field, p.gx, p.gy) + p.elevationPx;
           drawSprite(pen, def, p.gx, p.gy, v, basePx);
 
           // Player torchlight at night — falloff 1 removes the hard bright inner disc,
-          // leaving only the soft outer glow
+          // leaving only the soft outer glow. Standing atop a tower's lookout platform
+          // extends the reach of that light, same as the beacon it's built around.
           if (darkness > 0) {
-            light.add(p.gx, p.gy, basePx, 4.5, darkness * 0.95, TOOL_GOLD, 1);
+            const torchRadius = p.elevationPx > 0 ? 7.5 : 4.5;
+            light.add(p.gx, p.gy, basePx, torchRadius, darkness * 0.95, TOOL_GOLD, 1);
           }
 
         } else if (idx === ghostIndex && ghostDef !== undefined) {

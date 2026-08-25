@@ -672,6 +672,9 @@ function updateOne(
       for (let i = 0; i < players.length; i++) {
         const p = players[i];
         if (p === undefined || p.respawnTimer > 0 || !p.active) continue;
+        // A player standing on a tower's lookout platform is out of every ground predator's
+        // reach — no animal can climb up after them, so none can target or strike them there.
+        if (p.elevationPx > 0) continue;
         // Player protected inside campfire or beacon sanctuary is safe
         if (fearsFire && isNearActiveFireOrLight(p.gx, p.gy, buildings, darkness)) {
           continue;
@@ -913,18 +916,18 @@ function moveWithSeparation(
   const tileY = Math.floor(ny);
 
   // 4. Smooth movement with axis-aligned obstacle sliding
-  if (isWalkable(world, tileX, tileY) && !isTileOccupiedBySolidBuilding(tileX, tileY, buildings)) {
+  if (isWalkable(world, tileX, tileY) && !isTileOccupiedBySolidBuilding(tileX, tileY, buildings, 'animal')) {
     c.gx = clamp(nx, 2, W - 3);
     c.gy = clamp(ny, 2, H - 3);
   } else {
     // Try sliding along X axis
     const curTileY = Math.floor(c.gy);
-    if (isWalkable(world, tileX, curTileY) && !isTileOccupiedBySolidBuilding(tileX, curTileY, buildings)) {
+    if (isWalkable(world, tileX, curTileY) && !isTileOccupiedBySolidBuilding(tileX, curTileY, buildings, 'animal')) {
       c.gx = clamp(nx, 2, W - 3);
     } else {
       // Try sliding along Y axis
       const curTileX = Math.floor(c.gx);
-      if (isWalkable(world, curTileX, tileY) && !isTileOccupiedBySolidBuilding(curTileX, tileY, buildings)) {
+      if (isWalkable(world, curTileX, tileY) && !isTileOccupiedBySolidBuilding(curTileX, tileY, buildings, 'animal')) {
         c.gy = clamp(ny, 2, H - 3);
       } else {
         c.targetGx = NaN;

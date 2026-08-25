@@ -211,7 +211,7 @@ updateDomHud();
 function lockCameraToPlayer(camera: Camera, player: typeof p1): void {
   const pgx = player.gx;
   const pgy = player.gy;
-  const pzPx = heightAt(world.field, pgx, pgy);
+  const pzPx = heightAt(world.field, pgx, pgy) + player.elevationPx;
   const wx = gridToWorldX(pgx, pgy);
   const wy = gridToWorldY(pgx, pgy) - pzPx;
   camera.centerOn(wx, wy);
@@ -345,7 +345,7 @@ loop.onUpdate((dt, tick) => {
           else if (interact.type === 'repair') spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0xf39c12ff);
           updateDomHud();
         } else if (p1.attackCooldown <= 0) {
-          const baseH = heightAt(world.field, p1.gx, p1.gy);
+          const baseH = heightAt(world.field, p1.gx, p1.gy) + p1.elevationPx;
           const res = executeAttack(p1, creatures, projectiles, baseH, fxPool);
           if (res.isRanged) audio.play('bow_shoot');
           else if (res.hit) audio.play('hit_meat');
@@ -423,7 +423,7 @@ loop.onUpdate((dt, tick) => {
             else if (interact.type === 'repair') spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, 0xf39c12ff);
             updateDomHud();
           } else if (p2.attackCooldown <= 0) {
-            const baseH = heightAt(world.field, p2.gx, p2.gy);
+            const baseH = heightAt(world.field, p2.gx, p2.gy) + p2.elevationPx;
             const res = executeAttack(p2, creatures, projectiles, baseH, fxPool);
             if (res.isRanged) audio.play('bow_shoot');
             else if (res.hit) audio.play('hit_meat');
