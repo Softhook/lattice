@@ -1,4 +1,6 @@
-Improve the visual style of all the creatures. Crocodiles and Trolls are too small.
+Improve the visual style of all the creatures. For example the Crocodiles and Trolls are too small.
+Look again at all the attack opattern snad keep in my the z clipping needed
+
 
 In the center of the screen, when a user is above a particular item in the world, the text is too detailed. It currently gives the key to press. And the action to be performed when actually we just need the name of the item.
 
@@ -6,7 +8,6 @@ In the center of the screen, when a user is above a particular item in the world
 Allow the player to use the mouse to click in the world and make a text bar pop up for naming locations in the world. This text label is then always attached to that location. It has a little red cross in the top right corner for deleting that name 
 
 
-Look again at all the attack opattern snad keep in my the z clipping needed
 
 The usability of the crafting and interacting doesn't kind of work right now. When in the middle of selecting options to build, it's impossible to go and attack. somehow the physical interaction method doesn't work very well 
 
@@ -21,7 +22,7 @@ Timings of things being built or chopped down or mined is not right. Currently i
 
 
 
-make each plant look like a unique variation on its general type
+DONE: make each plant look like a unique variation on its general type
 
 Allow player to dig down much further into the ground. Investigate if we could let them build caves and tunnels that don't pull down the surface with it?
 

@@ -20,6 +20,7 @@ import {
   type Variant,
   type Ink,
   hex,
+  shade,
 } from '@latticekit/draw';
 import { Rng, createRng, fbm2, clamp } from '@latticekit/core';
 import { W, H, MAT_WATER, MAT_GRASS, getBiomeBlendAt, type BiomeKind, type WorldTerrain } from './world.js';
@@ -101,6 +102,29 @@ export interface FloraDefinition {
   readonly spriteDef: SpriteDef;
 }
 
+// ── Per-Instance Variation Helpers ─────────────────────────────────────────────
+//
+// Every massing below is handed an `rng` stream seeded deterministically from the flora
+// instance's own id (Variant.seed) by the kit. Drawing from it here — not just reading
+// `v.progress` for uniform scale — is what makes two pines of the same species stand apart:
+// a slightly taller trunk, a leaning canopy, a tinted shade of green. Same instance, same
+// draw, every time; different instances, different plants.
+
+/** A deterministic offset in [-amount, amount]. */
+function jitter(rng: Rng, amount: number): number {
+  return (rng.next() * 2 - 1) * amount;
+}
+
+/** A deterministic multiplier in [1-amount, 1+amount]. */
+function vary(rng: Rng, amount: number): number {
+  return 1 + jitter(rng, amount);
+}
+
+/** A small deterministic per-instance tint, so no two plants of a kind are painted identically. */
+function varyColor(color: Ink, factor: number): Ink {
+  return typeof color === 'number' ? shade(color, factor) : color;
+}
+
 // ── Parametric Procedural Massing Builders ─────────────────────────────────────
 
 export interface ConiferOptions {
@@ -115,17 +139,28 @@ export interface ConiferOptions {
 }
 
 export function createConiferMassing(opts: ConiferOptions): Massing {
-  return (w: SolidWriter, v: Variant, _rng: Rng) => {
+  return (w: SolidWriter, v: Variant, rng: Rng) => {
     const s = v.progress > 0 ? v.progress : 1.0;
-    w.shadow(0.1, 0.1, opts.baseW * s, opts.baseW * s, opts.shadowAlpha ?? 0.35);
-    w.box(0.38, 0.38, 0.24 * s, 0.24 * s, { color: opts.trunkColor, h: opts.trunkH * s });
-    for (let t = 0; t < opts.tiers; t++) {
-      const frac = (opts.tiers - 1 - t) / opts.tiers;
-      const tierW = (0.34 + frac * (opts.baseW - 0.34)) * s;
+    const trunkH = opts.trunkH * vary(rng, 0.15);
+    const baseW = opts.baseW * vary(rng, 0.12);
+    const tierH = opts.tierH * vary(rng, 0.14);
+    const tierBias = rng.next();
+    const tiers = clamp(opts.tiers + (tierBias < 0.2 ? -1 : tierBias > 0.85 ? 1 : 0), 2, opts.tiers + 1);
+    const lean = jitter(rng, 0.05);
+    const tintFactor = 0.85 + rng.next() * 0.3;
+    const needle1 = varyColor(opts.needleColor1, tintFactor);
+    const needle2 = varyColor(opts.needleColor2, tintFactor);
+
+    w.shadow(0.1, 0.1, baseW * s, baseW * s, opts.shadowAlpha ?? 0.35);
+    w.box(0.38, 0.38, 0.24 * s, 0.24 * s, { color: opts.trunkColor, h: trunkH * s });
+    for (let t = 0; t < tiers; t++) {
+      const frac = (tiers - 1 - t) / tiers;
+      const tierW = (0.34 + frac * (baseW - 0.34)) * s;
       const tierOffset = (1 - tierW) * 0.5;
-      const color = t % 2 === 0 ? opts.needleColor1 : opts.needleColor2;
-      const z = (0.8 + t * opts.tierH * 0.9) * s;
-      w.box(tierOffset, tierOffset, tierW, tierW, { color, h: opts.tierH * s, z });
+      const tierLean = lean * (1 - frac);
+      const color = t % 2 === 0 ? needle1 : needle2;
+      const z = (0.8 + t * tierH * 0.9) * s;
+      w.box(tierOffset + tierLean, tierOffset + tierLean, tierW, tierW, { color, h: tierH * s, z });
     }
   };
 }
@@ -144,16 +179,25 @@ export interface BroadleafOptions {
 }
 
 export function createBroadleafMassing(opts: BroadleafOptions): Massing {
-  return (w: SolidWriter, v: Variant, _rng: Rng) => {
+  return (w: SolidWriter, v: Variant, rng: Rng) => {
     const s = v.progress > 0 ? v.progress : 1.0;
+    const trunkH = opts.trunkH * vary(rng, 0.14);
+    const canopyW = opts.canopyW * vary(rng, 0.16);
+    const canopyH = opts.canopyH * vary(rng, 0.18);
+    const crownH = (opts.crownH ?? 0.85) * vary(rng, 0.2);
+    const lean = jitter(rng, 0.09);
+    const tintFactor = 0.85 + rng.next() * 0.3;
+    const leaf1 = varyColor(opts.leafColor1, tintFactor);
+    const leaf2 = varyColor(opts.leafColor2, tintFactor);
+
     w.shadow(0, 0, (opts.shadowRadius ?? 1.2) * s, (opts.shadowRadius ?? 1.2) * s, 0.4);
     const trunkW = (opts.vines ? 0.3 : 0.26) * s;
     const trunkOffset = (1 - trunkW) * 0.5;
     if (opts.vines) {
       w.box(0.25, 0.25, 0.5 * s, 0.5 * s, { color: opts.trunkColor, h: 0.6 * s });
-      w.box(trunkOffset, trunkOffset, trunkW, trunkW, { color: opts.trunkColor, h: opts.trunkH * s, z: 0.5 * s });
+      w.box(trunkOffset, trunkOffset, trunkW, trunkW, { color: opts.trunkColor, h: trunkH * s, z: 0.5 * s });
     } else {
-      w.box(trunkOffset, trunkOffset, trunkW, trunkW, { color: opts.trunkColor, h: opts.trunkH * s });
+      w.box(trunkOffset, trunkOffset, trunkW, trunkW, { color: opts.trunkColor, h: trunkH * s });
     }
 
     if (opts.knotColor) {
@@ -161,20 +205,20 @@ export function createBroadleafMassing(opts: BroadleafOptions): Massing {
       w.box(trunkOffset - 0.02, trunkOffset - 0.02, 0.08 * s, trunkW + 0.04, { color: opts.knotColor, h: 0.08 * s, z: 1.3 * s });
     }
 
-    const canopyOffset = (1 - opts.canopyW) * 0.5;
-    const canopyZ = opts.trunkH * 0.7 * s;
-    w.box(canopyOffset, canopyOffset, opts.canopyW * s, opts.canopyW * s, {
-      color: opts.leafColor1,
-      h: opts.canopyH * s,
+    const canopyOffset = (1 - canopyW) * 0.5 + lean;
+    const canopyZ = trunkH * 0.7 * s;
+    w.box(canopyOffset, canopyOffset, canopyW * s, canopyW * s, {
+      color: leaf1,
+      h: canopyH * s,
       z: canopyZ,
     });
 
-    const crownW = opts.canopyW * 0.7;
-    const crownOffset = (1 - crownW) * 0.5;
+    const crownW = canopyW * 0.7;
+    const crownOffset = (1 - crownW) * 0.5 + lean * 1.6;
     w.box(crownOffset, crownOffset, crownW * s, crownW * s, {
-      color: opts.leafColor2,
-      h: (opts.crownH ?? 0.85) * s,
-      z: canopyZ + opts.canopyH * 0.7 * s,
+      color: leaf2,
+      h: crownH * s,
+      z: canopyZ + canopyH * 0.7 * s,
     });
 
     if (opts.vines) {
@@ -197,26 +241,40 @@ export interface ShrubOptions {
 }
 
 export function createShrubMassing(opts: ShrubOptions): Massing {
-  return (w: SolidWriter, v: Variant, _rng: Rng) => {
+  return (w: SolidWriter, v: Variant, rng: Rng) => {
     const s = v.progress > 0 ? v.progress : 1.0;
+    const tintFactor = 0.85 + rng.next() * 0.3;
+    const bodyColor = varyColor(opts.bodyColor, tintFactor);
     if (opts.isDead) {
+      const lean = jitter(rng, 0.05);
       w.shadow(0.2, 0.2, 0.6 * s, 0.6 * s, 0.15);
-      w.box(0.35, 0.35, 0.3 * s, 0.3 * s, { color: opts.bodyColor, h: 0.3 * s });
-      w.box(0.2, 0.25, 0.25 * s, 0.25 * s, { color: opts.bodyColor, h: 0.4 * s, z: 0.18 * s });
-      w.box(0.55, 0.45, 0.25 * s, 0.25 * s, { color: opts.bodyColor, h: 0.45 * s, z: 0.18 * s });
+      w.box(0.35, 0.35, 0.3 * s, 0.3 * s, { color: bodyColor, h: 0.3 * s * vary(rng, 0.2) });
+      w.box(0.2 + lean, 0.25 + lean, 0.25 * s, 0.25 * s, { color: bodyColor, h: 0.4 * s * vary(rng, 0.25), z: 0.18 * s });
+      w.box(0.55 - lean, 0.45 - lean, 0.25 * s, 0.25 * s, { color: bodyColor, h: 0.45 * s * vary(rng, 0.25), z: 0.18 * s });
       return;
     }
-    w.shadow(0.1, 0.1, (opts.w + 0.1) * s, (opts.w + 0.1) * s, 0.2);
-    const offset = (1 - opts.w) * 0.5;
-    w.box(offset, offset, opts.w * s, opts.w * s, { color: opts.bodyColor, h: opts.h * s });
-    const topW = opts.w * 0.7;
-    const topOffset = (1 - topW) * 0.5;
-    w.box(topOffset, topOffset, topW * s, topW * s, { color: opts.highlightColor, h: opts.h * 0.65 * s, z: opts.h * 0.8 * s });
+    const highlightColor = varyColor(opts.highlightColor, tintFactor);
+    const shrubW = opts.w * vary(rng, 0.15);
+    const shrubH = opts.h * vary(rng, 0.2);
+    const lean = jitter(rng, 0.06);
+
+    w.shadow(0.1, 0.1, (shrubW + 0.1) * s, (shrubW + 0.1) * s, 0.2);
+    const offset = (1 - shrubW) * 0.5;
+    w.box(offset, offset, shrubW * s, shrubW * s, { color: bodyColor, h: shrubH * s });
+    const topW = shrubW * 0.7;
+    const topOffset = (1 - topW) * 0.5 + lean;
+    w.box(topOffset, topOffset, topW * s, topW * s, { color: highlightColor, h: shrubH * 0.65 * s, z: shrubH * 0.8 * s });
 
     if (v.level > 0 && opts.berryColor) {
-      w.box(0.2, 0.3, 0.15, 0.15, { color: opts.berryColor, h: 0.2, z: 0.7 * s });
-      w.box(0.6, 0.4, 0.15, 0.15, { color: opts.berryColor, h: 0.2, z: 0.6 * s });
-      w.box(0.35, 0.65, 0.15, 0.15, { color: opts.berryColor, h: 0.2, z: 0.65 * s });
+      const berries: readonly [number, number, number][] = [
+        [0.2, 0.3, 0.7],
+        [0.6, 0.4, 0.6],
+        [0.35, 0.65, 0.65],
+      ];
+      for (const [bx, by, bz] of berries) {
+        if (rng.next() < 0.15) continue; // not every bush fruits fully
+        w.box(bx + jitter(rng, 0.05), by + jitter(rng, 0.05), 0.15, 0.15, { color: opts.berryColor, h: 0.2, z: bz * s });
+      }
     }
   };
 }
@@ -227,14 +285,27 @@ export interface SucculentOptions {
 }
 
 export function createSucculentMassing(opts: SucculentOptions): Massing {
-  return (w: SolidWriter, v: Variant, _rng: Rng) => {
+  return (w: SolidWriter, v: Variant, rng: Rng) => {
     const s = v.progress > 0 ? v.progress : 1.0;
+    const bodyColor = varyColor(opts.bodyColor, 0.85 + rng.next() * 0.3);
+    const height = opts.height * vary(rng, 0.15);
+    const hasRightArm = rng.next() > 0.15;
+    const hasLeftArm = rng.next() > 0.15;
+    const armZ = 0.65 + rng.next() * 0.3;
+
     w.shadow(0.15, 0.15, 0.7 * s, 0.7 * s, 0.25);
-    w.box(0.38, 0.38, 0.24 * s, 0.24 * s, { color: opts.bodyColor, h: opts.height * s });
-    w.box(0.62, 0.42, 0.22 * s, 0.16 * s, { color: opts.bodyColor, h: 0.18 * s, z: 0.8 * s });
-    w.box(0.68, 0.42, 0.16 * s, 0.16 * s, { color: opts.bodyColor, h: 0.85 * s, z: 0.98 * s });
-    w.box(0.16, 0.42, 0.22 * s, 0.16 * s, { color: opts.bodyColor, h: 0.18 * s, z: 1.1 * s });
-    w.box(0.16, 0.42, 0.16 * s, 0.16 * s, { color: opts.bodyColor, h: 0.75 * s, z: 1.28 * s });
+    w.box(0.38, 0.38, 0.24 * s, 0.24 * s, { color: bodyColor, h: height * s });
+    if (hasRightArm) {
+      const armH = 0.85 * vary(rng, 0.2);
+      w.box(0.62, 0.42, 0.22 * s, 0.16 * s, { color: bodyColor, h: 0.18 * s, z: armZ * s });
+      w.box(0.68, 0.42, 0.16 * s, 0.16 * s, { color: bodyColor, h: armH * s, z: (armZ + 0.18) * s });
+    }
+    if (hasLeftArm) {
+      const armH = 0.75 * vary(rng, 0.2);
+      const armZ2 = 0.95 + rng.next() * 0.3;
+      w.box(0.16, 0.42, 0.22 * s, 0.16 * s, { color: bodyColor, h: 0.18 * s, z: armZ2 * s });
+      w.box(0.16, 0.42, 0.16 * s, 0.16 * s, { color: bodyColor, h: armH * s, z: (armZ2 + 0.18) * s });
+    }
   };
 }
 
@@ -247,18 +318,27 @@ export interface RockOptions {
 }
 
 export function createRockMassing(opts: RockOptions): Massing {
-  return (w: SolidWriter, v: Variant, _rng: Rng) => {
+  return (w: SolidWriter, v: Variant, rng: Rng) => {
     const s = v.progress > 0 ? v.progress : 1.0;
+    const tintFactor = 0.85 + rng.next() * 0.3;
+    const baseColor = varyColor(opts.baseColor, tintFactor);
+    const topColor = varyColor(opts.topColor, tintFactor);
+    const lean = jitter(rng, 0.06);
     if (opts.isSpire) {
+      const h1 = 1.0 * vary(rng, 0.2);
+      const h2 = 1.1 * vary(rng, 0.2);
+      const h3 = 1.2 * vary(rng, 0.25);
       w.shadow(0.05, 0.05, 0.9 * s, 0.9 * s, 0.4);
-      w.box(0.15, 0.15, 0.7 * s, 0.7 * s, { color: opts.baseColor, h: 1.0 * s });
-      w.box(0.24, 0.24, 0.52 * s, 0.52 * s, { color: opts.topColor, h: 1.1 * s, z: 0.95 * s });
-      w.box(0.32, 0.32, 0.36 * s, 0.36 * s, { color: opts.spireColor ?? opts.baseColor, h: 1.2 * s, z: 2.0 * s });
+      w.box(0.15, 0.15, 0.7 * s, 0.7 * s, { color: baseColor, h: h1 * s });
+      w.box(0.24 + lean, 0.24 + lean, 0.52 * s, 0.52 * s, { color: topColor, h: h2 * s, z: 0.95 * s });
+      w.box(0.32 + lean * 2, 0.32 + lean * 2, 0.36 * s, 0.36 * s, { color: varyColor(opts.spireColor ?? opts.baseColor, tintFactor), h: h3 * s, z: 2.0 * s });
       return;
     }
+    const h1 = 0.5 * vary(rng, 0.25);
+    const h2 = 0.4 * vary(rng, 0.25);
     w.shadow(0.1, 0.1, 0.8 * s, 0.8 * s, 0.3);
-    w.box(0.15, 0.15, 0.7 * s, 0.7 * s, { color: opts.baseColor, h: 0.5 * s });
-    w.box(0.25, 0.2, 0.5 * s, 0.5 * s, { color: opts.topColor, h: 0.4 * s, z: 0.4 * s });
+    w.box(0.15, 0.15, 0.7 * s, 0.7 * s, { color: baseColor, h: h1 * s });
+    w.box(0.25 + lean, 0.2 + lean, 0.5 * s, 0.5 * s, { color: topColor, h: h2 * s, z: 0.4 * s });
     if (v.level > 0 && opts.mossColor) {
       w.box(0.3, 0.3, 0.4 * s, 0.3 * s, { color: opts.mossColor, h: 0.1 * s, z: 0.8 * s });
     }
@@ -272,14 +352,24 @@ export interface FlowerOptions {
 }
 
 export function createFlowerMassing(opts: FlowerOptions): Massing {
-  return (w: SolidWriter, v: Variant, _rng: Rng) => {
+  return (w: SolidWriter, v: Variant, rng: Rng) => {
     const variants = opts.colorVariants ?? [opts.defaultColor];
-    const flowerColor = variants[v.level % variants.length] ?? opts.defaultColor;
+    const flowerColor = varyColor(variants[v.level % variants.length] ?? opts.defaultColor, 0.9 + rng.next() * 0.2);
+    const stemH = 0.15 * vary(rng, 0.3);
+    const blooms: readonly [number, number, number][] = [
+      [0.2, 0.25, 0.25],
+      [0.55, 0.3, 0.25],
+      [0.35, 0.6, 0.3],
+    ];
     w.shadow(0.2, 0.2, 0.6, 0.6, 0.15);
-    w.box(0.25, 0.25, 0.5, 0.5, { color: opts.stemColor, h: 0.15 });
-    w.box(0.2, 0.25, 0.2, 0.2, { color: flowerColor, h: 0.25, z: 0.15 });
-    w.box(0.55, 0.3, 0.2, 0.2, { color: flowerColor, h: 0.25, z: 0.15 });
-    w.box(0.35, 0.6, 0.2, 0.2, { color: flowerColor, h: 0.3, z: 0.15 });
+    w.box(0.25, 0.25, 0.5, 0.5, { color: opts.stemColor, h: stemH });
+    for (const [bx, by, bh] of blooms) {
+      w.box(bx + jitter(rng, 0.05), by + jitter(rng, 0.05), 0.2 * vary(rng, 0.2), 0.2 * vary(rng, 0.2), {
+        color: flowerColor,
+        h: bh * vary(rng, 0.2),
+        z: stemH,
+      });
+    }
   };
 }
 
@@ -289,12 +379,20 @@ export interface FungusOptions {
 }
 
 export function createFungusMassing(opts: FungusOptions): Massing {
-  return (w: SolidWriter, _v: Variant, _rng: Rng) => {
+  return (w: SolidWriter, _v: Variant, rng: Rng) => {
+    const capColor = varyColor(opts.capColor, 0.85 + rng.next() * 0.3);
+    const bigStemH = 0.35 * vary(rng, 0.3);
+    const bigCapW = 0.35 * vary(rng, 0.25);
+    const hasSmallCap = rng.next() > 0.1;
     w.shadow(0.2, 0.2, 0.6, 0.6, 0.15);
-    w.box(0.35, 0.35, 0.15, 0.15, { color: opts.stemColor, h: 0.35 });
-    w.box(0.25, 0.25, 0.35, 0.35, { color: opts.capColor, h: 0.2, z: 0.35 });
-    w.box(0.65, 0.55, 0.1, 0.1, { color: opts.stemColor, h: 0.2 });
-    w.box(0.58, 0.48, 0.22, 0.22, { color: opts.capColor, h: 0.15, z: 0.2 });
+    w.box(0.35, 0.35, 0.15, 0.15, { color: opts.stemColor, h: bigStemH });
+    w.box(0.25, 0.25, bigCapW, bigCapW, { color: capColor, h: 0.2 * vary(rng, 0.2), z: bigStemH });
+    if (hasSmallCap) {
+      const smallStemH = 0.2 * vary(rng, 0.3);
+      const smallCapW = 0.22 * vary(rng, 0.3);
+      w.box(0.65 + jitter(rng, 0.06), 0.55 + jitter(rng, 0.06), 0.1, 0.1, { color: opts.stemColor, h: smallStemH });
+      w.box(0.58 + jitter(rng, 0.06), 0.48 + jitter(rng, 0.06), smallCapW, smallCapW, { color: capColor, h: 0.15, z: smallStemH });
+    }
   };
 }
 
