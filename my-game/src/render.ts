@@ -62,10 +62,12 @@ import {
 
 import { drawSky, farRanges } from './sky.js';
 import { drawAmbientEffects } from './ambient.js';
-import { drawPlayerHud, drawSplitDivider, drawInventoryOverlay } from './hud.js';
+import { drawPlayerHud, drawSplitDivider, drawInventoryOverlay, drawMissionBanner } from './hud.js';
 import type { Projectile, VisualFx } from './combat.js';
 import { getTargetContext } from './players.js';
 import { screenText, DEFAULT_TEXT } from '@latticekit/draw';
+import { MISSION_REGISTRY, type Mission } from './missions.js';
+import { MAGIC_GLOW } from './palette.js';
 
 // ── Scratch for Projectiles, Combat FX, and Target Cursor (Zero Allocation) ───
 
@@ -222,6 +224,7 @@ export function renderVerdant(
   players: readonly [Player, Player],
   buildings: readonly Building[],
   projectiles: readonly Projectile[],
+  missions: readonly Mission[],
   t: number,
   darkness: number,
   daylight: number,
@@ -255,7 +258,7 @@ export function renderVerdant(
   ctx.beginPath();
   ctx.rect(0, 0, halfW, surface.height);
   ctx.clip();
-  drawViewport(pen, camera1, world, flora, creatures, players, buildings, projectiles, fxPool, players[0], t, darkness, daylight, cycle, seed, light1, !singlePlayer);
+  drawViewport(pen, camera1, world, flora, creatures, players, buildings, projectiles, fxPool, players[0], t, darkness, daylight, cycle, seed, light1, !singlePlayer, missions);
   ctx.restore();
 
   if (!singlePlayer) {
@@ -266,7 +269,7 @@ export function renderVerdant(
     ctx.rect(halfW, 0, halfW, surface.height);
     ctx.clip();
     ctx.translate(halfW, 0);
-    drawViewport(pen2, camera2, world, flora, creatures, players, buildings, projectiles, fxPool, players[1], t, darkness, daylight, cycle, seed, light2, false);
+    drawViewport(pen2, camera2, world, flora, creatures, players, buildings, projectiles, fxPool, players[1], t, darkness, daylight, cycle, seed, light2, false, missions);
     ctx.restore();
   }
 
@@ -292,6 +295,7 @@ function drawViewport(
   seed: number,
   light: LightField,
   showDivider: boolean,
+  missions: readonly Mission[],
 ): void {
   ORDER.clear();
 
@@ -510,6 +514,14 @@ function drawViewport(
                 light.add(b.gx + 1, b.gy + 1, b.basePx + 65, 7.5, darkness * 1.0, LANTERN_GLOW, 1);
               }
             }
+
+            // The wizard tower's dread aura is visible even at noon — `Math.max(darkness, 0.4)`
+            // floors it rather than gating on `darkness > 0` the way every other beacon does.
+            // @tier-b visual light flicker — pixels only, never hashed or persisted.
+            if (b.kind === 'wizard_tower') {
+              const pulse = noise2(b.id * 23 + 3, t * 0.4, 0) * 0.6 + noise2(b.id * 41 + 7, t * 1.1, 0) * 0.4;
+              light.add(b.gx + 1, b.gy + 1, b.basePx + 175, 9.0 + pulse, Math.max(darkness, 0.4) * 1.05, MAGIC_GLOW, 1);
+            }
           }
 
         } else if (idx < liveBldCount + liveFloraCount) {
@@ -539,6 +551,12 @@ function drawViewport(
             } else if (c.species === 'wolf') {
               light.add(c.gx, c.gy, basePx, 2.4, darkness * 0.4, hex('#e67e22'), 1);
             }
+          }
+
+          // Shades carry their conjuring tower's glow with them, visible even in daylight —
+          // same `Math.max(darkness, ...)` floor as the wizard tower's own aura above.
+          if (c.species === 'shade') {
+            light.add(c.gx, c.gy, basePx + 14, 2.2, Math.max(darkness, 0.3) * 0.5, MAGIC_GLOW, 1);
           }
 
         } else if (idx < liveBldCount + liveFloraCount + liveCreCount + livePlayerCount) {
@@ -689,6 +707,15 @@ function drawViewport(
         drawSplitDivider(pen);
       }
       drawPlayerHud(pen, activePlayer);
+
+      // Mission discovery banner — a global event, so it's drawn in every viewport rather than
+      // tied to either player's own HUD card.
+      for (let mi = 0; mi < missions.length; mi++) {
+        const mission = missions[mi];
+        if (mission === undefined || mission.state !== 'announced') continue;
+        const def = MISSION_REGISTRY[mission.kind];
+        drawMissionBanner(pen, def.announceText, def.announceSubtext, mission.announceTimer, def.announceSeconds);
+      }
 
       // In-world contextual action prompt pill floating over targeted object
       // ONLY shown when an actual interaction/action is available (harvest, stoke, attack, repair)

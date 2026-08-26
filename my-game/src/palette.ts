@@ -119,6 +119,16 @@ export const CROC         = hex('#2d502a');
 export const CROC_RIDGE   = hex('#1f3a1d');
 export const CROC_TOOTH   = hex('#fdfefe');
 export const CROC_EYE     = hex('#d4c23a');
+/** Shade — spectral wraith conjured by dark magic. Ignores fire, sieges buildings. */
+export const SHADE_ROBE      = hex('#2d2438');
+export const SHADE_ROBE_DARK = hex('#17121f');
+
+// ── Dark magic (mission tower + conjured monsters) ─────────────────────────────
+
+/** Shared glow hue for the wizard tower and everything it conjures, so the two read as one
+ *  source of magic rather than two unrelated art directions. */
+export const MAGIC_GLOW      = hex('#a55eea');
+export const MAGIC_GLOW_CORE = hex('#d6bcfa');
 
 
 // ── Player & Tool colors ───────────────────────────────────────────────────────

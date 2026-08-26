@@ -55,6 +55,10 @@ import {
   CROC_RIDGE,
   CROC_TOOTH,
   CROC_EYE,
+  SHADE_ROBE,
+  SHADE_ROBE_DARK,
+  MAGIC_GLOW,
+  MAGIC_GLOW_CORE,
   BOOTS_DARK,
   SKIN_TONE,
   HAIR_DARK,
@@ -1385,6 +1389,80 @@ export const CROC_SPRITE: SpriteDef = defineSprite({
   id: 'croc', w: 2, d: 2, massing: crocMassing,
 });
 
+// ── 9. Shade (Conjured Spectral Wraith — Levitating, No Legs, Glowing Eyes) ────
+
+/** A hostile wraith conjured by the wizard tower (see `missions.ts`). Legless by design — it
+ *  levitates rather than walks, so unlike every quadruped/biped above it needs no stride-cycle
+ *  leg geometry, only a bob. Silhouette stays a hooded robe on every facing (a ghost reads as
+ *  itself from any angle); only the glowing eyes and the attack lunge are facing-dependent,
+ *  which is enough directional signal without four hand-authored body poses for a minion this
+ *  small and short-lived. */
+const shadeMassing: Massing = (w, v, _rng) => {
+  const facing = v.flags & 3;
+  const stateCode = (v.flags >> 3) & 7;
+  const isHurt = ((v.flags >> 7) & 1) !== 0;
+  const isAttacking = stateCode === 4;
+  const isChasing = stateCode === 3 || isAttacking;
+
+  const phase = ((v.level % 1000) / 1000);
+
+  // @tier-b — levitation bob, tattered-hem sway, strike lunge, hurt shudder
+  const bob = Math.sin(phase * Math.PI * 2) * (isChasing ? 0.05 : 0.09);
+  const hemSway = Math.sin(phase * Math.PI * 2 + 1.3) * 0.05;
+  const lunge = isAttacking ? Math.sin(phase * Math.PI) * 0.16 : 0;
+  const hurtShake = isHurt ? Math.sin(phase * Math.PI * 10) * 0.06 : 0;
+  const z = 0.16 + bob;
+
+  let lx = 0;
+  let ly = 0;
+  if (facing === 1) ly = lunge; else if (facing === 0) ly = -lunge; else if (facing === 2) lx = lunge; else lx = -lunge;
+
+  w.shadow(0.24, 0.24, 0.52, 0.52, 0.14 + Math.abs(bob) * 0.4);
+
+  // Wispy trailing hem beneath the robe, in place of legs — a couple of shrinking, fading boxes
+  w.box(0.40 + lx - hemSway, 0.40 + ly - hemSway * 0.5, 0.20, 0.20, { color: SHADE_ROBE, h: 0.12, z: z - 0.10, outline: false, alpha: 0.4 });
+  w.box(0.44 + lx + hemSway, 0.44 + ly + hemSway * 0.5, 0.12, 0.12, { color: SHADE_ROBE, h: 0.08, z: z - 0.20, outline: false, alpha: 0.22 });
+
+  // Tattered robe body — three stacked, slightly shrinking tiers so the hem reads ragged
+  // rather than a clean cone.
+  w.box(0.22 + lx + hurtShake, 0.22 + ly, 0.56, 0.56, { color: SHADE_ROBE, h: 0.14, z, outline: false, alpha: 0.55 });
+  w.box(0.27 + lx + hemSway * 0.4 + hurtShake, 0.27 + ly, 0.46, 0.46, { color: SHADE_ROBE, h: 0.48, z: z + 0.10, outline: true, alpha: 0.9 });
+  w.box(0.33 + lx + hurtShake, 0.33 + ly, 0.34, 0.34, { color: SHADE_ROBE_DARK, h: 0.40, z: z + 0.54, outline: true });
+
+  // Hood
+  const hoodZ = z + 0.90;
+  w.box(0.35 + lx + hurtShake, 0.35 + ly, 0.30, 0.30, { color: SHADE_ROBE_DARK, h: 0.28, z: hoodZ, outline: true });
+
+  // Glowing eyes — the one facing-dependent read on an otherwise symmetric hood
+  const eyeZ = hoodZ + 0.10;
+  if (facing === 1) {
+    w.box(0.44 + lx, 0.58 + ly, 0.05, 0.05, { color: MAGIC_GLOW_CORE, h: 0.06, z: eyeZ });
+    w.box(0.55 + lx, 0.58 + ly, 0.05, 0.05, { color: MAGIC_GLOW_CORE, h: 0.06, z: eyeZ });
+  } else if (facing === 0) {
+    w.box(0.44 + lx, 0.40 + ly, 0.05, 0.05, { color: MAGIC_GLOW, h: 0.05, z: eyeZ, alpha: 0.6 });
+    w.box(0.55 + lx, 0.40 + ly, 0.05, 0.05, { color: MAGIC_GLOW, h: 0.05, z: eyeZ, alpha: 0.6 });
+  } else if (facing === 2) {
+    w.box(0.58 + lx, 0.44 + ly, 0.05, 0.05, { color: MAGIC_GLOW_CORE, h: 0.06, z: eyeZ });
+    w.box(0.58 + lx, 0.55 + ly, 0.05, 0.05, { color: MAGIC_GLOW_CORE, h: 0.06, z: eyeZ });
+  } else {
+    w.box(0.40 + lx, 0.44 + ly, 0.05, 0.05, { color: MAGIC_GLOW_CORE, h: 0.06, z: eyeZ });
+    w.box(0.40 + lx, 0.55 + ly, 0.05, 0.05, { color: MAGIC_GLOW_CORE, h: 0.06, z: eyeZ });
+  }
+
+  // Reaching claw, only mid-strike, thrust toward the attack direction
+  if (isAttacking) {
+    const clawZ = z + 0.60;
+    if (facing === 1) w.box(0.42, 0.70 + lunge * 1.5, 0.18, 0.14, { color: MAGIC_GLOW, h: 0.12, z: clawZ, outline: false, alpha: 0.75 });
+    else if (facing === 0) w.box(0.42, 0.16 - lunge * 1.5, 0.18, 0.14, { color: MAGIC_GLOW, h: 0.12, z: clawZ, outline: false, alpha: 0.75 });
+    else if (facing === 2) w.box(0.70 + lunge * 1.5, 0.42, 0.14, 0.18, { color: MAGIC_GLOW, h: 0.12, z: clawZ, outline: false, alpha: 0.75 });
+    else w.box(0.16 - lunge * 1.5, 0.42, 0.14, 0.18, { color: MAGIC_GLOW, h: 0.12, z: clawZ, outline: false, alpha: 0.75 });
+  }
+};
+
+export const SHADE_SPRITE: SpriteDef = defineSprite({
+  id: 'shade', w: 1, d: 1, massing: shadeMassing,
+});
+
 // ── Declarative Creature Sprite Registry ──────────────────────────────────────
 
 export const CREATURE_SPRITES: Record<Creature['species'], SpriteDef> = {
@@ -1396,6 +1474,7 @@ export const CREATURE_SPRITES: Record<Creature['species'], SpriteDef> = {
   bear:   BEAR_SPRITE,
   boar:   BOAR_SPRITE,
   croc:   CROC_SPRITE,
+  shade:  SHADE_SPRITE,
 };
 
 /** Map a creature species to its cached SpriteDef via declarative registry. */

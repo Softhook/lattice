@@ -31,7 +31,14 @@ import {
   createCreatureEvents,
   evolveGeneration,
   GENERATION_TICKS,
+  SPECIES_REGISTRY,
 } from './creatures.js';
+import {
+  placeMissionSites,
+  restoreMissions,
+  updateMissions,
+  createMissionEvents,
+} from './missions.js';
 import {
   createPlayers,
   movePlayer,
@@ -82,9 +89,11 @@ import {
   createFxPool,
   stepFx,
   spawnHarvestDebris,
+  spawnShockwave,
   executeAttack,
   stepProjectiles,
 } from './combat.js';
+import { hex } from '@latticekit/draw';
 
 // ── Seed ───────────────────────────────────────────────────────────────────────
 
@@ -125,9 +134,44 @@ const [p1, p2] = createPlayers();
 const playersPair: readonly [Player, Player] = [p1, p2];
 const creatures = populateWorld(SEED, world);
 
+// ── Missions ───────────────────────────────────────────────────────────────────
+// Sites are deterministic from SEED, so they're placed unconditionally here; save restore below
+// (if any) only overlays each mission's progress state, not its location.
+const missions = placeMissionSites(SEED, world);
+
+// ── Dev console helpers (dead-code-eliminated from `npm run build`) ────────────
+//
+// `import.meta.env.DEV` is Vite's compile-time flag: in `npm run dev` it's `true` and this
+// block ships; `vite build` inlines it to `false` and Rollup strips the whole branch, so no
+// game internals are ever exposed on `window` in the shipped build.
+//
+// From the browser console: `verdant.triggerMission()` teleports Player 1 to mission 0's site,
+// which fires the same proximity trigger a player walking there would — announcement, tower,
+// and monster spawns all play out exactly as in real play, just without the walk.
+if (import.meta.env.DEV) {
+  (window as unknown as { verdant: unknown }).verdant = {
+    missions,
+    buildings,
+    creatures,
+    p1,
+    p2,
+    triggerMission(index = 0): void {
+      const m = missions[index];
+      if (m === undefined) {
+        console.warn(`verdant.triggerMission: no mission at index ${index} (have ${missions.length})`);
+        return;
+      }
+      p1.gx = m.gx + 1;
+      p1.gy = m.gy - 0.05;
+      p1.facing = 's';
+      console.log(`verdant.triggerMission: moved Player 1 to mission "${m.kind}" at (${m.gx}, ${m.gy})`);
+    },
+  };
+}
+
 // ── Persistent Storage ────────────────────────────────────────────────────────
 
-const store = createVerdantStore(SEED, () => extractSaveState(SEED, playersPair, buildings, world, flora));
+const store = createVerdantStore(SEED, () => extractSaveState(SEED, playersPair, buildings, world, flora, missions));
 const opened = store.open();
 if (opened.source === 'save' && opened.state && opened.state.p1 && opened.state.p2) {
   // Restore saved player inventories, positions & combat gear
@@ -169,6 +213,12 @@ if (opened.source === 'save' && opened.state && opened.state.p1 && opened.state.
         buildings.push(restoreBuilding(sb.kind, sb.gx, sb.gy, sb.hp, sb.maxHp, world));
       }
     }
+  }
+
+  // Restore mission progress — must run after the buildings loop above, since it re-links each
+  // active mission to its tower by matching kind + position against the buildings just restored.
+  if (Array.isArray(s.missions)) {
+    restoreMissions(missions, s.missions, buildings);
   }
 }
 
@@ -295,6 +345,7 @@ let prevDaylight = 1.0;
 const projectiles = createProjectilePool();
 const fxPool = createFxPool();
 const creatureEvents = createCreatureEvents();
+const missionEvents = createMissionEvents();
 
 /** Debris tint spawned at the target tile for each harvest/repair interaction type. */
 const INTERACT_DEBRIS_COLOR: Partial<Record<InteractType, number>> = {
@@ -411,7 +462,7 @@ function runPlayerActions(player: Player, e: PlayerActionEdges, dt: number): voi
       startWork(player, work.kind, target.gx, target.gy, work.seconds);
     } else if (player.attackCooldown <= 0) {
       const baseH = heightAt(world.field, player.gx, player.gy) + player.elevationPx;
-      const res = executeAttack(player, creatures, projectiles, baseH, fxPool);
+      const res = executeAttack(player, creatures, projectiles, baseH, fxPool, buildings);
       audio.play(res.isRanged ? 'bow_shoot' : res.hit ? 'hit_meat' : 'attack');
     }
     return;
@@ -462,7 +513,7 @@ loop.onUpdate((dt, tick) => {
   copyKeys(curr, prevKeys);
 
   // ── Projectile kinematics & collision ────────────────────────────────────────
-  const projHits = stepProjectiles(projectiles, creatures, playersPair, world, dt, fxPool);
+  const projHits = stepProjectiles(projectiles, creatures, playersPair, world, dt, fxPool, buildings);
   if (projHits.length > 0) {
     audio.play('hit_meat');
   }
@@ -484,10 +535,19 @@ loop.onUpdate((dt, tick) => {
 
   tickFloraRegrowth(SEED, flora, world, dt);
 
-  // ── Troll building damage ────────────────────────────────────────────────────
+  // ── Missions ──────────────────────────────────────────────────────────────────
+  updateMissions(missions, playersPair, creatures, buildings, world, SEED, dt, missionEvents);
+  if (missionEvents.announced !== undefined) {
+    audio.play('mission_alert');
+  }
+  if (missionEvents.completed !== undefined) {
+    audio.play('mission_complete');
+  }
+
+  // ── Building-siege damage (trolls, mission-conjured monsters) ──────────────────
   for (let i = 0; i < creatures.length; i++) {
     const c = creatures[i];
-    if (c !== undefined && c.species === 'troll' && c.hp > 0) {
+    if (c !== undefined && c.hp > 0 && SPECIES_REGISTRY[c.species].attacksBuildings) {
       const hit = damageBuildings(buildings, c.gx, c.gy, dt * 0.4);
       if (hit && tickCount % 45 === 0) {
         const d1 = (p1.gx - c.gx) * (p1.gx - c.gx) + (p1.gy - c.gy) * (p1.gy - c.gy);
@@ -510,10 +570,27 @@ loop.onUpdate((dt, tick) => {
   }
 
   // ── Remove destroyed / extinguished buildings in place ─────────────────────────
+  // A building that's actually knocked down (as opposed to a campfire quietly running out of
+  // fuel) gets a debris burst and a thud — without it, a wall reduced to 0 hp by a siege just
+  // vanishes on the tick it happens, and the very next frame a monster walks across that empty
+  // tile. Silent removal reads exactly like the monster walked *through* a still-standing wall.
   let bi = buildings.length;
+  let anyCollapsed = false;
   while (bi--) {
     const b = buildings[bi];
-    if (b !== undefined && b.hp <= 0) buildings.splice(bi, 1);
+    if (b !== undefined && b.hp <= 0) {
+      if (b.kind !== 'campfire') {
+        const cx = b.gx + b.w * 0.5;
+        const cy = b.gy + b.d * 0.5;
+        spawnShockwave(fxPool, cx, cy, b.basePx, hex('#8d7a68'), 1.6 + b.w * 0.4);
+        spawnHarvestDebris(fxPool, cx, cy, b.basePx + 8, hex('#6b6558'), 10);
+        anyCollapsed = true;
+      }
+      buildings.splice(bi, 1);
+    }
+  }
+  if (anyCollapsed) {
+    audio.play('collapse');
   }
 
   // ── Evolution ─────────────────────────────────────────────────────────────────
@@ -533,7 +610,7 @@ loop.onUpdate((dt, tick) => {
   autosaveTimer += dt;
   if (autosaveTimer >= 30.0) {
     autosaveTimer = 0;
-    store.save(extractSaveState(SEED, playersPair, buildings, world, flora));
+    store.save(extractSaveState(SEED, playersPair, buildings, world, flora, missions));
   }
 
   // Refreshes the DOM resource counters — cheap no-op when nothing changed (it diffs internally),
@@ -587,6 +664,7 @@ loop.onRender((_alpha, t, nowMs) => {
     playersPair,
     buildings,
     projectiles,
+    missions,
     t,
     darkness,
     daylight,

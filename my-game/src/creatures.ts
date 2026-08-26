@@ -20,13 +20,13 @@ import type { FloraItem } from './flora.js';
 import { findClosestEdibleFlora, rebuildFloraSpatial } from './flora.js';
 
 import type { Building } from './buildings.js';
-import { isTileOccupiedBySolidBuilding } from './buildings.js';
+import { isTileOccupiedBySolidBuilding, isMissionStructure } from './buildings.js';
 import { SpatialGrid } from './spatial.js';
 
 
 // ── Species & Declarative Registry ────────────────────────────────────────────
 
-export type Species = 'rabbit' | 'deer' | 'fox' | 'wolf' | 'troll' | 'bear' | 'boar' | 'croc';
+export type Species = 'rabbit' | 'deer' | 'fox' | 'wolf' | 'troll' | 'bear' | 'boar' | 'croc' | 'shade';
 
 export type DietType = 'herbivore' | 'carnivore' | 'omnivore';
 export type BehaviorArchetype = 'skittish' | 'defensive' | 'territorial' | 'ambush' | 'apex';
@@ -56,6 +56,11 @@ export interface SpeciesDefinition {
   readonly predatorThreats: readonly Species[];
   readonly loot: CreatureLoot;
   readonly fearsFire?: boolean;
+  /** Whether this species sieges nearby player structures (see `damageBuildings` call sites in
+   *  `creatures.ts` and `main.ts`) in addition to attacking players directly. Trolls always have;
+   *  mission-conjured monsters (`shade`) share it so a wizard's minions actually threaten a base,
+   *  not just whichever player happens to be standing nearby. */
+  readonly attacksBuildings?: boolean;
 }
 
 /** Trait vector. These are the "genes" that evolve each generation. */
@@ -230,6 +235,31 @@ export const SPECIES_REGISTRY: Record<Species, SpeciesDefinition> = {
     predatorThreats: [],
     loot: { wood: 20, stone: 24, fiber: 12 },
     fearsFire: false,
+    attacksBuildings: true,
+  },
+  shade: {
+    species: 'shade',
+    name: 'Shade',
+    icon: '👻',
+    baseHp: 5,
+    // Aggression pinned at max — a shade never has a "peaceful" reading, unlike wolves/trolls
+    // whose hostility ramps with darkness. minPopulation/initialSpawnCount are 0 (below): shades
+    // exist only where `missions.ts` conjures them, never from world-gen or evolution.
+    baseTraits: { speed: 1.6, aggression: 1.0, size: 0.9, fertility: 0.0 },
+    diet: 'carnivore',
+    behavior: 'apex',
+    preferredBiomes: ['alpine', 'badlands'],
+    elevationRange: [0, 24],
+    initialSpawnCount: 0,
+    minPopulation: 0,
+    attackDamage: 14,
+    attackRange: 1.2,
+    noticeRange: 16,
+    preyTargets: [],
+    predatorThreats: [],
+    loot: { fiber: 3 },
+    fearsFire: false,
+    attacksBuildings: true,
   },
 };
 
@@ -691,11 +721,14 @@ function updateOne(
         }
       }
 
-      // Trolls siege player structures (towers, walls)
-      if (c.species === 'troll') {
+      // Building-siege archetypes (trolls, mission-conjured monsters) target player structures too.
+      if (def.attacksBuildings) {
         for (let i = 0; i < buildings.length; i++) {
           const b = buildings[i];
-          if (b === undefined || b.hp <= 0) continue;
+          // A mission's own tower is never a valid siege target — see `isMissionStructure`'s doc
+          // comment: without this, a shade spawned beside its conjuring tower would immediately
+          // destroy it instead of threatening a player's base.
+          if (b === undefined || b.hp <= 0 || isMissionStructure(b.kind)) continue;
           const bx = b.gx + b.w * 0.5;
           const by = b.gy + b.d * 0.5;
           const dx = bx - c.gx;

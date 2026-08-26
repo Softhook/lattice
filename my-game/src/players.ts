@@ -17,7 +17,7 @@ import { hex, type Rgba } from '@latticekit/draw';
 import type { WorldTerrain } from './world.js';
 import { dig, raise, isWalkable, W, H } from './world.js';
 import type { Building, BuildingKind } from './buildings.js';
-import { placeBuilding, isTileOccupiedBySolidBuilding, BUILDING_COSTS, BUILD_WORK_SECONDS, findTowerAt, towerPlatformPx } from './buildings.js';
+import { placeBuilding, isTileOccupiedBySolidBuilding, BUILDING_COSTS, BUILD_WORK_SECONDS, findTowerAt, towerPlatformPx, isMissionStructure } from './buildings.js';
 import type { FloraItem } from './flora.js';
 import { harvestFloraAt, FLORA_REGISTRY, FLORA_SPATIAL } from './flora.js';
 import type { WeaponKind } from './combat.js';
@@ -928,10 +928,15 @@ function resolveBuildingTarget(
 ): boolean {
   let targetBuilding: Building | undefined;
 
-  // Direct tile match
+  // Direct tile match. Mission structures (the wizard tower) are excluded here — they're a
+  // combat-only target (see `executeAttack`'s own building-hit check in `combat.ts`), never a
+  // repair/campfire/landmark one. Without this exclusion, a player standing at a damaged wizard
+  // tower would have every subsequent Space press resolve to *repairing* it instead of attacking
+  // it — `resolveWork`'s `target.kind === 'repair'` branch doesn't know or care whose building
+  // it's looking at.
   for (let i = 0; i < buildings.length; i++) {
     const b = buildings[i];
-    if (b === undefined || b.hp <= 0) continue;
+    if (b === undefined || b.hp <= 0 || isMissionStructure(b.kind)) continue;
     if (targetTile.gx >= b.gx && targetTile.gx < b.gx + b.w && targetTile.gy >= b.gy && targetTile.gy < b.gy + b.d) {
       targetBuilding = b;
       break;
@@ -943,7 +948,7 @@ function resolveBuildingTarget(
     let closestDist = 1.6;
     for (let i = 0; i < buildings.length; i++) {
       const b = buildings[i];
-      if (b === undefined || b.hp <= 0) continue;
+      if (b === undefined || b.hp <= 0 || isMissionStructure(b.kind)) continue;
       const bcx = b.gx + b.w * 0.5;
       const bcy = b.gy + b.d * 0.5;
       const dx = bcx - player.gx;

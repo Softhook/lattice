@@ -251,18 +251,20 @@ describe('Verdant Gameplay Logic', () => {
 
     // 3. Species Registry
     const speciesKeys = Object.keys(SPECIES_REGISTRY);
-    expect(speciesKeys.length).toBe(8);
+    expect(speciesKeys.length).toBe(9);
     for (const key of speciesKeys) {
       const s = SPECIES_REGISTRY[key as keyof typeof SPECIES_REGISTRY];
       expect(s.baseHp).toBeGreaterThan(0);
       expect(s.baseTraits.speed).toBeGreaterThan(0);
-      expect(s.minPopulation).toBeGreaterThan(0);
+      // Mission-conjured species (`shade`) never spawn from world-gen or evolution — see
+      // `missions.ts` — so a population floor of 0 is correct for them, not a violated invariant.
+      expect(s.minPopulation).toBeGreaterThanOrEqual(0);
       expect(s.preferredBiomes.length).toBeGreaterThan(0);
     }
 
     // 4. Building Registry
     const buildingKeys = Object.keys(BUILDING_REGISTRY);
-    expect(buildingKeys.length).toBe(8);
+    expect(buildingKeys.length).toBe(9);
     expect(buildingKeys.includes('campfire')).toBe(true);
     for (const key of buildingKeys) {
       const bld = BUILDING_REGISTRY[key as keyof typeof BUILDING_REGISTRY];

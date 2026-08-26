@@ -22,7 +22,7 @@ import {
 } from '@latticekit/draw';
 import { Rng } from '@latticekit/core';
 import { footprintBase, type Footprint } from '@latticekit/iso';
-import { TOWER, FLOOR } from './palette.js';
+import { TOWER, FLOOR, MAGIC_GLOW, MAGIC_GLOW_CORE } from './palette.js';
 import type { WorldTerrain } from './world.js';
 import { W, H, MAT_WATER } from './world.js';
 
@@ -38,10 +38,18 @@ export const FIRE_YELLOW  = hex('#f6b93b');
 export const FIRE_CORE    = hex('#fff275');
 export const ASH_DARK     = hex('#2f3542');
 export const EMBER_RED    = hex('#eb2f06');
+export const WIZARD_STONE      = hex('#1c1a24');
+export const WIZARD_STONE_DARK = hex('#0d0c12');
+export const WIZARD_TRIM       = hex('#3a2a52');
 
 // ── Building kinds ─────────────────────────────────────────────────────────────
 
-export type BuildingKind = 'campfire' | 'palisade' | 'wood_wall' | 'stone_wall' | 'wood_tower' | 'stone_tower' | 'floor' | 'gate';
+/** `wizard_tower` is a mission structure, not a player-buildable kind: `missions.ts` raises it
+ *  directly via `restoreBuilding` when its mission triggers, so it never appears in
+ *  `players.ts`'s `PLAYER_MODES` / the Inventory craft tab. It still lives in this same registry
+ *  because doing so gets it depth-sorted rendering, HP/destruction, and player-facing block/attack
+ *  collision for free — the entire reason a "mission tower" is modeled as a `Building` at all. */
+export type BuildingKind = 'campfire' | 'palisade' | 'wood_wall' | 'stone_wall' | 'wood_tower' | 'stone_tower' | 'floor' | 'gate' | 'wizard_tower';
 
 export interface BuildingCost {
   readonly wood: number;
@@ -58,6 +66,8 @@ export const BUILDING_COSTS: Record<BuildingKind, BuildingCost> = {
   stone_tower: { wood: 6,  stone: 14 },
   floor:       { wood: 2,  stone: 0 },
   gate:        { wood: 4,  stone: 8 },
+  // Never spent — a mission tower is raised by `missions.ts`, not bought from the Inventory.
+  wizard_tower: { wood: 0, stone: 0 },
 };
 
 /** Seconds a player must hold the Interact action on the placement ghost to raise this
@@ -71,6 +81,8 @@ export const BUILD_WORK_SECONDS: Record<BuildingKind, number> = {
   stone_tower: 2.2,
   floor:       0.4,
   gate:        1.0,
+  // Never channeled — see the `wizard_tower` note on `BUILDING_COSTS`.
+  wizard_tower: 0,
 };
 
 /** A placed structure in the world. */
@@ -299,6 +311,47 @@ const campfireMassing: Massing = (w: SolidWriter, v: Variant, _rng: Rng) => {
 
 export const CAMPFIRE_DEF: SpriteDef = defineSprite({ id: 'bld_campfire', w: 1, d: 1, massing: campfireMassing });
 
+/** Wizard Tower: a foreboding conjured spire — twisted obsidian tiers, a jagged crown, pulsing
+ *  purple rune bands, and a floating crystal orb overhead. Raised by `missions.ts` when a player
+ *  discovers it, never by a player's own Inventory. The pulse and the orb's bob share one
+ *  incommensurate-harmonic phase (the same trick `campfireMassing` uses for its flame flicker) so
+ *  the tower reads as alive rather than blinking on a metronome. */
+const wizardTowerMassing: Massing = (w: SolidWriter, v: Variant, _rng: Rng) => {
+  w.shadow(-0.15, -0.15, 2.3, 2.3, 0.6);
+
+  // Jagged obsidian base — wider than the shaft above it, like something grown rather than built
+  w.box(-0.1, -0.1, 2.2, 2.2, { color: WIZARD_STONE_DARK, h: 1.0, outline: true });
+  w.box(0.05, 0.05, 1.9, 1.9, { color: WIZARD_STONE, h: 0.3, z: 1.0, outline: false });
+
+  // Twisted tapering spire — each tier narrower and off-center, so it reads as warped rather
+  // than a straight, honest watchtower shaft
+  w.box(0.15, 0.2, 1.7, 1.6, { color: WIZARD_STONE, h: 2.2, z: 1.3, outline: true });
+  w.box(0.34, 0.32, 1.28, 1.36, { color: WIZARD_STONE_DARK, h: 1.8, z: 3.4, outline: true });
+  w.box(0.52, 0.46, 0.94, 1.06, { color: WIZARD_STONE, h: 1.5, z: 5.1, outline: true });
+
+  // Jagged, unevenly sized crown spikes
+  w.post(0.55, 0.55, 6.6, 0.95, WIZARD_STONE_DARK, 0.09);
+  w.post(1.42, 0.6, 6.6, 0.7, WIZARD_STONE_DARK, 0.08);
+  w.post(0.6, 1.42, 6.6, 0.78, WIZARD_STONE_DARK, 0.08);
+  w.post(1.4, 1.38, 6.6, 0.58, WIZARD_STONE_DARK, 0.07);
+  w.post(1.0, 1.0, 6.6, 1.3, WIZARD_TRIM, 0.1);
+
+  // Pulsing rune bands wrapped around the shaft (@tier-b visual pulse — never hashed/persisted)
+  const phase = (v.seed % 100) * 0.1;
+  const pulse =
+    (Math.sin((v.progress || 0) * Math.PI * 2 + phase) * 0.6 +
+      Math.sin((v.progress || 0) * Math.PI * 3.3 + phase * 1.6) * 0.4) * 0.5 + 0.5; // 0..1
+  w.box(0.36, 0.3, 1.28, 1.4, { color: MAGIC_GLOW, h: 0.1, z: 3.85, outline: false, alpha: 0.3 + pulse * 0.4 });
+  w.box(0.56, 0.5, 0.88, 1.0, { color: MAGIC_GLOW, h: 0.08, z: 5.55, outline: false, alpha: 0.3 + pulse * 0.4 });
+
+  // Floating crystal orb crown, bobbing gently overhead — the tower's dread aura made visible (@tier-b)
+  const bob = Math.sin((v.progress || 0) * Math.PI * 2 + phase) * 0.08;
+  w.cylinder(1.0, 1.0, 0.24 + pulse * 0.05, { color: MAGIC_GLOW, h: 0.46, z: 7.0 + bob, outline: false, alpha: 0.8 });
+  w.cylinder(1.0, 1.0, 0.11, { color: MAGIC_GLOW_CORE, h: 0.24, z: 7.14 + bob, outline: false });
+};
+
+export const WIZARD_TOWER_DEF: SpriteDef = defineSprite({ id: 'bld_wizard_tower', w: 2, d: 2, massing: wizardTowerMassing });
+
 // ── Declarative Building Registry ─────────────────────────────────────────────
 
 export interface BuildingDefinition {
@@ -312,6 +365,11 @@ export interface BuildingDefinition {
   /** Whether this kind physically blocks wild animals and predators from entering its footprint tiles. */
   readonly blocksAnimals: boolean;
   readonly spriteDef: SpriteDef;
+  /** False only for mission structures (`wizard_tower`) raised by `missions.ts`. Building-siege
+   *  creatures (`SpeciesDefinition.attacksBuildings`) skip every kind this is false for — without
+   *  it, a shade spawned beside its own conjuring tower would immediately target and destroy it,
+   *  ending the mission the instant it started. See `isMissionStructure`. */
+  readonly playerBuilt: boolean;
 }
 
 export const BUILDING_REGISTRY: Record<BuildingKind, BuildingDefinition> = {
@@ -324,6 +382,7 @@ export const BUILDING_REGISTRY: Record<BuildingKind, BuildingDefinition> = {
     blocksPlayers: false,
     blocksAnimals: false,
     spriteDef: CAMPFIRE_DEF,
+    playerBuilt: true,
   },
   palisade: {
     kind: 'palisade',
@@ -334,6 +393,7 @@ export const BUILDING_REGISTRY: Record<BuildingKind, BuildingDefinition> = {
     blocksPlayers: true,
     blocksAnimals: true,
     spriteDef: PALISADE_DEF,
+    playerBuilt: true,
   },
   wood_wall: {
     kind: 'wood_wall',
@@ -344,6 +404,7 @@ export const BUILDING_REGISTRY: Record<BuildingKind, BuildingDefinition> = {
     blocksPlayers: true,
     blocksAnimals: true,
     spriteDef: WOOD_WALL_DEF,
+    playerBuilt: true,
   },
   stone_wall: {
     kind: 'stone_wall',
@@ -354,6 +415,7 @@ export const BUILDING_REGISTRY: Record<BuildingKind, BuildingDefinition> = {
     blocksPlayers: true,
     blocksAnimals: true,
     spriteDef: STONE_WALL_DEF,
+    playerBuilt: true,
   },
   wood_tower: {
     kind: 'wood_tower',
@@ -365,6 +427,7 @@ export const BUILDING_REGISTRY: Record<BuildingKind, BuildingDefinition> = {
     blocksPlayers: false,
     blocksAnimals: true,
     spriteDef: WOOD_TOWER_DEF,
+    playerBuilt: true,
   },
   stone_tower: {
     kind: 'stone_tower',
@@ -375,6 +438,7 @@ export const BUILDING_REGISTRY: Record<BuildingKind, BuildingDefinition> = {
     blocksPlayers: false,
     blocksAnimals: true,
     spriteDef: STONE_TOWER_DEF,
+    playerBuilt: true,
   },
   floor: {
     kind: 'floor',
@@ -385,6 +449,7 @@ export const BUILDING_REGISTRY: Record<BuildingKind, BuildingDefinition> = {
     blocksPlayers: false,
     blocksAnimals: false,
     spriteDef: FLOOR_DEF,
+    playerBuilt: true,
   },
   gate: {
     kind: 'gate',
@@ -396,6 +461,18 @@ export const BUILDING_REGISTRY: Record<BuildingKind, BuildingDefinition> = {
     blocksPlayers: false,
     blocksAnimals: true,
     spriteDef: GATE_DEF,
+    playerBuilt: true,
+  },
+  wizard_tower: {
+    kind: 'wizard_tower',
+    name: 'Wizard Tower',
+    cost: { wood: 0, stone: 0 },
+    footprint: { w: 2, d: 2 },
+    maxHp: 650,
+    blocksPlayers: true,
+    blocksAnimals: true,
+    spriteDef: WIZARD_TOWER_DEF,
+    playerBuilt: false,
   },
 };
 
@@ -410,6 +487,13 @@ export function defFor(kind: BuildingKind): SpriteDef {
 /** Max HP for a freshly placed building of this kind — what `placeBuilding` seeds `hp` from. */
 export function hpFor(kind: BuildingKind): number {
   return BUILDING_REGISTRY[kind].maxHp;
+}
+
+/** True for `wizard_tower` and any future mission-only structure — the inverse of
+ *  `BuildingDefinition.playerBuilt`, named for how it reads at its call sites (building-siege
+ *  targeting in `creatures.ts`, `damageBuildings` above). */
+export function isMissionStructure(kind: BuildingKind): boolean {
+  return !BUILDING_REGISTRY[kind].playerBuilt;
 }
 
 /** Which kind of mover is asking `isTileOccupiedBySolidBuilding` whether a tile is blocked —
@@ -582,7 +666,10 @@ export function damageBuildings(
   let hit = false;
   for (let i = 0; i < buildings.length; i++) {
     const b = buildings[i];
-    if (b === undefined || b.hp <= 0) continue;
+    // Mission structures (the wizard tower) are never a siege target — see `playerBuilt`'s doc
+    // comment: without this, a shade sieging "the nearest building" while standing next to its
+    // own conjuring tower would damage that tower instead of a player's base.
+    if (b === undefined || b.hp <= 0 || isMissionStructure(b.kind)) continue;
     const dx = Math.abs(trollX - (b.gx + b.w * 0.5));
     const dy = Math.abs(trollY - (b.gy + b.d * 0.5));
     if (dx < 1.4 + b.w * 0.5 && dy < 1.4 + b.d * 0.5) {

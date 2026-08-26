@@ -218,6 +218,35 @@ export const VERDANT_SOUNDS = {
       { wave: 'sine', hz: 1180, gain: 0.05, hold: 0.03, cutoff: 2200 },
     ],
   },
+  mission_alert: {
+    bus: 'sfx',
+    minGapMs: 2000,
+    layers: [
+      // A dissonant tritone swell (rather than a clean triad, like `respawn`/`dawn_chime`) —
+      // a discovery that should read as a threat, not a reward.
+      { wave: 'sawtooth', hz: 110, toHz: 155, gain: 0.16, hold: 0.9, attack: 0.15, cutoff: 900 },
+      { wave: 'sine', hz: 155, toHz: 220, gain: 0.10, hold: 1.1, attack: 0.25, delay: 0.1, cutoff: 1100 },
+      { wave: 'noise', hz: 0, gain: 0.05, hold: 0.5, attack: 0.05, cutoff: 1400, highpass: 300 },
+    ],
+  },
+  mission_complete: {
+    bus: 'sfx',
+    minGapMs: 1000,
+    layers: [
+      { wave: 'sine', hz: 220, toHz: 440, gain: 0.14, hold: 0.5, attack: 0.03, cutoff: 1800 },
+      { wave: 'triangle', hz: 330, toHz: 660, gain: 0.10, hold: 0.6, attack: 0.06, delay: 0.08, cutoff: 2000 },
+      { wave: 'sine', hz: 494, toHz: 880, gain: 0.08, hold: 0.7, attack: 0.10, delay: 0.16, cutoff: 2400 },
+    ],
+  },
+  collapse: {
+    bus: 'sfx',
+    minGapMs: 200,
+    layers: [
+      { wave: 'noise', hz: 0, gain: 0.16, hold: 0.28, attack: 0.01, cutoff: 900, highpass: 80 },
+      { wave: 'triangle', hz: 130, toHz: 55, gain: 0.15, hold: 0.20, cutoff: 380 },
+      { wave: 'sine', hz: 60, toHz: 28, gain: 0.10, hold: 0.16, cutoff: 220 },
+    ],
+  },
 } as const satisfies Record<string, SoundDef>;
  
 export type SoundName = keyof typeof VERDANT_SOUNDS;

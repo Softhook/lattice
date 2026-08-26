@@ -3,7 +3,8 @@
   "compilerOptions": {
     "rootDir": ".",
     "outDir": "dist-ts",
-    "noEmit": false
+    "noEmit": false,
+    "types": ["vite/client"]
   },
   "include": ["src/**/*.ts", "vite.config.ts"],
   "references": [

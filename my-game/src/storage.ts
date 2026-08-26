@@ -28,6 +28,13 @@ import {
   type FloraItem,
   type FloraKind,
 } from './flora.js';
+import {
+  extractSavedMissions,
+  type SavedMission,
+  type Mission,
+  type MissionKind,
+  type MissionState,
+} from './missions.js';
 
 export interface SavedBuilding {
   readonly kind: BuildingKind;
@@ -58,6 +65,7 @@ export interface VerdantSaveV1 {
   readonly terrainHeights?: readonly SavedVertexDelta[];
   readonly terrainSurfaces?: readonly SavedSurfaceDelta[];
   readonly flora?: readonly SavedFlora[];
+  readonly missions?: readonly SavedMission[];
 }
 
 function recognizePlayer(v: unknown, label: string, defaultGx: number, defaultGy: number): SavedPlayer {
@@ -96,6 +104,13 @@ function recognizeFlora(v: unknown, index: number): SavedFlora {
   return { kind, gx, gy, scale, subType };
 }
 
+function recognizeMission(v: unknown, index: number): SavedMission {
+  const o = expectObject(v, `save.missions[${index}]`);
+  const kind = typeof o['kind'] === 'string' ? (o['kind'] as MissionKind) : 'wizard_tower';
+  const state = typeof o['state'] === 'string' ? (o['state'] as MissionState) : 'dormant';
+  return { kind, state };
+}
+
 function recognizeVertexDelta(v: unknown, index: number): SavedVertexDelta {
   const o = expectObject(v, `save.terrainHeights[${index}]`);
   const x = typeof o['x'] === 'number' ? o['x'] : 0;
@@ -129,6 +144,9 @@ export const recognizeVerdantSaveV1: Recognize<VerdantSaveV1> = (value: unknown)
   const rawFlora = Array.isArray(o['flora']) ? o['flora'] : undefined;
   const flora = rawFlora ? rawFlora.map((f, i) => recognizeFlora(f, i)) : undefined;
 
+  const rawMissions = Array.isArray(o['missions']) ? o['missions'] : undefined;
+  const missions = rawMissions ? rawMissions.map((m, i) => recognizeMission(m, i)) : undefined;
+
   return {
     version: 1,
     seed,
@@ -138,6 +156,7 @@ export const recognizeVerdantSaveV1: Recognize<VerdantSaveV1> = (value: unknown)
     terrainHeights,
     terrainSurfaces,
     ...(flora ? { flora } : {}),
+    ...(missions ? { missions } : {}),
   };
 };
 
@@ -168,10 +187,12 @@ export function extractSaveState(
   buildings: readonly Building[],
   world?: WorldTerrain,
   flora?: readonly FloraItem[],
+  missions?: readonly Mission[],
 ): VerdantSaveV1 {
   const [p1, p2] = players;
   const terrain = world ? extractTerrainDeltas(world) : undefined;
   const savedFlora = flora ? extractSavedFlora(flora) : undefined;
+  const savedMissions = missions ? extractSavedMissions(missions) : undefined;
 
   return {
     version: 1,
@@ -208,5 +229,6 @@ export function extractSaveState(
     terrainHeights: terrain ? terrain.heights : [],
     terrainSurfaces: terrain ? terrain.surfaces : [],
     ...(savedFlora ? { flora: savedFlora } : {}),
+    ...(savedMissions ? { missions: savedMissions } : {}),
   };
 }

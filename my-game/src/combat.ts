@@ -17,7 +17,9 @@ import type { WorldTerrain } from './world.js';
 import { W, H } from './world.js';
 import { SPECIES_REGISTRY, type Species, type Creature } from './creatures.js';
 import type { Player } from './players.js';
-import { facingTile, triggerPlayerAction } from './players.js';
+import { facingTile, triggerPlayerAction, isInForwardCone } from './players.js';
+import type { Building } from './buildings.js';
+import { isMissionStructure, BUILDING_REGISTRY } from './buildings.js';
 
 export type WeaponKind = 'hands' | 'axe' | 'sword' | 'bow';
 
@@ -372,13 +374,16 @@ export interface AttackResult {
   msg: string;
 }
 
-/** Perform an attack with the player's equipped weapon and trigger animations & effects. */
+/** Perform an attack with the player's equipped weapon and trigger animations & effects.
+ *  `buildings` defaults to empty — callers that only exercise creature combat (most of the unit
+ *  suite) don't need to know mission structures exist. */
 export function executeAttack(
   player: Player,
   creatures: Creature[],
   projectiles: Projectile[],
   baseHeightPx: number,
   fxPool?: VisualFx[],
+  buildings: readonly Building[] = [],
 ): AttackResult {
   const weapon = WEAPONS[player.weapon];
 
@@ -462,7 +467,7 @@ export function executeAttack(
     targetCreature.gx = clamp(targetCreature.gx + kx, 2, W - 3);
     targetCreature.gy = clamp(targetCreature.gy + ky, 2, H - 3);
     targetCreature.idleTimer = 0.4;
-    targetCreature.state = targetCreature.species === 'troll' || targetCreature.species === 'wolf' ? 'chase' : 'flee';
+    targetCreature.state = SPECIES_REGISTRY[targetCreature.species].behavior === 'apex' ? 'chase' : 'flee';
 
     // Spawn impact hit sparks
     if (fxPool !== undefined) {
@@ -488,6 +493,44 @@ export function executeAttack(
     };
   }
 
+  // No creature in range — check mission structures (the wizard tower). Ordinary player-built
+  // structures are never a valid melee target here (see `isMissionStructure`'s doc comment):
+  // repairing, not attacking, is how a player restores their own building's hp.
+  let targetBuilding: Building | undefined;
+  let bestBDist = weapon.reach;
+  for (let i = 0; i < buildings.length; i++) {
+    const b = buildings[i];
+    if (b === undefined || b.hp <= 0 || !isMissionStructure(b.kind)) continue;
+    const bcx = b.gx + b.w * 0.5;
+    const bcy = b.gy + b.d * 0.5;
+    const dx = bcx - player.gx;
+    const dy = bcy - player.gy;
+    const dist = Math.sqrt(dx * dx + dy * dy); // Tier A: sqrt is exact per spec — melee hit-check distance
+    if (dist <= bestBDist && isInForwardCone(player.facing, dx, dy, 1.25)) {
+      bestBDist = dist;
+      targetBuilding = b;
+    }
+  }
+
+  if (targetBuilding !== undefined) {
+    const dmg = weapon.damage;
+    targetBuilding.hp -= dmg;
+    const name = BUILDING_REGISTRY[targetBuilding.kind].name.toUpperCase();
+
+    if (fxPool !== undefined) {
+      spawnHitSparks(fxPool, targetBuilding.gx + targetBuilding.w * 0.5, targetBuilding.gy + targetBuilding.d * 0.5, baseHeightPx + 30, hex('#a55eea'), 8);
+    }
+
+    const destroyed = targetBuilding.hp <= 0;
+    return {
+      hit: true,
+      damageDealt: dmg,
+      creatureDefeated: false,
+      isRanged: false,
+      msg: destroyed ? `DESTROYED ${name}!` : `HIT ${name} (-${dmg} HP)`,
+    };
+  }
+
   return {
     hit: false,
     damageDealt: 0,
@@ -499,7 +542,8 @@ export function executeAttack(
 
 const HIT_EVENTS_SCRATCH: AttackResult[] = [];
 
-/** Step active projectiles, checking collision against creatures and world boundaries. */
+/** Step active projectiles, checking collision against creatures and world boundaries.
+ *  `buildings` defaults to empty — see the note on `executeAttack`. */
 export function stepProjectiles(
   projectiles: Projectile[],
   creatures: Creature[],
@@ -507,6 +551,7 @@ export function stepProjectiles(
   world: WorldTerrain,
   dt: number,
   fxPool?: VisualFx[],
+  buildings: readonly Building[] = [],
 ): readonly AttackResult[] {
   HIT_EVENTS_SCRATCH.length = 0;
 
@@ -558,7 +603,7 @@ export function stepProjectiles(
         c.gx = clamp(c.gx + (p.vx / mag) * 0.6, 2, W - 3);
         c.gy = clamp(c.gy + (p.vy / mag) * 0.6, 2, H - 3);
         c.idleTimer = 0.3;
-        c.state = c.species === 'troll' || c.species === 'wolf' ? 'chase' : 'flee';
+        c.state = SPECIES_REGISTRY[c.species].behavior === 'apex' ? 'chase' : 'flee';
 
         if (fxPool !== undefined) {
           spawnHitSparks(fxPool, c.gx, c.gy, p.z, hex('#ff7675'), 8);
@@ -582,6 +627,33 @@ export function stepProjectiles(
         p.live = false;
         break;
       }
+    }
+    if (!p.live) continue;
+
+    // Check hit against mission structures (the wizard tower) — same restriction as melee's
+    // building branch: ordinary player-built structures are never a valid arrow target.
+    for (let bi = 0; bi < buildings.length; bi++) {
+      const b = buildings[bi];
+      if (b === undefined || b.hp <= 0 || !isMissionStructure(b.kind)) continue;
+      if (p.x < b.gx || p.x >= b.gx + b.w || p.y < b.gy || p.y >= b.gy + b.d) continue;
+
+      b.hp -= p.damage;
+      const name = BUILDING_REGISTRY[b.kind].name.toUpperCase();
+
+      if (fxPool !== undefined) {
+        spawnHitSparks(fxPool, p.x, p.y, p.z, hex('#a55eea'), 8);
+      }
+
+      HIT_EVENTS_SCRATCH.push({
+        hit: true,
+        damageDealt: p.damage,
+        creatureDefeated: false,
+        isRanged: true,
+        msg: b.hp <= 0 ? `DESTROYED ${name}!` : `ARROW HIT ${name}`,
+      });
+
+      p.live = false;
+      break;
     }
   }
 

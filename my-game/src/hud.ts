@@ -233,6 +233,9 @@ const BUILDING_ICONS: Record<BuildingKind, string> = {
   stone_tower: '🏯',
   floor: '🟫',
   gate: '🚪',
+  // Never shown — `wizard_tower` isn't in `INVENTORY_CRAFT_ORDER` (see the note on it in
+  // `buildings.ts`), but `BUILDING_ICONS` is a `Record` over every `BuildingKind`.
+  wizard_tower: '🧙',
 };
 
 const ROW_TEXT_OK    = hex('#8da882');
@@ -393,4 +396,37 @@ export function drawInventoryOverlay(pen: Pen, player: Player): void {
     const thumbY = trackY + (trackH - thumbH) * (scroll / Math.max(1, total - rowsVisible));
     pen.surface.stroke(setLine(trackX, thumbY, trackX, thumbY + thumbH), 2, false, pAccent, 3);
   }
+}
+
+// ── Mission Announcement Banner ─────────────────────────────────────────────────
+
+const MISSION_GLOW = hex('#a55eea');
+
+/**
+ * Draw a mission's discovery banner across the top of one viewport — a global event, so
+ * `render.ts` calls this in both viewports' overlay passes rather than tying it to either
+ * player's own HUD card. Fades in over the first quarter-second and out over the last, driven
+ * entirely by `secondsRemaining` (so both viewports stay in lockstep without their own timers).
+ */
+export function drawMissionBanner(
+  pen: Pen,
+  title: string,
+  subtitle: string,
+  secondsRemaining: number,
+  totalSeconds: number,
+): void {
+  const viewW = pen.camera.viewW;
+  const alpha = Math.min(1, (totalSeconds - secondsRemaining) * 4) * Math.min(1, secondsRemaining * 2);
+  if (alpha <= 0) return;
+
+  const bannerW = Math.min(560, viewW - 40);
+  const bannerX = (viewW - bannerW) * 0.5;
+  const bannerY = 26;
+  const bannerH = 56;
+
+  pen.surface.poly(setBox(bannerX, bannerY, bannerW, bannerH), 6, withAlpha(hex('#160c22'), alpha * 0.92));
+  pen.surface.stroke(setBox(bannerX, bannerY, bannerW, bannerH), 6, true, withAlpha(MISSION_GLOW, alpha), 2);
+
+  screenText(pen, viewW * 0.5, bannerY + 24, title, withAlpha(MISSION_GLOW, alpha), textStyle(15, 800, 0, 0));
+  screenText(pen, viewW * 0.5, bannerY + 42, subtitle, withAlpha(hex('#d2bfe8'), alpha), textStyle(10, 600, 0, 0));
 }
