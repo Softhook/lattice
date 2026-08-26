@@ -159,6 +159,7 @@ const RESPAWN_TIME = 3;
 export const PLAYER_MODES: readonly PlayerMode[] = [
   'move',
   'campfire',
+  'palisade',
   'wood_wall',
   'stone_wall',
   'wood_tower',
@@ -509,9 +510,26 @@ export function movePlayer(
 
   const tileX = clamp(Math.floor(nx), 0, W - 1);
   const tileY = clamp(Math.floor(ny), 0, H - 1);
+  const curTileX = clamp(Math.floor(player.gx), 0, W - 1);
+  const curTileY = clamp(Math.floor(player.gy), 0, H - 1);
+
+  // A building can end up occupying the player's own tile (e.g. placed just as they stood on
+  // it). Buildings must never be able to trap a player, so once that's happened, ignore
+  // building collision entirely for this tick — terrain walkability still applies — until
+  // they've stepped off it.
+  const escapingOwnBuilding = isTileOccupiedBySolidBuilding(curTileX, curTileY, buildings);
+  const blockedByBuilding = (gx: number, gy: number): boolean =>
+    !escapingOwnBuilding && isTileOccupiedBySolidBuilding(gx, gy, buildings);
+
+  // Two buildings placed diagonally from each other (corner-to-corner) share only a point,
+  // not an edge, so per-tile checks alone would let a player cut straight through that gap
+  // when moving diagonally. Block the corner cut explicitly.
+  const cuttingBlockedCorner =
+    tileX !== curTileX && tileY !== curTileY &&
+    blockedByBuilding(tileX, curTileY) && blockedByBuilding(curTileX, tileY);
 
   let stepped = false;
-  if (isWalkable(world, tileX, tileY) && !isTileOccupiedBySolidBuilding(tileX, tileY, buildings)) {
+  if (!cuttingBlockedCorner && isWalkable(world, tileX, tileY) && !blockedByBuilding(tileX, tileY)) {
     player.gx = clamp(nx, 0, W - 1);
     player.gy = clamp(ny, 0, H - 1);
 
@@ -522,13 +540,10 @@ export function movePlayer(
     }
   } else {
     // Collision slide along one axis if possible
-    const curTileX = clamp(Math.floor(player.gx), 0, W - 1);
-    const curTileY = clamp(Math.floor(player.gy), 0, H - 1);
-
-    if (isWalkable(world, curTileX, tileY) && !isTileOccupiedBySolidBuilding(curTileX, tileY, buildings)) {
+    if (isWalkable(world, curTileX, tileY) && !blockedByBuilding(curTileX, tileY)) {
       player.gy = clamp(ny, 0, H - 1);
       player.vx = 0;
-    } else if (isWalkable(world, tileX, curTileY) && !isTileOccupiedBySolidBuilding(tileX, curTileY, buildings)) {
+    } else if (isWalkable(world, tileX, curTileY) && !blockedByBuilding(tileX, curTileY)) {
       player.gx = clamp(nx, 0, W - 1);
       player.vy = 0;
     } else {

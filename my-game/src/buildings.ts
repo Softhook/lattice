@@ -33,8 +33,6 @@ export const WALL_BEAM    = hex('#4e342e');
 export const WALL_STONE   = hex('#78909c');
 export const STONE_DARK   = hex('#546e7a');
 export const LANTERN_GLOW = hex('#f1c40f');
-export const BANNER_RED   = hex('#e74c3c');
-export const BANNER_BLUE  = hex('#3498db');
 export const FIRE_ORANGE  = hex('#ff793f');
 export const FIRE_YELLOW  = hex('#f6b93b');
 export const FIRE_CORE    = hex('#fff275');
@@ -43,7 +41,7 @@ export const EMBER_RED    = hex('#eb2f06');
 
 // ── Building kinds ─────────────────────────────────────────────────────────────
 
-export type BuildingKind = 'campfire' | 'wood_wall' | 'stone_wall' | 'wood_tower' | 'stone_tower' | 'floor' | 'gate';
+export type BuildingKind = 'campfire' | 'palisade' | 'wood_wall' | 'stone_wall' | 'wood_tower' | 'stone_tower' | 'floor' | 'gate';
 
 export interface BuildingCost {
   readonly wood: number;
@@ -53,6 +51,7 @@ export interface BuildingCost {
 
 export const BUILDING_COSTS: Record<BuildingKind, BuildingCost> = {
   campfire:    { wood: 4,  stone: 2, fiber: 2 },
+  palisade:    { wood: 2,  stone: 0 },
   wood_wall:   { wood: 4,  stone: 0 },
   stone_wall:  { wood: 0,  stone: 4 },
   wood_tower:  { wood: 12, stone: 2 },
@@ -65,6 +64,7 @@ export const BUILDING_COSTS: Record<BuildingKind, BuildingCost> = {
  *  structure. Roughly tracks material cost — see `workSecondsFor` in `players.ts`. */
 export const BUILD_WORK_SECONDS: Record<BuildingKind, number> = {
   campfire:    0.8,
+  palisade:    0.3,
   wood_wall:   0.6,
   stone_wall:  1.1,
   wood_tower:  1.6,
@@ -92,7 +92,23 @@ export interface Building {
 
 // ── Sprite Definitions ─────────────────────────────────────────────────────────
 
-/** Wood Palisade Wall: Timber stakes with cross-bracing. */
+/** Palisade Stake: A single sharpened log, planted dead-center in its tile. The cheapest and
+ *  quickest wall — being centered rather than edge-to-edge, it lines up on its own whether a
+ *  run of stakes goes straight or turns a corner, so unlike the gate it needs no per-neighbor
+ *  orientation logic. */
+const palisadeMassing: Massing = (w: SolidWriter, _v: Variant, _rng: Rng) => {
+  w.shadow(0.32, 0.32, 0.36, 0.36, 0.3);
+  // Buried footing
+  w.box(0.4, 0.4, 0.2, 0.2, { color: WALL_BEAM, h: 0.15, outline: false });
+  // Single trunk, centered in the tile
+  w.box(0.36, 0.36, 0.28, 0.28, { color: WALL_WOOD, h: 1.5, z: 0.12 });
+  // Sharpened tip
+  w.box(0.4, 0.4, 0.2, 0.2, { color: WALL_BEAM, h: 0.4, z: 1.62 });
+};
+
+export const PALISADE_DEF: SpriteDef = defineSprite({ id: 'bld_palisade', w: 1, d: 1, massing: palisadeMassing });
+
+/** Timber Wall: Braced timber planking, edge-to-edge across the tile. */
 const woodWallMassing: Massing = (w: SolidWriter, _v: Variant, _rng: Rng) => {
   w.shadow(0, 0, 1, 1, 0.35);
   // Log base footing
@@ -145,8 +161,6 @@ const woodTowerMassing: Massing = (w: SolidWriter, _v: Variant, _rng: Rng) => {
   w.post(0.95, 0.95, 4.5, 0.9, WALL_BEAM, 0.08);
   // Warm Lantern Beacon
   w.box(0.85, 0.85, 0.3, 0.3, { color: LANTERN_GLOW, h: 0.35, z: 5.4 });
-  // Pennant
-  w.box(0.96, 0.96, 0.08, 0.5, { color: BANNER_BLUE, h: 0.25, z: 5.2 });
 };
 
 export const WOOD_TOWER_DEF: SpriteDef = defineSprite({ id: 'bld_wood_tower', w: 2, d: 2, massing: woodTowerMassing });
@@ -171,8 +185,6 @@ const stoneTowerMassing: Massing = (w: SolidWriter, _v: Variant, _rng: Rng) => {
   w.post(0.95, 0.95, 5.65, 0.95, WALL_BEAM, 0.08);
   // Warm Lantern Beacon
   w.box(0.85, 0.85, 0.3, 0.3, { color: LANTERN_GLOW, h: 0.35, z: 6.6 });
-  // Heraldic Pennant Banner
-  w.box(0.96, 0.96, 0.08, 0.55, { color: BANNER_RED, h: 0.3, z: 6.3 });
 };
 
 export const STONE_TOWER_DEF: SpriteDef = defineSprite({ id: 'bld_stone_tower', w: 2, d: 2, massing: stoneTowerMassing });
@@ -228,7 +240,7 @@ export const GATE_DEF: SpriteDef = defineSprite({ id: 'bld_gate', w: 1, d: 1, ma
 
 /** Wall-like kinds a gate's orientation reads off — segments its posts visually continue. */
 function isWallLikeKind(kind: BuildingKind): boolean {
-  return kind === 'wood_wall' || kind === 'stone_wall' || kind === 'gate';
+  return kind === 'palisade' || kind === 'wood_wall' || kind === 'stone_wall' || kind === 'gate';
 }
 
 /** Whether any active wall-like building occupies tile (gx, gy). */
@@ -313,9 +325,19 @@ export const BUILDING_REGISTRY: Record<BuildingKind, BuildingDefinition> = {
     blocksAnimals: false,
     spriteDef: CAMPFIRE_DEF,
   },
+  palisade: {
+    kind: 'palisade',
+    name: 'Palisade Stake',
+    cost: { wood: 2, stone: 0 },
+    footprint: { w: 1, d: 1 },
+    maxHp: 90,
+    blocksPlayers: true,
+    blocksAnimals: true,
+    spriteDef: PALISADE_DEF,
+  },
   wood_wall: {
     kind: 'wood_wall',
-    name: 'Wood Palisade Wall',
+    name: 'Timber Wall',
     cost: { wood: 4, stone: 0 },
     footprint: { w: 1, d: 1 },
     maxHp: 180,

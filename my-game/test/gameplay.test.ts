@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { createWorld, W, H, isWalkable, dig, raise, BIOME_REGISTRY } from '../src/world.js';
 import { createPlayers, movePlayer, interactAtFacing, cycleBuildKind, buildAtFacing, canAffordBuilding, tickPlayer, getTargetContext, facingTile, isInForwardCone } from '../src/players.js';
 import { populateFlora, FLORA_REGISTRY } from '../src/flora.js';
-import { BUILDING_COSTS, BUILDING_REGISTRY, type Building } from '../src/buildings.js';
+import { BUILDING_COSTS, BUILDING_REGISTRY, placeBuilding, type Building } from '../src/buildings.js';
 import { populateWorld, updateCreatures, createCreatureEvents, SPECIES_REGISTRY, spawnCreature, isNearActiveFireOrLight, FIRE_WARD_RADIUS, FIRE_SAFE_ZONE_RADIUS, type CreatureState } from '../src/creatures.js';
 
 describe('Verdant Gameplay Logic', () => {
@@ -41,6 +41,41 @@ describe('Verdant Gameplay Logic', () => {
     expect(p1.facing).toBe('w');
   });
 
+  it('never traps a player inside a building that ends up on their own tile', () => {
+    const world = createWorld(42);
+    const [p1] = createPlayers();
+    p1.gx = 10.5;
+    p1.gy = 10.5;
+
+    // Simulate a wall having been placed on the tile the player is standing on.
+    const wall = placeBuilding('wood_wall', 10, 10, world, [])!;
+    expect(wall).toBeDefined();
+
+    movePlayer(p1, 1, 0, world, [wall], 0.2);
+    expect(p1.gx).toBeGreaterThan(10.5);
+  });
+
+  it('blocks diagonal movement through the gap between two corner-to-corner walls', () => {
+    const world = createWorld(42);
+    const [p1] = createPlayers();
+
+    const wallA = placeBuilding('wood_wall', 11, 10, world, [])!;
+    const wallB = placeBuilding('wood_wall', 10, 11, world, [])!;
+    const buildings = [wallA, wallB];
+
+    // Positioned in the open tile (11, 11), moving diagonally toward the open tile (10, 10)
+    // through the shared corner pinched between the two diagonal walls.
+    p1.gx = 11.5;
+    p1.gy = 11.5;
+
+    for (let i = 0; i < 30; i++) {
+      movePlayer(p1, -1, -1, world, buildings, 1 / 60);
+    }
+
+    expect(Math.floor(p1.gx)).toBe(11);
+    expect(Math.floor(p1.gy)).toBe(11);
+  });
+
   it('cycles player build modes only for affordable recipes', () => {
     const [p1] = createPlayers();
     expect(p1.mode).toBe('move');
@@ -52,8 +87,11 @@ describe('Verdant Gameplay Logic', () => {
     cycleBuildKind(p1);
     expect(p1.mode).toBe('move');
 
-    // With 4 wood only (can afford wood_wall (4W) and floor (2W), but not campfire (4W 2S 2F))
+    // With 4 wood only (can afford palisade (2W), wood_wall (4W), and floor (2W), but not
+    // campfire (4W 2S 2F))
     p1.inventory.wood = 4;
+    cycleBuildKind(p1);
+    expect(p1.mode).toBe('palisade');
     cycleBuildKind(p1);
     expect(p1.mode).toBe('wood_wall');
     cycleBuildKind(p1);
@@ -224,7 +262,7 @@ describe('Verdant Gameplay Logic', () => {
 
     // 4. Building Registry
     const buildingKeys = Object.keys(BUILDING_REGISTRY);
-    expect(buildingKeys.length).toBe(7);
+    expect(buildingKeys.length).toBe(8);
     expect(buildingKeys.includes('campfire')).toBe(true);
     for (const key of buildingKeys) {
       const bld = BUILDING_REGISTRY[key as keyof typeof BUILDING_REGISTRY];

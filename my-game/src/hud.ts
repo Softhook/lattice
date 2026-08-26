@@ -226,6 +226,7 @@ export function drawPlayerHud(pen: Pen, player: Player): void {
  *  no icon field of its own since only this one screen needs one. */
 const BUILDING_ICONS: Record<BuildingKind, string> = {
   campfire: '🔥',
+  palisade: '🌲',
   wood_wall: '🪵',
   stone_wall: '🧱',
   wood_tower: '🗼',
