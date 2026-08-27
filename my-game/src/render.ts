@@ -64,6 +64,7 @@ import { drawSky, farRanges } from './sky.js';
 import { drawAmbientEffects } from './ambient.js';
 import { drawPlayerHud, drawSplitDivider, drawInventoryOverlay, drawMissionBanner } from './hud.js';
 import type { Projectile, VisualFx } from './combat.js';
+import type { FoodDrop } from './food.js';
 import { getTargetContext } from './players.js';
 import { screenText, DEFAULT_TEXT } from '@latticekit/draw';
 import { MISSION_REGISTRY, type Mission } from './missions.js';
@@ -77,6 +78,17 @@ const TARGET_BOX_SCRATCH = new Float64Array(8);
 const FX_BOX_SCRATCH = new Float64Array(8);
 const FX_ARC_SCRATCH = new Float64Array(6);
 const FX_RING_SCRATCH = new Float64Array(16);
+const FOOD_BOX_SCRATCH = new Float64Array(8);
+
+/** Meat tint per game species, keyed off the drop's `species`. Anything not listed falls back
+ *  to a neutral raw-meat red — but only rabbit/deer/boar ever produce a drop (see `FOOD_YIELD`). */
+const FOOD_TINT: Record<string, number> = {
+  rabbit: hex('#e8a58c'),
+  deer: hex('#b5643c'),
+  boar: hex('#9c4e3f'),
+};
+const FOOD_TINT_FALLBACK = hex('#c0553f');
+const FOOD_BONE = hex('#efe4cf');
 
 /** Mutable twin of `TextStyle` — same trick as `hud.ts`'s `TEXT_SCRATCH`: the target-cursor
  *  prompt pill draws up to two `screenText` calls per viewport per frame, and `{ ...DEFAULT_TEXT,
@@ -231,6 +243,7 @@ export function renderVerdant(
   cycle: number,
   seed: number,
   fxPool?: readonly VisualFx[],
+  foodPool?: readonly FoodDrop[],
 ): void {
   // Open the frame — clears canvas and builds pen with camera1 and light1.
   const pen = beginFrame({
@@ -258,7 +271,7 @@ export function renderVerdant(
   ctx.beginPath();
   ctx.rect(0, 0, halfW, surface.height);
   ctx.clip();
-  drawViewport(pen, camera1, world, flora, creatures, players, buildings, projectiles, fxPool, players[0], t, darkness, daylight, cycle, seed, light1, !singlePlayer, missions);
+  drawViewport(pen, camera1, world, flora, creatures, players, buildings, projectiles, fxPool, foodPool, players[0], t, darkness, daylight, cycle, seed, light1, !singlePlayer, missions);
   ctx.restore();
 
   if (!singlePlayer) {
@@ -269,7 +282,7 @@ export function renderVerdant(
     ctx.rect(halfW, 0, halfW, surface.height);
     ctx.clip();
     ctx.translate(halfW, 0);
-    drawViewport(pen2, camera2, world, flora, creatures, players, buildings, projectiles, fxPool, players[1], t, darkness, daylight, cycle, seed, light2, false, missions);
+    drawViewport(pen2, camera2, world, flora, creatures, players, buildings, projectiles, fxPool, foodPool, players[1], t, darkness, daylight, cycle, seed, light2, false, missions);
     ctx.restore();
   }
 
@@ -287,6 +300,7 @@ function drawViewport(
   buildings: readonly Building[],
   projectiles: readonly Projectile[],
   fxPool: readonly VisualFx[] | undefined,
+  foodPool: readonly FoodDrop[] | undefined,
   activePlayer: Player,
   t: number,
   darkness: number,
@@ -698,6 +712,60 @@ function drawViewport(
 
             pen.surface.poly(FX_BOX_SCRATCH, 4, fillCol);
           }
+        }
+      }
+
+      // Food drops — the meat a hunted rabbit / deer / boar leaves on the ground. Drawn as a
+      // small bobbing chunk with a ground shadow; blinks in its final seconds before it rots
+      // (see `updateFoodDrops` in `food.ts`). Billboarded in this pass rather than depth-sorted
+      // with the solids: they're tiny, short-lived, and always sit flat on open ground.
+      if (foodPool !== undefined) {
+        const zoom = camera.zoom;
+        for (let di = 0; di < foodPool.length; di++) {
+          const f = foodPool[di];
+          if (f === undefined || !f.live) continue;
+          // Blink ~3x/sec once rot is imminent. Tier A (multiply + floor) — visual only regardless.
+          if (f.ttlSec < 6 && Math.floor(f.ttlSec * 6) % 2 === 0) continue;
+
+          const groundH = heightAt(world.field, f.gx, f.gy);
+          const wx = (f.gx - f.gy) * 32;
+          const wy = (f.gx + f.gy) * 16 - groundH;
+          const sx = (wx - camera.x) * zoom + camera.viewW * 0.5;
+          const sy = (wy - camera.y) * zoom + camera.viewH * 0.5;
+          if (sx < -40 || sx > camera.viewW + 40 || sy < -40 || sy > camera.viewH + 40) continue;
+
+          const bobPx = Math.sin(f.bob * 6.28318) * 2.0 * zoom; // @tier-b — bob wobble, pixels only
+
+          // Ground shadow
+          const shW = 6 * zoom;
+          const shH = 3 * zoom;
+          FOOD_BOX_SCRATCH[0] = sx;       FOOD_BOX_SCRATCH[1] = sy - shH;
+          FOOD_BOX_SCRATCH[2] = sx + shW; FOOD_BOX_SCRATCH[3] = sy;
+          FOOD_BOX_SCRATCH[4] = sx;       FOOD_BOX_SCRATCH[5] = sy + shH;
+          FOOD_BOX_SCRATCH[6] = sx - shW; FOOD_BOX_SCRATCH[7] = sy;
+          pen.surface.poly(FOOD_BOX_SCRATCH, 4, withAlpha(hex('#000000'), 0.3));
+
+          // Meat chunk
+          const cy = sy - 5 * zoom + bobPx;
+          const rw = 5.5 * zoom;
+          const rh = 4 * zoom;
+          const tint = FOOD_TINT[f.species] ?? FOOD_TINT_FALLBACK;
+          FOOD_BOX_SCRATCH[0] = sx;      FOOD_BOX_SCRATCH[1] = cy - rh;
+          FOOD_BOX_SCRATCH[2] = sx + rw; FOOD_BOX_SCRATCH[3] = cy;
+          FOOD_BOX_SCRATCH[4] = sx;      FOOD_BOX_SCRATCH[5] = cy + rh;
+          FOOD_BOX_SCRATCH[6] = sx - rw; FOOD_BOX_SCRATCH[7] = cy;
+          pen.surface.poly(FOOD_BOX_SCRATCH, 4, tint);
+
+          // Bone / fat highlight nub
+          const bx = sx + rw * 0.4;
+          const by = cy - rh * 0.35;
+          const bw = rw * 0.42;
+          const bh = rh * 0.42;
+          FOOD_BOX_SCRATCH[0] = bx;      FOOD_BOX_SCRATCH[1] = by - bh;
+          FOOD_BOX_SCRATCH[2] = bx + bw; FOOD_BOX_SCRATCH[3] = by;
+          FOOD_BOX_SCRATCH[4] = bx;      FOOD_BOX_SCRATCH[5] = by + bh;
+          FOOD_BOX_SCRATCH[6] = bx - bw; FOOD_BOX_SCRATCH[7] = by;
+          pen.surface.poly(FOOD_BOX_SCRATCH, 4, FOOD_BONE);
         }
       }
     },

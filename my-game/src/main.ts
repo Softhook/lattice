@@ -94,6 +94,11 @@ import {
   executeAttack,
   stepProjectiles,
 } from './combat.js';
+import {
+  createFoodPool,
+  createFoodEvents,
+  updateFoodDrops,
+} from './food.js';
 import { hex } from '@latticekit/draw';
 
 // ── Seed ───────────────────────────────────────────────────────────────────────
@@ -181,6 +186,7 @@ if (opened.source === 'save' && opened.state && opened.state.p1 && opened.state.
   p1.inventory.stone = s.p1.stone;
   p1.inventory.fiber = s.p1.fiber;
   p1.hp = s.p1.hp;
+  p1.hunger = s.p1.hunger;
   p1.gx = s.p1.gx;
   p1.gy = s.p1.gy;
   p1.weapon = s.p1.weapon;
@@ -190,6 +196,7 @@ if (opened.source === 'save' && opened.state && opened.state.p1 && opened.state.
   p2.inventory.stone = s.p2.stone;
   p2.inventory.fiber = s.p2.fiber;
   p2.hp = s.p2.hp;
+  p2.hunger = s.p2.hunger;
   p2.gx = s.p2.gx;
   p2.gy = s.p2.gy;
   p2.weapon = s.p2.weapon;
@@ -318,6 +325,16 @@ lockCameraToPlayer(camera2, p2);
 const loop = createLoop({
   clock:  { now: () => performance.now() },
   frames: browserFrames(),
+  // Catch-up ceiling. The default (250 ms) lets a single long frame — a GC pause, a tab
+  // refocus, or the sim itself briefly going over budget with ~1200 creatures alive — queue
+  // up to ~15 fixed steps that then all run in the *next* pump before one paint. Every
+  // creature advances fifteen ticks of movement, animation, and AI between two frames at
+  // once: the "all the animals lurch together for a second" glitch. Worse, running 15 heavy
+  // steps in one pump overruns the next frame too, so it feeds itself for about a second.
+  // Capping at 3 steps turns any hitch into an imperceptible hiccup (the lost time is just
+  // dropped — this is a real-time sandbox with no score to desync) and makes the recovery
+  // pump cheap enough that it can't spiral.
+  maxCatchUpMs: 50,
 });
 
 // ── Input ──────────────────────────────────────────────────────────────────────
@@ -353,11 +370,14 @@ window.addEventListener('pointerdown', onFirstGesture, { once: true });
 let tickCount = 0;
 let currentDarkness = 0;
 let autosaveTimer = 0;
+let autosaveCount = 0;
 let prevDaylight = 1.0;
 const projectiles = createProjectilePool();
 const fxPool = createFxPool();
+const foodPool = createFoodPool();
 const creatureEvents = createCreatureEvents();
 const missionEvents = createMissionEvents();
+const foodEvents = createFoodEvents();
 
 /** Debris tint spawned at the target tile for each harvest/repair interaction type. */
 const INTERACT_DEBRIS_COLOR: Partial<Record<InteractType, number>> = {
@@ -474,7 +494,7 @@ function runPlayerActions(player: Player, e: PlayerActionEdges, dt: number): voi
       startWork(player, work.kind, target.gx, target.gy, work.seconds);
     } else if (player.attackCooldown <= 0) {
       const baseH = heightAt(world.field, player.gx, player.gy) + player.elevationPx;
-      const res = executeAttack(player, creatures, projectiles, baseH, fxPool, buildings);
+      const res = executeAttack(player, creatures, projectiles, baseH, fxPool, buildings, foodPool);
       audio.play(res.isRanged ? 'bow_shoot' : res.hit ? 'hit_meat' : 'attack');
     }
     return;
@@ -525,13 +545,19 @@ loop.onUpdate((dt, tick) => {
   copyKeys(curr, prevKeys);
 
   // ── Projectile kinematics & collision ────────────────────────────────────────
-  const projHits = stepProjectiles(projectiles, creatures, playersPair, world, dt, fxPool, buildings);
+  const projHits = stepProjectiles(projectiles, creatures, playersPair, world, dt, fxPool, buildings, foodPool);
   if (projHits.length > 0) {
     audio.play('hit_meat');
   }
 
   // ── Combat and interaction FX particle simulation ───────────────────────────
   stepFx(fxPool, dt);
+
+  // ── Food drops: rot timers, bob, and player pickup (refills the hunger bar) ──
+  updateFoodDrops(foodPool, playersPair, dt, foodEvents);
+  if (foodEvents.pickedUp) {
+    audio.play('forage');
+  }
 
   // ── Creature & Flora Ecosystem ───────────────────────────────────────────────
   updateCreatures(creatures, world, playersPair, flora, buildings, currentDarkness, dt, creatureEvents);
@@ -618,11 +644,20 @@ loop.onUpdate((dt, tick) => {
     audio.play('respawn');
   }
 
-  // ── Autosave every 30 seconds ─────────────────────────────────────────────────
+  // ── Autosave ─────────────────────────────────────────────────────────────────
+  // The periodic write skips the flora array — ~14k plants that dominate the payload, cost a
+  // ~1 MB synchronous `localStorage` write plus the store's checksum round-trip, and are the
+  // least consequential thing to lose (flora regenerates deterministically from the seed).
+  // Player-meaningful state (inventory, buildings, terraform, missions, hp/hunger) goes out
+  // every 30 s; the full snapshot including flora goes out every ~4 min and on `pagehide`
+  // (see `flushFullSave`). The write is also deferred off a generation boundary so an
+  // `evolveGeneration` tick and a save tick never stack into one visible hitch.
   autosaveTimer += dt;
-  if (autosaveTimer >= 30.0) {
+  if (autosaveTimer >= 30.0 && tickCount % GENERATION_TICKS !== 0) {
     autosaveTimer = 0;
-    store.save(extractSaveState(SEED, playersPair, buildings, world, flora, missions));
+    autosaveCount++;
+    const withFlora = autosaveCount % 8 === 0;
+    store.save(extractSaveState(SEED, playersPair, buildings, world, withFlora ? flora : undefined, missions));
   }
 
   // Refreshes the DOM resource counters — cheap no-op when nothing changed (it diffs internally),
@@ -683,6 +718,7 @@ loop.onRender((_alpha, t, nowMs) => {
     cycle,
     SEED,
     fxPool,
+    foodPool,
   );
 });
 
@@ -741,6 +777,22 @@ window.addEventListener('keydown', (e) => {
 
 document.addEventListener('fullscreenchange', () => {
   fit();
+});
+
+// ── Full save on the way out ─────────────────────────────────────────────────
+// The periodic autosave skips flora for cost; this is where the complete snapshot (flora
+// included) actually gets written — when the tab is hidden or closed, which is both the last
+// safe moment and a frame the player isn't watching, so a one-off ~1 MB write is invisible.
+let fullSavePending = true;
+function flushFullSave(): void {
+  if (!fullSavePending) return;
+  fullSavePending = false;
+  store.save(extractSaveState(SEED, playersPair, buildings, world, flora, missions));
+}
+window.addEventListener('pagehide', flushFullSave);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') flushFullSave();
+  else fullSavePending = true;
 });
 
 // ── Resize ────────────────────────────────────────────────────────────────────

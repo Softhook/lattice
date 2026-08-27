@@ -15,11 +15,12 @@ import { heightAt } from '@latticekit/iso';
 import { hex, type Rgba } from '@latticekit/draw';
 import type { WorldTerrain } from './world.js';
 import { W, H } from './world.js';
-import { SPECIES_REGISTRY, type Species, type Creature } from './creatures.js';
+import { SPECIES_REGISTRY, RETALIATE_SECONDS, type Species, type Creature } from './creatures.js';
 import type { Player } from './players.js';
 import { facingTile, triggerPlayerAction, isInForwardCone } from './players.js';
 import type { Building } from './buildings.js';
 import { isMissionStructure, BUILDING_REGISTRY, isTileOccupiedBySolidBuilding } from './buildings.js';
+import { spawnFoodDrop, type FoodDrop } from './food.js';
 
 export type WeaponKind = 'hands' | 'axe' | 'sword' | 'bow';
 
@@ -397,7 +398,8 @@ function applyKnockback(c: Creature, dx: number, dy: number, buildings: readonly
 
 /** Perform an attack with the player's equipped weapon and trigger animations & effects.
  *  `buildings` defaults to empty — callers that only exercise creature combat (most of the unit
- *  suite) don't need to know mission structures exist. */
+ *  suite) don't need to know mission structures exist. `foodPool`, likewise optional, is where a
+ *  slain game animal's meat is dropped (see `food.ts`); omit it and kills simply drop no food. */
 export function executeAttack(
   player: Player,
   creatures: Creature[],
@@ -405,6 +407,7 @@ export function executeAttack(
   baseHeightPx: number,
   fxPool?: VisualFx[],
   buildings: readonly Building[] = [],
+  foodPool?: FoodDrop[],
 ): AttackResult {
   const weapon = WEAPONS[player.weapon];
 
@@ -487,7 +490,16 @@ export function executeAttack(
     }
     applyKnockback(targetCreature, kx, ky, buildings);
     targetCreature.idleTimer = 0.4;
-    targetCreature.state = SPECIES_REGISTRY[targetCreature.species].behavior === 'apex' ? 'chase' : 'flee';
+    // A defensive predator (crocodile) doesn't flee a hit like other non-apex animals — it turns
+    // and fights back, and stays provoked for `RETALIATE_SECONDS` (see `updateOne` in
+    // `creatures.ts`).
+    const hitBehavior = SPECIES_REGISTRY[targetCreature.species].behavior;
+    if (hitBehavior === 'defensive') {
+      targetCreature.state = 'chase';
+      targetCreature.retaliateTimer = RETALIATE_SECONDS;
+    } else {
+      targetCreature.state = hitBehavior === 'apex' ? 'chase' : 'flee';
+    }
 
     // Spawn impact hit sparks
     if (fxPool !== undefined) {
@@ -497,6 +509,9 @@ export function executeAttack(
     const killed = targetCreature.hp <= 0;
     if (killed) {
       dropCreatureLoot(player, targetCreature.species);
+      if (foodPool !== undefined) {
+        spawnFoodDrop(foodPool, targetCreature.gx, targetCreature.gy, targetCreature.species);
+      }
     }
 
     const label = killed
@@ -572,6 +587,7 @@ export function stepProjectiles(
   dt: number,
   fxPool?: VisualFx[],
   buildings: readonly Building[] = [],
+  foodPool?: FoodDrop[],
 ): readonly AttackResult[] {
   HIT_EVENTS_SCRATCH.length = 0;
 
@@ -622,7 +638,15 @@ export function stepProjectiles(
         const mag = Math.sqrt(p.vx * p.vx + p.vy * p.vy) || 1; // Tier A: sqrt is exact per spec
         applyKnockback(c, (p.vx / mag) * 0.6, (p.vy / mag) * 0.6, buildings);
         c.idleTimer = 0.3;
-        c.state = SPECIES_REGISTRY[c.species].behavior === 'apex' ? 'chase' : 'flee';
+        // Defensive predators (crocodile) retaliate on a hit rather than flee — same rule as the
+        // melee path in `executeAttack`.
+        const hitBehavior = SPECIES_REGISTRY[c.species].behavior;
+        if (hitBehavior === 'defensive') {
+          c.state = 'chase';
+          c.retaliateTimer = RETALIATE_SECONDS;
+        } else {
+          c.state = hitBehavior === 'apex' ? 'chase' : 'flee';
+        }
 
         if (fxPool !== undefined) {
           spawnHitSparks(fxPool, c.gx, c.gy, p.z, hex('#ff7675'), 8);
@@ -632,6 +656,9 @@ export function stepProjectiles(
         const shooter = players[p.shooterIndex];
         if (killed && shooter !== undefined) {
           dropCreatureLoot(shooter, c.species);
+        }
+        if (killed && foodPool !== undefined) {
+          spawnFoodDrop(foodPool, c.gx, c.gy, c.species);
         }
 
         HIT_EVENTS_SCRATCH.push({

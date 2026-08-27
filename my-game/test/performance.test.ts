@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { createWorld } from '../src/world.js';
 import { createPlayers } from '../src/players.js';
-import { populateFlora } from '../src/flora.js';
+import { populateFlora, rebuildFloraSpatial, removeFloraAt } from '../src/flora.js';
 import { populateWorld, updateCreatures, createCreatureEvents } from '../src/creatures.js';
 import { createProjectilePool, stepProjectiles } from '../src/combat.js';
 
@@ -44,6 +44,32 @@ describe('Performance & Regression Benchmarks', () => {
       expect(c.gy).toBeGreaterThanOrEqual(1);
       expect(c.gy).toBeLessThanOrEqual(639);
     }
+  });
+
+  it('removes a grazed/harvested plant in O(1)+O(cell), not an O(n) full re-index', () => {
+    const world = createWorld(42);
+    const flora = populateFlora(42, world);
+    rebuildFloraSpatial(flora);
+    expect(flora.length).toBeGreaterThan(8000);
+
+    // Baseline: the cost of one full spatial rebuild over the whole flora population — what the
+    // old grazing / harvest path paid on every single plant removed.
+    const rebuildSamples = 40;
+    const rb0 = performance.now();
+    for (let i = 0; i < rebuildSamples; i++) rebuildFloraSpatial(flora);
+    const rebuildEach = (performance.now() - rb0) / rebuildSamples;
+
+    // The current path: locate the tail item, swap it into the hole, patch two grid slots.
+    const removeSamples = Math.min(2000, flora.length - 100);
+    const rm0 = performance.now();
+    for (let i = 0; i < removeSamples; i++) {
+      removeFloraAt(flora, Math.floor(flora.length * 0.41));
+    }
+    const removeEach = (performance.now() - rm0) / removeSamples;
+
+    // Must be at least 20x cheaper than a full rebuild (measured ~375x; 20x is slack for a
+    // loaded CI box). A regression to `splice` + `rebuildFloraSpatial` would fail this.
+    expect(removeEach).toBeLessThan(rebuildEach / 20);
   });
 });
 

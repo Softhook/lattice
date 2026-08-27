@@ -3,7 +3,7 @@ import { createWorld, W, H, isWalkable, dig, raise, BIOME_REGISTRY } from '../sr
 import { createPlayers, movePlayer, interactAtFacing, cycleBuildKind, buildAtFacing, canAffordBuilding, tickPlayer, getTargetContext, facingTile, isInForwardCone } from '../src/players.js';
 import { populateFlora, FLORA_REGISTRY } from '../src/flora.js';
 import { BUILDING_COSTS, BUILDING_REGISTRY, placeBuilding, type Building } from '../src/buildings.js';
-import { populateWorld, updateCreatures, createCreatureEvents, SPECIES_REGISTRY, spawnCreature, isNearActiveFireOrLight, FIRE_WARD_RADIUS, FIRE_SAFE_ZONE_RADIUS, type CreatureState } from '../src/creatures.js';
+import { populateWorld, updateCreatures, createCreatureEvents, evolveGeneration, GENERATION_TICKS, MAX_CREATURES, SPECIES_REGISTRY, spawnCreature, isNearActiveFireOrLight, FIRE_WARD_RADIUS, FIRE_SAFE_ZONE_RADIUS, type CreatureState } from '../src/creatures.js';
 
 describe('Verdant Gameplay Logic', () => {
   it('initializes world and terrain grid with bounds', () => {
@@ -185,6 +185,37 @@ describe('Verdant Gameplay Logic', () => {
     }
   });
 
+  it('evolution holds each species to its ceiling — the hare never monocultures the continent', () => {
+    const world = createWorld(42);
+    const [p1, p2] = createPlayers();
+    p1.gx = -100; // keep players out of it
+    p2.gx = -100;
+    const flora = populateFlora(42, world);
+    const creatures = populateWorld(42, world);
+    const events = createCreatureEvents();
+
+    // ~20 generations of pure ecosystem simulation.
+    for (let i = 0; i < GENERATION_TICKS * 20; i++) {
+      updateCreatures(creatures, world, [p1, p2], flora, [], 0, 1 / 60, events);
+      if ((i + 1) % GENERATION_TICKS === 0) evolveGeneration(creatures, 42, world, []);
+    }
+
+    const counts: Record<string, number> = {};
+    for (const c of creatures) counts[c.species] = (counts[c.species] ?? 0) + 1;
+
+    // No species is over its ceiling …
+    for (const key of Object.keys(SPECIES_REGISTRY)) {
+      const def = SPECIES_REGISTRY[key as keyof typeof SPECIES_REGISTRY];
+      expect(counts[key] ?? 0).toBeLessThanOrEqual(def.maxPopulation);
+    }
+    // … the hare specifically is held down despite fertility 2.2 …
+    expect(counts['rabbit'] ?? 0).toBeLessThanOrEqual(SPECIES_REGISTRY.rabbit.maxPopulation);
+    // … and the world stays diverse rather than collapsing to one or two species.
+    const survivingSpecies = Object.values(counts).filter((n) => n > 0).length;
+    expect(survivingSpecies).toBeGreaterThanOrEqual(6);
+    expect(creatures.length).toBeLessThanOrEqual(MAX_CREATURES);
+  }, 30000);
+
   it('ticks player respawn timer correctly', () => {
     const [p1] = createPlayers();
     p1.hp = 0;
@@ -259,8 +290,18 @@ describe('Verdant Gameplay Logic', () => {
       // Mission-conjured species (`shade`) never spawn from world-gen or evolution — see
       // `missions.ts` — so a population floor of 0 is correct for them, not a violated invariant.
       expect(s.minPopulation).toBeGreaterThanOrEqual(0);
+      expect(s.maxPopulation).toBeGreaterThanOrEqual(s.minPopulation);
       expect(s.preferredBiomes.length).toBeGreaterThan(0);
     }
+
+    // Population ceilings sum to a little over the global cap — species compete for the last
+    // slots rather than every one resting at its own ceiling.
+    const ceilingSum = speciesKeys.reduce(
+      (acc, k) => acc + SPECIES_REGISTRY[k as keyof typeof SPECIES_REGISTRY].maxPopulation,
+      0,
+    );
+    expect(ceilingSum).toBeGreaterThan(MAX_CREATURES);
+    expect(ceilingSum).toBeLessThan(MAX_CREATURES * 1.5);
 
     // 4. Building Registry
     const buildingKeys = Object.keys(BUILDING_REGISTRY);
@@ -504,6 +545,31 @@ describe('Verdant Gameplay Logic', () => {
     // With extinguished campfire, wolf aggressively targets player as normal
     const aggressiveStates: readonly CreatureState[] = ['chase', 'attack'];
     expect(aggressiveStates.includes(wolf.state)).toBe(true);
+  });
+
+  it('leaves crocodiles as defensive predators that ignore an unprovoked player', () => {
+    expect(SPECIES_REGISTRY.croc.behavior).toBe('defensive');
+
+    const world = createWorld(42);
+    const [p1, p2] = createPlayers();
+    p1.gx = 20;
+    p1.gy = 20;
+    p2.gx = 400;
+    p2.gy = 400;
+
+    // Croc two tiles from Player 1, never attacked.
+    const croc = spawnCreature('croc', 22, 20, 42);
+    croc.state = 'idle';
+    croc.retaliateTimer = 0;
+
+    const creatures = [croc];
+    for (let i = 0; i < 30; i++) {
+      updateCreatures(creatures, world, [p1, p2], [], [], 0, 1 / 60, createCreatureEvents());
+    }
+
+    // Unprovoked, it never chases or bites the player.
+    expect(croc.state).not.toBe('chase');
+    expect(croc.state).not.toBe('attack');
   });
 
   it('allows fearless monsters (trolls) to ignore fire warding', () => {

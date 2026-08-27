@@ -175,6 +175,33 @@ describe('Combat & Weapon Crafting System', () => {
     expect(activeSlash?.lifeSec).toBeLessThan(0.22);
   });
 
+  it('crocodile retaliates and hunts the attacker after being struck (defensive predator)', () => {
+    const world = createWorld(42);
+    const [p1, p2] = createPlayers();
+    p1.gx = 20;
+    p1.gy = 20;
+    p1.facing = 'e';
+    p1.weapon = 'sword';
+    p2.gx = 400;
+    p2.gy = 400;
+
+    const croc = spawnCreature('croc', 21.1, 20.0, 42);
+    croc.hp = 300; // survive the hit so we can watch it turn hostile
+    croc.state = 'idle';
+
+    const proj = createProjectilePool();
+    const res = executeAttack(p1, [croc], proj, 0);
+    expect(res.hit).toBe(true);
+    expect(croc.retaliateTimer).toBeGreaterThan(0);
+    expect(croc.state).toBe('chase');
+
+    // While provoked, the AI keeps the croc locked onto the player.
+    const creatures = [croc];
+    updateCreatures(creatures, world, [p1, p2], [], [], 0, 1 / 60, createCreatureEvents());
+    const hostile: readonly Creature['state'][] = ['chase', 'attack'];
+    expect(hostile.includes(croc.state)).toBe(true);
+  });
+
   it('plays wolf attack animation cycle smoothly without timer resets', () => {
     const [p1, p2] = createPlayers();
     p1.gx = 10;

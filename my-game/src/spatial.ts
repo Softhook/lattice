@@ -17,8 +17,13 @@ export const GRID_COLS = Math.ceil(W / CELL_SIZE);
 export const GRID_ROWS = Math.ceil(H / CELL_SIZE);
 export const TOTAL_CELLS = GRID_COLS * GRID_ROWS;
 
-/** Maximum entities indexed in a spatial grid instance (supports up to 8,192 flora & creatures). */
-export const MAX_SPATIAL_ENTITIES = 8192;
+/**
+ * Maximum entities indexed in a single spatial grid instance. Sized to comfortably clear the
+ * live flora population — `populateFlora` seeds ~14k plants across the 640x640 continent, and
+ * anything above this ceiling silently falls out of the index (see `insert`), so every query
+ * would miss it. 16,384 covers flora with headroom; the creature grid never approaches it.
+ */
+export const MAX_SPATIAL_ENTITIES = 16384;
 
 
 export class SpatialGrid {
@@ -62,13 +67,55 @@ export class SpatialGrid {
   }
 
   /**
-   * Query all entity IDs within radius of (gx, gy).
-   * Results are stored in `this.queryBuffer`, count in `this.queryCount`.
-   * Allocates ZERO heap objects and guarantees finite execution.
+   * Unlink entity `id` from the cell it was last `insert`ed into, in O(chain length) — the
+   * cell is recomputed from the entity's stored position, so a caller removing an entity does
+   * not have to remember where it was put. A no-op if `id` is out of range or not currently
+   * linked (double removes are safe).
+   *
+   * This is the single-entity counterpart to `clear()` + full rebuild: on the hot path a
+   * grazed or harvested plant is dropped with `remove(id)` plus a swap-pop in the owning array
+   * (see `removeFloraAt` in `flora.ts`), which is O(1)-ish instead of re-inserting every entity.
+   * A full `clear()` + rebuild is still the right tool for a bulk reload.
    */
-  queryRadius(gx: number, gy: number, radius: number): number {
+  remove(id: number): void {
+    if (id < 0 || id >= MAX_SPATIAL_ENTITIES) return;
+    const col = clamp(Math.floor((this.posX[id] ?? 0) / CELL_SIZE), 0, GRID_COLS - 1);
+    const row = clamp(Math.floor((this.posY[id] ?? 0) / CELL_SIZE), 0, GRID_ROWS - 1);
+    const cellIdx = row * GRID_COLS + col;
+
+    let curr = this.head[cellIdx] ?? -1;
+    if (curr === id) {
+      this.head[cellIdx] = this.next[id] ?? -1;
+      this.next[id] = -1;
+      return;
+    }
+    let iters = 0;
+    while (curr !== -1 && iters++ < MAX_SPATIAL_ENTITIES) {
+      const nxt = this.next[curr] ?? -1;
+      if (nxt === id) {
+        this.next[curr] = this.next[id] ?? -1;
+        this.next[id] = -1;
+        return;
+      }
+      curr = nxt;
+    }
+  }
+
+  /**
+   * Query entity IDs within radius of (gx, gy). Results land in `this.queryBuffer`, count
+   * returned and also in `this.queryCount`. Allocates ZERO heap objects.
+   *
+   * `maxResults` caps how many hits are collected — the query stops the moment it has that
+   * many. Callers on the per-creature hot path (boid separation, threat/prey scans) pass a
+   * small cap so cost stays bounded even inside a dense herd or warren, where an uncapped
+   * radius query can otherwise return hundreds of entities every tick. The hits kept are
+   * whichever the cell walk reaches first, not the nearest N — fine for an averaged flee
+   * vector or "some nearby prey", not for an exact nearest-neighbor.
+   */
+  queryRadius(gx: number, gy: number, radius: number, maxResults = MAX_SPATIAL_ENTITIES): number {
     this.queryCount = 0;
     const rSq = radius * radius;
+    const cap = maxResults < MAX_SPATIAL_ENTITIES ? maxResults : MAX_SPATIAL_ENTITIES;
 
     const minCol = clamp(Math.floor((gx - radius) / CELL_SIZE), 0, GRID_COLS - 1);
     const maxCol = clamp(Math.floor((gx + radius) / CELL_SIZE), 0, GRID_COLS - 1);
@@ -81,7 +128,7 @@ export class SpatialGrid {
         let curr = this.head[rowOffset + c] ?? -1;
         let iters = 0;
         while (curr !== -1 && iters++ < MAX_SPATIAL_ENTITIES) {
-          if (this.queryCount >= MAX_SPATIAL_ENTITIES) return this.queryCount;
+          if (this.queryCount >= cap) return this.queryCount;
           const ex = this.posX[curr] ?? 0;
           const ey = this.posY[curr] ?? 0;
           const dx = ex - gx;

@@ -22,7 +22,7 @@ import {
   hex,
   shade,
 } from '@latticekit/draw';
-import { Rng, createRng, fbm2, clamp } from '@latticekit/core';
+import { Rng, createRng, fbm2, hash2, clamp } from '@latticekit/core';
 import { W, H, MAT_WATER, MAT_GRASS, getBiomeBlendAt, type BiomeKind, type WorldTerrain } from './world.js';
 
 
@@ -720,8 +720,14 @@ export interface FloraItem {
   readonly w: number;
   readonly d: number;
   basePx: number;
+  /** The plant's mature footprint scale. Set once; `growth` scales the *rendered* size below it. */
   scale: number;
   subType: number;
+  /** Maturity in [0, 1]. Omitted / `1` for anything from world-gen or a save — those are
+   *  full-grown. A regrown seedling starts near 0 and is eased up to 1 over `GROWTH_SECONDS`
+   *  by `tickFloraRegrowth`; `floraVariant` renders it at `scale * maturityScale(growth)` so it
+   *  sprouts small and fills out rather than popping in at full size. */
+  growth?: number;
 }
 
 export interface SavedFlora {
@@ -730,6 +736,8 @@ export interface SavedFlora {
   readonly gy: number;
   readonly scale: number;
   readonly subType: number;
+  /** Present only for a seedling saved mid-growth; absent means fully grown. */
+  readonly growth?: number;
 }
 
 
@@ -738,7 +746,32 @@ import { SpatialGrid, MAX_SPATIAL_ENTITIES } from './spatial.js';
 
 export const FLORA_SPATIAL = new SpatialGrid();
 
-/** Rebuild the spatial grid index across all flora items. */
+// ── Regrowth & maturation state ──────────────────────────────────────────────
+//
+// Soft plants (flowers, bushes, mushrooms) trickle back after grazing. Two rules keep it from
+// reading as "plants blinked in everywhere at once":
+//  1. Seedlings are dripped in one at a time on a fractional accumulator whose rate tapers to
+//     zero as the meadow refills — never a synchronized batch on a 5-second metronome.
+//  2. Each seedling sprouts at `growth ≈ 0` and is eased to full size over `GROWTH_SECONDS`;
+//     `growing` holds just the handful still maturing so the per-tick cost is trivial.
+// Module state resets naturally on a new world (the page reloads — see `createNewWorld`).
+
+/** Density the ecosystem recovers toward — roughly the natural populated count from
+ *  `populateFlora`. Regrowth tapers off as `flora.length` approaches this. */
+const FLORA_SOFT_CAP = 14000;
+/** Seedlings per second when the meadow is completely barren; scales linearly down with how
+ *  full it is, so a devastated area recovers visibly while a near-full one barely seeds. */
+const SEED_RATE_MAX = 3.0;
+/** Seconds for a seedling to grow from sprout to full size. */
+const GROWTH_SECONDS = 70;
+
+let regrowthAccum = 0;
+/** Plants still maturing (`growth < 1`). Small — bounded by `SEED_RATE_MAX * GROWTH_SECONDS`. */
+const growing: FloraItem[] = [];
+
+/** Rebuild the spatial grid index across all flora items. Use for a bulk (re)load; for removing
+ *  a single plant on the hot path use `removeFloraAt` / `consumeFloraItem` instead — a full
+ *  rebuild over ~14k plants is ~0.2 ms and a grazing herd can trigger a dozen removals per tick. */
 export function rebuildFloraSpatial(flora: readonly FloraItem[]): void {
   FLORA_SPATIAL.clear();
   for (let i = 0; i < flora.length; i++) {
@@ -749,7 +782,52 @@ export function rebuildFloraSpatial(flora: readonly FloraItem[]): void {
   }
 }
 
-/** Extract current living flora items for persistence. */
+/**
+ * Remove the flora item at array index `idx` without an O(n) re-index. The last item is swapped
+ * into the hole (`pop` then costs nothing) and the spatial grid is patched in place: the dead
+ * slot is unlinked, and the moved item is re-keyed from its old index to `idx`. Order within
+ * `flora` is not preserved — nothing depends on it (saves, rendering and queries all key by the
+ * live index, which stays in sync here).
+ */
+export function removeFloraAt(flora: FloraItem[], idx: number): void {
+  const last = flora.length - 1;
+  if (idx < 0 || idx > last) return;
+
+  FLORA_SPATIAL.remove(idx);
+  if (idx !== last) {
+    const moved = flora[last];
+    if (moved !== undefined) {
+      flora[idx] = moved;
+      FLORA_SPATIAL.remove(last);
+      FLORA_SPATIAL.insert(idx, moved.gx, moved.gy);
+    }
+  }
+  flora.pop();
+}
+
+/**
+ * Remove a specific flora `item` (e.g. the plant a herbivore just finished eating). Locates it
+ * through the spatial index at its own position — O(cell) — and falls back to a linear scan
+ * only if it isn't where the index thinks it is. Returns false if it was already gone.
+ */
+export function consumeFloraItem(flora: FloraItem[], item: FloraItem): boolean {
+  const count = FLORA_SPATIAL.queryRadius(item.gx, item.gy, 0.1);
+  for (let i = 0; i < count; i++) {
+    const idx = FLORA_SPATIAL.queryBuffer[i];
+    if (idx !== undefined && flora[idx] === item) {
+      removeFloraAt(flora, idx);
+      return true;
+    }
+  }
+  const idx = flora.indexOf(item);
+  if (idx === -1) return false;
+  removeFloraAt(flora, idx);
+  return true;
+}
+
+/** Extract current living flora items for persistence. `growth` is written only for the rare
+ *  still-maturing seedling — a full-grown plant (the overwhelming majority) omits it and reloads
+ *  as mature. */
 export function extractSavedFlora(flora: readonly FloraItem[]): SavedFlora[] {
   return flora.map((f) => ({
     kind: f.kind,
@@ -757,13 +835,16 @@ export function extractSavedFlora(flora: readonly FloraItem[]): SavedFlora[] {
     gy: f.gy,
     scale: f.scale,
     subType: f.subType,
+    ...(f.growth !== undefined && f.growth < 1 ? { growth: f.growth } : {}),
   }));
 }
 
-/** Reconstruct flora items from saved state. */
+/** Reconstruct flora items from saved state. Any plant saved mid-growth resumes maturing. */
 export function restoreFlora(saved: readonly SavedFlora[]): FloraItem[] {
   let seq = 1;
-  const items = saved.map((s) => ({
+  growing.length = 0;
+  regrowthAccum = 0;
+  const items: FloraItem[] = saved.map((s) => ({
     id: seq++,
     kind: s.kind,
     gx: s.gx,
@@ -773,7 +854,12 @@ export function restoreFlora(saved: readonly SavedFlora[]): FloraItem[] {
     basePx: 0,
     scale: s.scale,
     subType: s.subType,
+    growth: s.growth ?? 1,
   }));
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
+    if (it !== undefined && (it.growth ?? 1) < 1) growing.push(it);
+  }
   rebuildFloraSpatial(items);
   return items;
 }
@@ -800,6 +886,16 @@ const FLORA_VARIANT_SCRATCH: {
 };
 
 /**
+ * Rendered-size multiplier for a plant's maturity: a fresh seedling shows at ~18% of its mature
+ * footprint and eases (smoothstep) up to full size as `growth` runs 0 → 1. Pure Tier-A
+ * arithmetic and cosmetic only — it feeds the sprite `progress`, never a hash or a save.
+ */
+export function maturityScale(growth: number): number {
+  const g = growth < 0 ? 0 : growth > 1 ? 1 : growth;
+  return 0.18 + 0.82 * (g * g * (3 - 2 * g));
+}
+
+/**
  * Return the visual Variant for a flora item.
  * Reuses an internal scratch variant to guarantee zero heap allocation.
  */
@@ -807,7 +903,7 @@ export function floraVariant(f: FloraItem): Variant {
   FLORA_VARIANT_SCRATCH.seed = f.id;
   FLORA_VARIANT_SCRATCH.flags = 0;
   FLORA_VARIANT_SCRATCH.level = f.subType;
-  FLORA_VARIANT_SCRATCH.progress = f.scale;
+  FLORA_VARIANT_SCRATCH.progress = f.scale * maturityScale(f.growth ?? 1);
   FLORA_VARIANT_SCRATCH.label = '';
   return FLORA_VARIANT_SCRATCH;
 }
@@ -821,8 +917,11 @@ export function populateFlora(seed: number, world: WorldTerrain): FloraItem[] {
   const rng = createRng(seed ^ 0x5a5a5a5a);
   const items: FloraItem[] = [];
 
-  // Reset spatial index for population collision checks
+  // Reset spatial index for population collision checks, and the regrowth/maturation state
+  // (a fresh world has nothing sprouting and no accumulated seed budget).
   FLORA_SPATIAL.clear();
+  growing.length = 0;
+  regrowthAccum = 0;
 
   // Multi-frequency candidate sampling across the continent
   for (let gy = 6; gy < H - 6; gy += 4) {
@@ -1034,6 +1133,7 @@ export function populateFlora(seed: number, world: WorldTerrain): FloraItem[] {
           basePx: 0,
           scale,
           subType,
+          growth: 1, // world-gen flora is fully grown
         };
         items.push(item);
         FLORA_SPATIAL.insert(itemIdx, tgx, tgy);
@@ -1077,8 +1177,7 @@ export function harvestFloraAt(flora: FloraItem[], gx: number, gy: number): Harv
   if (index === -1) return undefined;
   const item = flora[index];
   if (item === undefined) return undefined;
-  flora.splice(index, 1);
-  rebuildFloraSpatial(flora);
+  removeFloraAt(flora, index);
 
   const def = FLORA_REGISTRY[item.kind];
   const wood = def.harvest.wood ?? 0;
@@ -1095,6 +1194,10 @@ export function harvestFloraAt(flora: FloraItem[], gx: number, gy: number): Harv
 }
 
 const DEFAULT_EDIBLE_KINDS: readonly FloraKind[] = ['flowers', 'bush', 'mushroom'];
+
+/** Below this maturity a plant is a bare sprout — herbivores don't bother with it, which gives
+ *  regrowth a foothold in grazed areas instead of every seedling being eaten the moment it shows. */
+const FORAGE_MIN_GROWTH = 0.35;
 
 /** Find the closest edible flora within radius for herbivores. */
 export function findClosestEdibleFlora(
@@ -1115,6 +1218,7 @@ export function findClosestEdibleFlora(
       if (idx === undefined) continue;
       const f = flora[idx];
       if (f === undefined) continue;
+      if ((f.growth ?? 1) < FORAGE_MIN_GROWTH) continue;
       if (!edibleKinds.includes(f.kind) && !FLORA_REGISTRY[f.kind]?.edible) continue;
       const dx = f.gx - fromX;
       const dy = f.gy - fromY;
@@ -1130,6 +1234,7 @@ export function findClosestEdibleFlora(
   for (let i = 0; i < flora.length; i++) {
     const f = flora[i];
     if (f === undefined) continue;
+    if ((f.growth ?? 1) < FORAGE_MIN_GROWTH) continue;
     if (!edibleKinds.includes(f.kind) && !FLORA_REGISTRY[f.kind]?.edible) continue;
     const dx = f.gx - fromX;
     const dy = f.gy - fromY;
@@ -1143,8 +1248,6 @@ export function findClosestEdibleFlora(
   return closest;
 }
 
-let regrowthTimer = 0;
-
 /**
  * The only flora kinds that ever come back. Rocks and stone are deliberately excluded
  * and must never be added here: boulders and rock spires are a finite resource — once
@@ -1152,34 +1255,83 @@ let regrowthTimer = 0;
  */
 const REGROWABLE_KINDS = ['flowers', 'bush', 'mushroom'] as const;
 
-/** Slowly regrow small, soft flora (flowers, mushrooms, bushes) in the ecosystem. Never rocks. */
+/** Pick a random regrowable plant to sprout beside, so patches spread outward instead of
+ *  seedlings appearing at scattered empty tiles across the whole map. Samples a few entries and
+ *  returns the first soft plant; `undefined` if the meadow has none left (fall back to open ground). */
+function pickRegrowParent(flora: readonly FloraItem[], rng: Rng): FloraItem | undefined {
+  if (flora.length === 0) return undefined;
+  for (let tries = 0; tries < 8; tries++) {
+    const f = flora[Math.floor(rng.next() * flora.length)];
+    if (f !== undefined && (f.kind === 'flowers' || f.kind === 'bush' || f.kind === 'mushroom')) {
+      return f;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Ecosystem tick for soft flora: (1) ease every still-maturing seedling toward full size, and
+ * (2) drip in at most one new seedling, on a fractional accumulator whose rate falls to zero as
+ * the meadow refills toward `FLORA_SOFT_CAP`. New plants sprout small (`growth ≈ 0`) next to an
+ * existing patch, not at full size in a random empty field — so recovery reads as growth, not as
+ * plants blinking into existence everywhere at once. Trees and rocks never regrow.
+ */
 export function tickFloraRegrowth(
   seed: number,
   flora: FloraItem[],
   world: WorldTerrain,
   dt: number,
 ): void {
-  regrowthTimer += dt;
-  if (regrowthTimer < 5.0) return;
-  regrowthTimer = 0;
+  // 1. Maturation — only the handful of plants still growing, so this is a few iterations.
+  if (growing.length > 0) {
+    const inc = dt / GROWTH_SECONDS;
+    for (let i = growing.length - 1; i >= 0; i--) {
+      const f = growing[i];
+      if (f === undefined) { growing.splice(i, 1); continue; }
+      const g = (f.growth ?? 1) + inc;
+      if (g >= 1) {
+        f.growth = 1;
+        growing.splice(i, 1);
+      } else {
+        f.growth = g;
+      }
+    }
+  }
 
-  if (flora.length >= 6000 || flora.length >= MAX_SPATIAL_ENTITIES) return; // Ecosystem capacity for 640x640 continent
+  // 2. Seeding — rate tapers to zero as the population approaches its natural density.
+  if (flora.length >= FLORA_SOFT_CAP || flora.length >= MAX_SPATIAL_ENTITIES - 256) return;
+  const deficit = (FLORA_SOFT_CAP - flora.length) / FLORA_SOFT_CAP; // 1 = barren, 0 = full
+  regrowthAccum += SEED_RATE_MAX * deficit * dt;
+  if (regrowthAccum < 1) return;
+  regrowthAccum -= 1;
 
-  const rng = createRng((seed + flora.length * 31) ^ 0xabcdef);
-  const gx = Math.floor(4 + rng.next() * (W - 8));
-  const gy = Math.floor(4 + rng.next() * (H - 8));
+  const rng = createRng(hash2(seed ^ 0xabcdef, floraIdSeq, flora.length));
 
-  const mat = world.surface.get(gx, gy);
-  if (mat !== MAT_GRASS) return;
+  let gx: number;
+  let gy: number;
+  const parent = pickRegrowParent(flora, rng);
+  if (parent !== undefined) {
+    // A ring 2–6 tiles out from the parent on each axis (random sign) — far enough to clear the
+    // parent's own tile, close enough that patches visibly spread outward. Pure Tier-A (no trig)
+    // so the saved seedling position stays bit-reproducible.
+    const ox = (2 + Math.floor(rng.next() * 5)) * (rng.next() < 0.5 ? -1 : 1);
+    const oy = (2 + Math.floor(rng.next() * 5)) * (rng.next() < 0.5 ? -1 : 1);
+    gx = parent.gx + ox;
+    gy = parent.gy + oy;
+  } else {
+    gx = Math.floor(4 + rng.next() * (W - 8));
+    gy = Math.floor(4 + rng.next() * (H - 8));
+  }
 
-  // Check if tile already has flora using O(1) spatial query
-  if (FLORA_SPATIAL.queryRadius(gx, gy, 0.8) > 0) return;
+  if (gx < 4 || gy < 4 || gx >= W - 4 || gy >= H - 4) return;
+  if (world.surface.get(gx, gy) !== MAT_GRASS) return;
+  if (FLORA_SPATIAL.queryRadius(gx, gy, 0.9) > 0) return;
 
   const roll = rng.next();
   const kind: FloraKind = roll < 0.5 ? REGROWABLE_KINDS[0] : roll < 0.8 ? REGROWABLE_KINDS[1] : REGROWABLE_KINDS[2];
 
   const newIdx = flora.length;
-  flora.push({
+  const seedling: FloraItem = {
     id: floraIdSeq++,
     kind,
     gx,
@@ -1187,10 +1339,13 @@ export function tickFloraRegrowth(
     w: 1,
     d: 1,
     basePx: 0,
-    scale: 0.8 + rng.next() * 0.3,
+    scale: 0.8 + rng.next() * 0.3, // mature target — rendered size is this × maturityScale(growth)
     subType: Math.floor(rng.next() * 3),
-  });
+    growth: 0.03,
+  };
+  flora.push(seedling);
   FLORA_SPATIAL.insert(newIdx, gx, gy);
+  growing.push(seedling);
 }
 
 

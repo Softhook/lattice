@@ -17,7 +17,7 @@ import type { WorldTerrain } from './world.js';
 import { isWalkable, W, H, getBiomeAt } from './world.js';
 import { damagePlayer, type Player } from './players.js';
 import type { FloraItem } from './flora.js';
-import { findClosestEdibleFlora, rebuildFloraSpatial } from './flora.js';
+import { findClosestEdibleFlora, consumeFloraItem } from './flora.js';
 
 import type { Building } from './buildings.js';
 import { isTileOccupiedBySolidBuilding, isMissionStructure } from './buildings.js';
@@ -49,6 +49,11 @@ export interface SpeciesDefinition {
   readonly elevationRange: readonly [number, number];
   readonly initialSpawnCount: number;
   readonly minPopulation: number;
+  /** Population ceiling. `evolveGeneration` will not let a species reproduce past this, so a
+   *  high-`fertility` breeder (the hare) can't collapse the whole continent into a monoculture
+   *  and pack the spatial grid. The ceilings sum to a little over `MAX_CREATURES`, so species
+   *  still compete for the last slots rather than every one sitting at its own cap. */
+  readonly maxPopulation: number;
   readonly attackDamage: number;
   readonly attackRange: number;
   readonly noticeRange: number;
@@ -88,6 +93,7 @@ export const SPECIES_REGISTRY: Record<Species, SpeciesDefinition> = {
     elevationRange: [2, 16],
     initialSpawnCount: 240,
     minPopulation: 60,
+    maxPopulation: 340,
     attackDamage: 0,
     attackRange: 1.0,
     noticeRange: 8,
@@ -108,6 +114,7 @@ export const SPECIES_REGISTRY: Record<Species, SpeciesDefinition> = {
     elevationRange: [3, 16],
     initialSpawnCount: 150,
     minPopulation: 40,
+    maxPopulation: 245,
     attackDamage: 0,
     attackRange: 1.2,
     noticeRange: 8,
@@ -128,6 +135,7 @@ export const SPECIES_REGISTRY: Record<Species, SpeciesDefinition> = {
     elevationRange: [2, 14],
     initialSpawnCount: 130,
     minPopulation: 32,
+    maxPopulation: 205,
     attackDamage: 24,
     attackRange: 1.3,
     noticeRange: 7,
@@ -148,6 +156,7 @@ export const SPECIES_REGISTRY: Record<Species, SpeciesDefinition> = {
     elevationRange: [2, 18],
     initialSpawnCount: 110,
     minPopulation: 28,
+    maxPopulation: 160,
     attackDamage: 18,
     attackRange: 1.3,
     noticeRange: 8,
@@ -168,6 +177,7 @@ export const SPECIES_REGISTRY: Record<Species, SpeciesDefinition> = {
     elevationRange: [6, 22],
     initialSpawnCount: 90,
     minPopulation: 20,
+    maxPopulation: 120,
     attackDamage: 22,
     attackRange: 1.3,
     noticeRange: 9,
@@ -181,13 +191,18 @@ export const SPECIES_REGISTRY: Record<Species, SpeciesDefinition> = {
     name: 'Marsh Crocodile',
     icon: '🐊',
     baseHp: 42,
-    baseTraits: { speed: 1.1, aggression: 0.80, size: 1.35, fertility: 0.8 },
+    // A defensive predator, not a hunter of people: low resting aggression and the `defensive`
+    // archetype mean it ignores players entirely — basking, and ambushing only wild prey — until
+    // something attacks it. A hit flips `retaliateTimer` on (see `combat.ts`) and for a few
+    // seconds it turns and bites back hard before settling again.
+    baseTraits: { speed: 1.1, aggression: 0.32, size: 1.35, fertility: 0.8 },
     diet: 'carnivore',
-    behavior: 'ambush',
+    behavior: 'defensive',
     preferredBiomes: ['wetlands', 'coastal'],
     elevationRange: [1, 5],
     initialSpawnCount: 80,
     minPopulation: 20,
+    maxPopulation: 110,
     attackDamage: 32,
     attackRange: 1.3,
     noticeRange: 7,
@@ -208,6 +223,7 @@ export const SPECIES_REGISTRY: Record<Species, SpeciesDefinition> = {
     elevationRange: [7, 22],
     initialSpawnCount: 60,
     minPopulation: 16,
+    maxPopulation: 85,
     attackDamage: 44,
     attackRange: 1.7,
     noticeRange: 6,
@@ -228,6 +244,7 @@ export const SPECIES_REGISTRY: Record<Species, SpeciesDefinition> = {
     elevationRange: [14, 24],
     initialSpawnCount: 40,
     minPopulation: 12,
+    maxPopulation: 55,
     attackDamage: 36,
     attackRange: 2.3,
     noticeRange: 10,
@@ -252,6 +269,7 @@ export const SPECIES_REGISTRY: Record<Species, SpeciesDefinition> = {
     elevationRange: [0, 24],
     initialSpawnCount: 0,
     minPopulation: 0,
+    maxPopulation: 0,
     attackDamage: 14,
     attackRange: 1.2,
     noticeRange: 16,
@@ -302,6 +320,11 @@ export interface Creature {
   fleeDirY: number;
   /** Seconds remaining to keep fleeing after the last threat was seen, so brief dips out of noticeRange don't flip the state every tick. */
   fleeSpookTimer: number;
+  /** Seconds a normally player-indifferent `defensive` predator (the crocodile) stays provoked
+   *  and will chase and bite the player who attacked it. Set by `executeAttack` /
+   *  `stepProjectiles` on a player hit, counted down in `updateOne`. 0 = back to basking and
+   *  ignoring players. Unused by every other archetype. */
+  retaliateTimer: number;
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -312,6 +335,14 @@ export const GENERATION_TICKS = 600;
 /** Maximum creatures alive at once across the massive continent. */
 export const MAX_CREATURES = 1200;
 
+/** Per-creature spatial-query result caps. A radius query in a dense herd/warren can otherwise
+ *  return hundreds of entities, and these loops run once (or twice) per creature per tick. The
+ *  hits kept are the first the cell walk reaches, which is good enough for an averaged flee
+ *  heading, "some nearby prey", or a crowd-separation push. */
+const THREAT_SCAN_CAP = 20;
+const PREY_SCAN_CAP = 24;
+const BOID_SCAN_CAP = 12;
+
 /** Mutation magnitude per generation (trait drift). */
 const MUTATION = 0.08;
 
@@ -320,6 +351,10 @@ const FLEE_TURN_RATE = 6.0;
 
 /** Seconds a creature keeps fleeing after its last threat sighting, so brushing the edge of noticeRange doesn't flicker the state. */
 const FLEE_SPOOK_DURATION = 0.6;
+
+/** Seconds a provoked `defensive` predator (crocodile) stays locked onto the player who hit it.
+ *  Long enough that a single arrow means a real fight, short enough that backing off ends it. */
+export const RETALIATE_SECONDS = 7;
 
 // ── Spawn ──────────────────────────────────────────────────────────────────────
 
@@ -364,6 +399,7 @@ export function spawnCreature(
     fleeDirX: 0,
     fleeDirY: 0,
     fleeSpookTimer: 0,
+    retaliateTimer: 0,
   };
 }
 
@@ -448,6 +484,82 @@ export function isNearActiveFireOrLight(
   return false;
 }
 
+// ── Per-tick ward-source cache ────────────────────────────────────────────────
+//
+// Campfires and (after dark) lit towers are the only buildings that ward predators or shelter
+// prey — walls, floors, gates and daytime towers never do. Every fire-fearing creature tests
+// them each tick, and hunters test them again for every prey candidate and player, so walking
+// the whole `buildings` list per creature is pure waste once a player has built a base. Instead
+// `updateCreatures` distills the list into this small fixed cache once per tick and `updateOne`
+// reads it. Objects are reused across ticks — the array only ever grows.
+
+interface WardSource {
+  cx: number;
+  cy: number;
+  /** Predator flee radius in tiles (explicit per building kind). */
+  wardR: number;
+  /** Multiplier applied to a caller's base sanctuary radius: 1 for a campfire, 0.7 / 0.85 for a
+   *  wood / stone tower. A creature-targeting check inside this radius treats its target as safe. */
+  sanctuaryScale: number;
+  /** Campfire only — the ward that also singes a creature standing in the flames. */
+  isFire: boolean;
+}
+
+const WARD_SOURCES: WardSource[] = [];
+let wardSourceCount = 0;
+
+/** Refresh `WARD_SOURCES` from the live building list for this tick. */
+function rebuildWardSources(buildings: readonly Building[], darkness: number): void {
+  wardSourceCount = 0;
+  for (let i = 0; i < buildings.length; i++) {
+    const b = buildings[i];
+    if (b === undefined || b.hp <= 0) continue;
+
+    let wardR = 0;
+    let sanctuaryScale = 0;
+    if (b.kind === 'campfire') {
+      wardR = FIRE_WARD_RADIUS;
+      sanctuaryScale = 1;
+    } else if (darkness > 0.2 && b.kind === 'wood_tower') {
+      wardR = 6.0;
+      sanctuaryScale = 0.7;
+    } else if (darkness > 0.2 && b.kind === 'stone_tower') {
+      wardR = 7.5;
+      sanctuaryScale = 0.85;
+    } else {
+      continue;
+    }
+
+    let s = WARD_SOURCES[wardSourceCount];
+    if (s === undefined) {
+      s = { cx: 0, cy: 0, wardR: 0, sanctuaryScale: 0, isFire: false };
+      WARD_SOURCES[wardSourceCount] = s;
+    }
+    s.cx = b.gx + b.w * 0.5;
+    s.cy = b.gy + b.d * 0.5;
+    s.wardR = wardR;
+    s.sanctuaryScale = sanctuaryScale;
+    s.isFire = b.kind === 'campfire';
+    wardSourceCount++;
+  }
+}
+
+/** True if (x, y) sits inside any cached ward source's sanctuary, scaled from `baseRadius`. The
+ *  cache-backed fast path for the predator-targeting checks in `updateOne`; `isNearActiveFireOrLight`
+ *  is the equivalent that walks the raw building list, kept for external callers and the wander
+ *  check's custom radius. */
+function isInsideWardSanctuary(x: number, y: number, baseRadius: number): boolean {
+  for (let wi = 0; wi < wardSourceCount; wi++) {
+    const w = WARD_SOURCES[wi];
+    if (w === undefined || w.sanctuaryScale <= 0) continue;
+    const r = w.sanctuaryScale * baseRadius;
+    const dx = x - w.cx;
+    const dy = y - w.cy;
+    if (dx * dx + dy * dy <= r * r) return true;
+  }
+  return false;
+}
+
 export interface CreatureEvents {
   playerAttacked: boolean;
   roarOccurred: boolean;
@@ -492,6 +604,9 @@ export function updateCreatures(
   out.howlOccurred = false;
   out.wardOccurred = false;
 
+  // 0. Distill campfires / lit towers into the per-tick ward cache (see `WARD_SOURCES`).
+  rebuildWardSources(buildings, darkness);
+
   // 1. Build spatial index for live creatures
   CREATURE_SPATIAL.clear();
   for (let i = 0; i < creatures.length; i++) {
@@ -528,6 +643,9 @@ function updateOne(
   if (c.hurtTimer > 0) {
     c.hurtTimer = Math.max(0, c.hurtTimer - dt);
   }
+  if (c.retaliateTimer > 0) {
+    c.retaliateTimer = Math.max(0, c.retaliateTimer - dt);
+  }
 
   // Slow natural idle/breathing cadence
   const idleRate = c.species === 'rabbit' ? 0.15 : c.species === 'croc' ? 0.08 : 0.3;
@@ -546,42 +664,31 @@ function updateOne(
   let threatDy = 0;
   let threatCount = 0;
 
-  // Fire / Light warding: basic predators (wolves, foxes, etc.) and wild beasts are warded off by campfires and bright beacons
+  // Fire / Light warding: basic predators (wolves, foxes, etc.) and wild beasts are warded off by
+  // campfires and bright beacons. Reads the per-tick `WARD_SOURCES` cache, not the raw building list.
   const fearsFire = def.fearsFire ?? true;
   if (fearsFire) {
-    for (let bi = 0; bi < buildings.length; bi++) {
-      const b = buildings[bi];
-      if (b === undefined || b.hp <= 0) continue;
-
-      let wardRadius = 0;
-      if (b.kind === 'campfire') {
-        wardRadius = FIRE_WARD_RADIUS;
-      } else if (darkness > 0.2) {
-        if (b.kind === 'wood_tower') wardRadius = 6.0;
-        else if (b.kind === 'stone_tower') wardRadius = 7.5;
-      }
-
-      if (wardRadius > 0) {
-        const fireX = b.gx + b.w * 0.5;
-        const fireY = b.gy + b.d * 0.5;
-        const dx = fireX - c.gx;
-        const dy = fireY - c.gy;
-        const dSq = dx * dx + dy * dy;
-        if (dSq < wardRadius * wardRadius) {
-          const d = Math.sqrt(dSq); // Tier A: sqrt is exact per spec — distance to fire, pixels only
-          const weight = (wardRadius - d) / wardRadius * 2.5;
-          if (d > 0.01) {
-            threatDx += (dx / d) * weight;
-            threatDy += (dy / d) * weight;
-            threatCount++;
-          }
-          // Immediate singe / burn damage if touching campfire flames directly
-          if (b.kind === 'campfire' && d < FIRE_BURN_RADIUS) {
-            c.hp -= 15 * dt;
-            c.hurtTimer = 0.35;
-          }
-          events.wardOccurred = true;
+    for (let wi = 0; wi < wardSourceCount; wi++) {
+      const src = WARD_SOURCES[wi];
+      if (src === undefined) continue;
+      const wardRadius = src.wardR;
+      const dx = src.cx - c.gx;
+      const dy = src.cy - c.gy;
+      const dSq = dx * dx + dy * dy;
+      if (dSq < wardRadius * wardRadius) {
+        const d = Math.sqrt(dSq); // Tier A: sqrt is exact per spec — distance to fire, pixels only
+        const weight = (wardRadius - d) / wardRadius * 2.5;
+        if (d > 0.01) {
+          threatDx += (dx / d) * weight;
+          threatDy += (dy / d) * weight;
+          threatCount++;
         }
+        // Immediate singe / burn damage if touching campfire flames directly
+        if (src.isFire && d < FIRE_BURN_RADIUS) {
+          c.hp -= 15 * dt;
+          c.hurtTimer = 0.35;
+        }
+        events.wardOccurred = true;
       }
     }
   }
@@ -605,7 +712,9 @@ function updateOne(
   // Check predator threats via spatial query (defensive creatures flee only when wounded)
   const shouldCheckPredatorThreats = def.behavior === 'skittish' || (def.behavior === 'defensive' && c.hp < c.maxHp * 0.4);
   if (shouldCheckPredatorThreats && def.predatorThreats.length > 0) {
-    const nearbyCount = CREATURE_SPATIAL.queryRadius(c.gx, c.gy, noticeRange);
+    // Cap the scan: the flee heading is an average of threat vectors, so a handful of the
+    // nearest predators settles it — no need to walk every animal in a packed warren.
+    const nearbyCount = CREATURE_SPATIAL.queryRadius(c.gx, c.gy, noticeRange, THREAT_SCAN_CAP);
     for (let q = 0; q < nearbyCount; q++) {
       const otherIdx = CREATURE_SPATIAL.queryBuffer[q];
       if (otherIdx === undefined) continue;
@@ -668,9 +777,10 @@ function updateOne(
     let targetPlayer: Player | undefined = undefined;
     let targetBuilding: Building | undefined = undefined;
 
-    // Check prey creatures via spatial neighborhood query
+    // Check prey creatures via spatial neighborhood query (capped — a predator only needs
+    // *a* nearby target, and the first ones the cell walk reaches are already close).
     if (def.preyTargets.length > 0) {
-      const nearbyCount = CREATURE_SPATIAL.queryRadius(c.gx, c.gy, bestDist);
+      const nearbyCount = CREATURE_SPATIAL.queryRadius(c.gx, c.gy, bestDist, PREY_SCAN_CAP);
       for (let q = 0; q < nearbyCount; q++) {
         const otherIdx = CREATURE_SPATIAL.queryBuffer[q];
         if (otherIdx === undefined) continue;
@@ -679,7 +789,7 @@ function updateOne(
 
         if (def.preyTargets.includes(other.species)) {
           // Prey protected by fire/light sanctuary is ignored
-          if (fearsFire && isNearActiveFireOrLight(other.gx, other.gy, buildings, darkness)) {
+          if (fearsFire && isInsideWardSanctuary(other.gx, other.gy, FIRE_SAFE_ZONE_RADIUS)) {
             continue;
           }
           const dx = other.gx - c.gx;
@@ -696,9 +806,13 @@ function updateOne(
       }
     }
 
-    // Hostile apex predators and territorial beasts target nearby active players
-    if (isCreatureHostile || def.behavior === 'territorial') {
-      const playerDetectRange = def.behavior === 'territorial' ? 5.5 : bestDist;
+    // Hostile apex predators and territorial beasts target nearby active players. A `defensive`
+    // predator (the crocodile) is deliberately not on that list — it never picks a player as
+    // prey — but once provoked (`retaliateTimer`, set on a player hit in `combat.ts`) it hunts
+    // the offender for a few seconds within a moderate radius, then goes back to ignoring them.
+    const provoked = def.behavior === 'defensive' && c.retaliateTimer > 0;
+    if (isCreatureHostile || def.behavior === 'territorial' || provoked) {
+      const playerDetectRange = def.behavior === 'territorial' ? 5.5 : provoked ? 7.0 : bestDist;
       for (let i = 0; i < players.length; i++) {
         const p = players[i];
         if (p === undefined || p.respawnTimer > 0 || !p.active) continue;
@@ -706,7 +820,7 @@ function updateOne(
         // reach — no animal can climb up after them, so none can target or strike them there.
         if (p.elevationPx > 0) continue;
         // Player protected inside campfire or beacon sanctuary is safe
-        if (fearsFire && isNearActiveFireOrLight(p.gx, p.gy, buildings, darkness)) {
+        if (fearsFire && isInsideWardSanctuary(p.gx, p.gy, FIRE_SAFE_ZONE_RADIUS)) {
           continue;
         }
         const dx = p.gx - c.gx;
@@ -814,11 +928,7 @@ function updateOne(
         c.state = 'eat';
         c.eatTimer += dt;
         if (c.eatTimer >= 1.8) {
-          const fIdx = flora.indexOf(edible);
-          if (fIdx !== -1) {
-            flora.splice(fIdx, 1);
-            rebuildFloraSpatial(flora);
-          }
+          consumeFloraItem(flora, edible);
           c.hp = Math.min(c.maxHp, c.hp + 6);
           c.eatTimer = 0;
           c.targetGx = NaN;
@@ -842,7 +952,7 @@ function updateOne(
     const dist  = 3 + c.rng.next() * 5;
     const candGx = clamp(Math.round(c.gx + Math.cos(angle) * dist), 8, W - 9); // @tier-b
     const candGy = clamp(Math.round(c.gy + Math.sin(angle) * dist), 8, H - 9); // @tier-b
-    if (!fearsFire || !isNearActiveFireOrLight(candGx, candGy, buildings, darkness, 4.0)) {
+    if (!fearsFire || !isInsideWardSanctuary(candGx, candGy, 4.0)) {
       c.targetGx  = candGx;
       c.targetGy  = candGy;
     }
@@ -887,10 +997,12 @@ function moveWithSeparation(
     dy /= d;
   }
 
-  // 1. Soft Boid Separation force (accelerated via local spatial query)
+  // 1. Soft Boid Separation force (accelerated via local spatial query, capped — a dozen of the
+  //    closest neighbors is more than enough to push out of a crowd, and this loop runs for
+  //    every moving creature every tick).
   let sepX = 0;
   let sepY = 0;
-  const nearbyBoids = CREATURE_SPATIAL.queryRadius(c.gx, c.gy, 1.2);
+  const nearbyBoids = CREATURE_SPATIAL.queryRadius(c.gx, c.gy, 1.2, BOID_SCAN_CAP);
   for (let q = 0; q < nearbyBoids; q++) {
     const otherIdx = CREATURE_SPATIAL.queryBuffer[q];
     if (otherIdx === undefined) continue;
@@ -1015,28 +1127,20 @@ export function evolveGeneration(
   world: WorldTerrain,
   buildings: readonly Building[],
 ): void {
-  // Remove dead creatures
-  let i = creatures.length;
-  while (i--) {
-    const c = creatures[i];
-    if (c !== undefined && c.hp <= 0) {
-      creatures.splice(i, 1);
+  // Remove dead creatures — single-pass compaction (order-preserving), not a splice per corpse,
+  // which is O(n) each and quadratic when a whole lineage dies off between generations.
+  let write = 0;
+  for (let read = 0; read < creatures.length; read++) {
+    const c = creatures[read];
+    if (c !== undefined && c.hp > 0) {
+      if (write !== read) creatures[write] = c;
+      write++;
     }
   }
+  creatures.length = write;
 
-  // Survivors reproduce: each creature with fertility > 1.0 spawns a child (up to cap)
-  const toAdd: Creature[] = [];
-  for (let ci = 0; ci < creatures.length; ci++) {
-    const c = creatures[ci];
-    if (c === undefined) continue;
-    if (creatures.length + toAdd.length >= MAX_CREATURES) break;
-    if (c.traits.fertility > 1.0 && c.rng.next() < (c.traits.fertility - 1.0) * 0.5) {
-      const child = spawnCreature(c.species, c.gx, c.gy, worldSeed, c.traits, c.generation + 1);
-      toAdd.push(child);
-    }
-  }
-
-  // Replenish extinct species with uniform spatial distribution across the world
+  // Live population by species — built up front now, because reproduction below reads it to
+  // enforce each species' `maxPopulation` ceiling, and increments it as children are queued.
   const counts: Partial<Record<Species, number>> = {};
   for (let ci = 0; ci < creatures.length; ci++) {
     const c = creatures[ci];
@@ -1045,6 +1149,23 @@ export function evolveGeneration(
     }
   }
 
+  // Survivors reproduce: each creature with fertility > 1.0 spawns a child — unless its species
+  // is already at `maxPopulation` (which is what stops the fertility-2.2 hare from taking over
+  // the whole 1200-slot continent and packing the spatial grid into a hot mess).
+  const toAdd: Creature[] = [];
+  for (let ci = 0; ci < creatures.length; ci++) {
+    const c = creatures[ci];
+    if (c === undefined) continue;
+    if (creatures.length + toAdd.length >= MAX_CREATURES) break;
+    if ((counts[c.species] ?? 0) >= SPECIES_REGISTRY[c.species].maxPopulation) continue;
+    if (c.traits.fertility > 1.0 && c.rng.next() < (c.traits.fertility - 1.0) * 0.5) {
+      const child = spawnCreature(c.species, c.gx, c.gy, worldSeed, c.traits, c.generation + 1);
+      toAdd.push(child);
+      counts[c.species] = (counts[c.species] ?? 0) + 1;
+    }
+  }
+
+  // Replenish species below their population floor, spread uniformly across the world.
   const defs = Object.values(SPECIES_REGISTRY);
   for (let mi = 0; mi < defs.length; mi++) {
     const def = defs[mi];

@@ -22,6 +22,7 @@ import { clamp } from '@latticekit/core';
 import type { Player } from './players.js';
 import {
   MAX_HP,
+  MAX_HUNGER,
   canAffordBuilding,
   canAffordWeapon,
   INVENTORY_ITEMS_ORDER,
@@ -43,6 +44,8 @@ const UI_HP_GOOD    = hex('#2ecc71');
 const UI_HP_BAD     = hex('#e74c3c');
 const UI_TOOL_GOLD  = hex('#f1c40f');
 const UI_CORNER_DIM = hex('#4a6a58');
+const UI_HUNGER_MID = hex('#f1c40f');
+const UI_HUNGER_LOW = hex('#e67e22');
 
 // ── Static Scratch Arrays for Poly / Stroke Calls (Zero Allocation) ────────────
 
@@ -127,7 +130,9 @@ export function drawPlayerHud(pen: Pen, player: Player): void {
   const hudW = 224;
   const rowH = 22;
   const armed = player.mode !== 'move';
-  const hudH = 36 + rowH + (armed ? rowH + 4 : 0) + 8;
+  // Base region padY..padY+42 holds the header row plus the stacked HP and hunger bars; the
+  // weapon row (and, when armed, the build row) stack below that.
+  const hudH = 42 + rowH + (armed ? rowH + 4 : 0) + 8;
 
   const isHurt = player.hurtFlash > 0;
   const cardBorder = isHurt ? hex('#e74c3c') : pColor;
@@ -147,28 +152,44 @@ export function drawPlayerHud(pen: Pen, player: Player): void {
   pen.surface.poly(setBox(padX, padY, hudW, hudH), 4, cardBg);
   pen.surface.stroke(setBox(padX, padY, hudW, hudH), 4, true, cardBorder, isHurt ? 2.5 : 1.5);
 
-  // 2. Header row: Player tag + HP number
+  // 2. Header row: Player tag + HP number + hunger number
   screenText(pen, padX + 10, padY + 12, pLabel, pAccent, textStyle(12, 800, -1, 0));
 
   const currentHp = Math.max(0, Math.ceil(player.hp));
   const hpRatio = player.hp / MAX_HP;
   const hpColor = isHurt ? hex('#ff6b6b') : (hpRatio > 0.3 ? UI_HP_GOOD : UI_HP_BAD);
-  screenText(pen, padX + hudW - 10, padY + 12, `${currentHp}/${MAX_HP}`, hpColor, textStyle(11, 700, 1, 0));
 
-  // 3. HP bar
+  const currentHunger = Math.max(0, Math.ceil(player.hunger));
+  const hungerRatio = player.hunger / MAX_HUNGER;
+  const starving = player.hunger <= 0;
+  const hungerColor = starving
+    ? hex('#ff6b6b')
+    : hungerRatio > 0.5 ? UI_HP_GOOD : hungerRatio > 0.2 ? UI_HUNGER_MID : UI_HUNGER_LOW;
+
+  screenText(pen, padX + hudW - 10, padY + 12, `${currentHp} ❤`, hpColor, textStyle(11, 700, 1, 0));
+  screenText(pen, padX + hudW - 62, padY + 12, `${currentHunger} 🍖`, hungerColor, textStyle(11, 700, 1, 0));
+
+  // 3. Stacked HP bar + hunger bar
   const barX = padX + 10;
-  const barY = padY + 24;
   const barW = hudW - 20;
-  const barH = 6;
+  const barH = 5;
+  const hpBarY = padY + 22;
+  const hungerBarY = padY + 30;
 
-  pen.surface.poly(setBox(barX, barY, barW, barH), 4, hex('#1a2414'));
+  pen.surface.poly(setBox(barX, hpBarY, barW, barH), 4, hex('#1a2414'));
   if (hpRatio > 0) {
     const fillW = Math.max(2, barW * clamp(hpRatio, 0, 1));
-    pen.surface.poly(setBox(barX, barY, fillW, barH), 4, isHurt ? hex('#ff7979') : (hpRatio > 0.3 ? UI_HP_GOOD : UI_HP_BAD));
+    pen.surface.poly(setBox(barX, hpBarY, fillW, barH), 4, isHurt ? hex('#ff7979') : (hpRatio > 0.3 ? UI_HP_GOOD : UI_HP_BAD));
+  }
+
+  pen.surface.poly(setBox(barX, hungerBarY, barW, barH), 4, hex('#1a2414'));
+  if (hungerRatio > 0) {
+    const fillW = Math.max(2, barW * clamp(hungerRatio, 0, 1));
+    pen.surface.poly(setBox(barX, hungerBarY, fillW, barH), 4, hungerColor);
   }
 
   // 4. Weapon row — always the single place the Inventory hint is shown.
-  const wepY = padY + 36;
+  const wepY = padY + 42;
   const wepW = hudW - 20;
 
   pen.surface.poly(setBox(barX, wepY, wepW, rowH), 4, hex('#181a24'));

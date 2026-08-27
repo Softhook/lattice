@@ -88,6 +88,10 @@ export interface Player {
   inventory: Inventory;
   /** Hit points. 0 → player is knocked down (respawns after 3 s). */
   hp: number;
+  /** Satiety, `MAX_HUNGER` (full) down to 0 (starving). Drains steadily with time; refilled by
+   *  collecting the meat a hunted rabbit / deer / boar leaves behind (see `food.ts`). At 0 the
+   *  player takes steady starvation damage until they eat or are knocked down. */
+  hunger: number;
   /** Seconds remaining before HP regen resumes. Set on taking damage. */
   combatCooldown: number;
   /** Seconds remaining for red damage flash indicator. */
@@ -156,6 +160,17 @@ const REGEN_RATE = 4;
 /** Seconds before respawn after reaching 0 HP. */
 const RESPAWN_TIME = 3;
 
+/** Max satiety. A fresh (or freshly respawned) player starts here. */
+const MAX_HUNGER = 100;
+
+/** Satiety lost per second of being alive. ~100 / 0.42 ≈ 4 minutes from full to starving, so a
+ *  player has to break off building/exploring to hunt every few minutes but isn't chained to it. */
+const HUNGER_DECAY_PER_SEC = 0.42;
+
+/** HP lost per second while satiety sits at 0. ~33 s from full health to knocked down — enough
+ *  warning to go eat something, harsh enough that ignoring the empty bar ends the run. */
+const STARVE_DAMAGE_PER_SEC = 3;
+
 export const PLAYER_MODES: readonly PlayerMode[] = [
   'move',
   'campfire',
@@ -204,6 +219,7 @@ function makePlayer(index: 0 | 1, gx: number, gy: number): Player {
       fiber: 4,
     },
     hp: MAX_HP,
+    hunger: MAX_HUNGER,
     combatCooldown: 0,
     hurtFlash: 0,
     respawnTimer: 0,
@@ -1237,6 +1253,7 @@ export function tickPlayer(player: Player, dt: number): boolean {
     player.respawnTimer -= dt;
     if (player.respawnTimer <= 0) {
       player.hp = MAX_HP;
+      player.hunger = MAX_HUNGER;
       player.respawnTimer = 0;
       player.combatCooldown = 0;
       player.hurtFlash = 0;
@@ -1246,12 +1263,42 @@ export function tickPlayer(player: Player, dt: number): boolean {
     }
     return false;
   }
+
+  // Hunger drains whenever the player is up and about. At empty it bleeds HP directly (not via
+  // `damagePlayer` — that would strobe the full-screen hurt flash every tick and lock regen
+  // behind a combat cooldown that never clears); a light flash pulse a few times a second is
+  // enough to read as "you are starving." Regen is skipped outright while starving so eating,
+  // not standing still, is the fix.
+  const starving = player.hunger <= 0;
+  player.hunger = Math.max(0, player.hunger - HUNGER_DECAY_PER_SEC * dt);
+  if (starving) {
+    player.hp = Math.max(0, player.hp - STARVE_DAMAGE_PER_SEC * dt);
+    if (player.hurtFlash <= 0) player.hurtFlash = 0.6;
+    if (player.hp <= 0) {
+      player.hp = 0;
+      player.respawnTimer = RESPAWN_TIME;
+      return false;
+    }
+  }
+
   if (player.combatCooldown > 0) {
     player.combatCooldown = Math.max(0, player.combatCooldown - dt);
-  } else if (player.hp < MAX_HP) {
+  } else if (!starving && player.hp < MAX_HP) {
     player.hp = Math.min(MAX_HP, player.hp + REGEN_RATE * dt);
   }
   return false;
+}
+
+/**
+ * Restore satiety from eating `amount` points of food (a collected carcass drop). Clamped at
+ * `MAX_HUNGER`; surfaces a toast so the pickup reads on-screen. `species` only flavors the
+ * wording. See `food.ts`'s `updateFoodDrops`, the sole caller.
+ */
+export function feedPlayer(player: Player, amount: number, species: string): void {
+  if (player.respawnTimer > 0) return;
+  player.hunger = Math.min(MAX_HUNGER, player.hunger + amount);
+  player.lastActionMsg = `ATE ${species.toUpperCase()} MEAT (+${Math.round(amount)} FOOD)`;
+  player.msgTimer = 2.0;
 }
 
 /** Apply incoming damage. Triggers respawn if HP reaches 0. */
@@ -1266,4 +1313,4 @@ export function damagePlayer(player: Player, amount: number): void {
   }
 }
 
-export { MAX_HP };
+export { MAX_HP, MAX_HUNGER };

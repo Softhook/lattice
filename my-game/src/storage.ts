@@ -49,6 +49,9 @@ export interface SavedPlayer {
   readonly stone: number;
   readonly fiber: number;
   readonly hp: number;
+  /** Satiety at save time. Absent in pre-hunger saves — `recognizePlayer` defaults those to
+   *  full so an old world doesn't load its players mid-starvation. */
+  readonly hunger: number;
   readonly mode: string;
   readonly weapon: WeaponKind;
   readonly craftedWeapons: readonly WeaponKind[];
@@ -74,6 +77,7 @@ function recognizePlayer(v: unknown, label: string, defaultGx: number, defaultGy
   const stone = typeof o['stone'] === 'number' ? o['stone'] : 0;
   const fiber = typeof o['fiber'] === 'number' ? o['fiber'] : 0;
   const hp = typeof o['hp'] === 'number' ? o['hp'] : 100;
+  const hunger = typeof o['hunger'] === 'number' ? o['hunger'] : 100;
   const mode = typeof o['mode'] === 'string' ? o['mode'] : 'move';
   const weapon = (typeof o['weapon'] === 'string' ? o['weapon'] : 'hands') as WeaponKind;
   const rawCrafted = Array.isArray(o['craftedWeapons']) ? (o['craftedWeapons'] as WeaponKind[]) : [];
@@ -81,7 +85,7 @@ function recognizePlayer(v: unknown, label: string, defaultGx: number, defaultGy
   const gx = typeof o['gx'] === 'number' ? o['gx'] : defaultGx;
   const gy = typeof o['gy'] === 'number' ? o['gy'] : defaultGy;
 
-  return { wood, stone, fiber, hp, mode, weapon, craftedWeapons, gx, gy };
+  return { wood, stone, fiber, hp, hunger, mode, weapon, craftedWeapons, gx, gy };
 }
 
 function recognizeBuilding(v: unknown, index: number): SavedBuilding {
@@ -101,7 +105,9 @@ function recognizeFlora(v: unknown, index: number): SavedFlora {
   const gy = typeof o['gy'] === 'number' ? o['gy'] : 0;
   const scale = typeof o['scale'] === 'number' ? o['scale'] : 1.0;
   const subType = typeof o['subType'] === 'number' ? o['subType'] : 0;
-  return { kind, gx, gy, scale, subType };
+  // Absent in pre-growth saves (and for every mature plant) — those load fully grown.
+  const growth = typeof o['growth'] === 'number' ? o['growth'] : 1;
+  return { kind, gx, gy, scale, subType, growth };
 }
 
 function recognizeMission(v: unknown, index: number): SavedMission {
@@ -202,6 +208,7 @@ export function extractSaveState(
       stone: p1.inventory.stone,
       fiber: p1.inventory.fiber,
       hp: p1.hp,
+      hunger: p1.hunger,
       mode: p1.mode,
       weapon: p1.weapon,
       craftedWeapons: [...p1.craftedWeapons],
@@ -213,6 +220,7 @@ export function extractSaveState(
       stone: p2.inventory.stone,
       fiber: p2.inventory.fiber,
       hp: p2.hp,
+      hunger: p2.hunger,
       mode: p2.mode,
       weapon: p2.weapon,
       craftedWeapons: [...p2.craftedWeapons],

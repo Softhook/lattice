@@ -30,6 +30,7 @@ Players cooperate to shape the world (dig and build), gather procedural resource
 
 ### Modes & Controls
 - **Move Mode**: The Act key (<kbd>Space</kbd> / <kbd>N</kbd>) harvests resources from the facing tile (chopping trees for Wood, mining boulders for Stone, foraging bushes for Wood/Fiber), attacks a targeted creature, stokes a campfire, or repairs a damaged building — whichever the on-screen prompt is currently pointing at.
+- **Hunger**: The amber bar under each player's HP drains steadily (~4 min from full to empty). Hunt a rabbit, deer, or boar and walk over the meat it leaves behind to refill it; at empty the player starves and loses HP until they eat. Crocodiles are defensive now — they leave players alone and only turn on you (hard) once attacked.
 - **Dig / Raise**: <kbd>Q</kbd> / <kbd>U</kbd> digs down; <kbd>R</kbd> / <kbd>Y</kbd> raises terrain.
 - **Build Mode**: The Act key (<kbd>Space</kbd> / <kbd>N</kbd>) places the selected structure if the player has the required materials:
   - **Wood Wall** (4 Wood): 1×1 solid timber palisade; blocks and keeps out animals.
@@ -68,11 +69,12 @@ The game is modularized inside the `my-game/` workspace:
 
 - **[main.ts](file:///Users/softhook/Documents/GitHub/lattice/my-game/src/main.ts)**: Orchestration and lifecycle: loop, cameras, audio, input, persistent storage, and tick wiring.
 - **[world.ts](file:///Users/softhook/Documents/GitHub/lattice/my-game/src/world.ts)**: Heightfield grid math, seed-driven terrain generator (`core.fbm2`), and zero-allocation dig/raise vertex mutations.
-- **[creatures.ts](file:///Users/softhook/Documents/GitHub/lattice/my-game/src/creatures.ts)**: AI wander/flee/chase state machine, boid repulsions, and generational evolution loop.
+- **[creatures.ts](file:///Users/softhook/Documents/GitHub/lattice/my-game/src/creatures.ts)**: AI wander/flee/chase state machine, boid repulsions, and generational evolution loop. Per-species `maxPopulation` ceilings keep the ecosystem balanced (no hare monoculture); per-tick spatial queries (threat / prey / boid) are result-capped so a dense warren can't blow the frame budget.
 - **[buildings.ts](file:///Users/softhook/Documents/GitHub/lattice/my-game/src/buildings.ts)**: Definition, massings, costs, and footprint collision validation of constructible structures.
 - **[players.ts](file:///Users/softhook/Documents/GitHub/lattice/my-game/src/players.ts)**: Player stats, continuous movement physics, combat, and action dispatch.
 - **[combat.ts](file:///Users/softhook/Documents/GitHub/lattice/my-game/src/combat.ts)**: Weapon definitions, zero-allocation projectile ballistics, melee hit resolution, and combat/harvest visual FX pooling.
-- **[flora.ts](file:///Users/softhook/Documents/GitHub/lattice/my-game/src/flora.ts)**: Procedural trees, shrubs, flowers, rocks, harvesting yields, and ecosystem regrowth.
+- **[flora.ts](file:///Users/softhook/Documents/GitHub/lattice/my-game/src/flora.ts)**: Procedural trees, shrubs, flowers, rocks, harvesting yields, O(1) removal (swap-pop + incremental spatial patch), and staggered regrowth — soft plants trickle back one seedling at a time near existing patches and grow from sprout to full size over ~70 s (`growth` field, `maturityScale`).
+- **[food.ts](file:///Users/softhook/Documents/GitHub/lattice/my-game/src/food.ts)**: Hunger economy — the meat a hunted rabbit/deer/boar drops, its rot timer, and the walk-over pickup that refills a player's hunger bar.
 - **[audio.ts](file:///Users/softhook/Documents/GitHub/lattice/my-game/src/audio.ts)**: Zero-asset procedural WebAudio sound synthesizer and dynamic day/night ambient drone bed via `@latticekit/audio`.
 - **[storage.ts](file:///Users/softhook/Documents/GitHub/lattice/my-game/src/storage.ts)**: Versioned save/load schema and autosave integration via `@latticekit/persist`.
 - **[input.ts](file:///Users/softhook/Documents/GitHub/lattice/my-game/src/input.ts)**: Zero-allocation continuous key held polling and edge-trigger action checks.
