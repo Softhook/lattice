@@ -351,6 +351,13 @@ export interface Creature {
   /** Smoothed flee heading (unit vector), turn-rate-limited so escape direction doesn't snap frame to frame. */
   fleeDirX: number;
   fleeDirY: number;
+  /** Smoothed *visible* heading (unit-ish vector), turn-rate-limited in every state — not just
+   *  while fleeing, the way `fleeDir` is. The discrete `facing` snaps off this eased vector
+   *  rather than the raw per-tick steering direction, so a burst of steering noise (a Boid
+   *  shove, a forage target a tile off the last one) no longer spins the sprite through a 90°
+   *  flip. `+ - *` only, so it stays safe to feed `facing`, which is sim state. */
+  faceDirX: number;
+  faceDirY: number;
   /** Seconds remaining to keep fleeing after the last threat was seen, so brief dips out of noticeRange don't flip the state every tick. */
   fleeSpookTimer: number;
   /** Seconds this animal will keep broadcasting alarm to its herd. Set only when it detects a
@@ -386,6 +393,21 @@ const MUTATION = 0.08;
 
 /** How fast a fleeing creature's heading turns to face away from a threat, in full-turns/sec equivalent. Lower = smoother but laggier escapes. */
 const FLEE_TURN_RATE = 6.0;
+
+/** How fast a creature's smoothed heading (`faceDir`) rotates toward the direction it currently
+ *  wants to go, in the same units as `FLEE_TURN_RATE`. Derived from behaviour archetype and
+ *  body size rather than stored as an evolving gene: a skittish hare pivots almost instantly, a
+ *  lumbering apex bear swings round slowly, and a larger individual of any species carries more
+ *  rotational inertia. `/` and comparison only — Tier-A, safe to reach `facing`. */
+function headingTurnRate(c: Creature): number {
+  const base =
+    SPECIES_REGISTRY[c.species].behavior === 'skittish'    ? 11 :
+    SPECIES_REGISTRY[c.species].behavior === 'ambush'      ? 8  :
+    SPECIES_REGISTRY[c.species].behavior === 'defensive'   ? 6  :
+    SPECIES_REGISTRY[c.species].behavior === 'territorial' ? 5  :
+    /* apex */                                               4;
+  return base / (c.traits.size > 0.6 ? c.traits.size : 0.6);
+}
 
 /** Seconds a creature keeps fleeing after its last threat sighting, so brushing the edge of noticeRange doesn't flicker the state. */
 const FLEE_SPOOK_DURATION = 0.6;
@@ -433,6 +455,7 @@ export function spawnCreature(
   const base = parentTraits ?? def.baseTraits;
   const traits = mutateTrait(base, rng, parentTraits ? MUTATION : MUTATION * 2);
   const maxHp  = Math.round(def.baseHp * traits.size * 4);
+  const facing: Creature['facing'] = rng.next() > 0.5 ? 's' : 'e';
 
   return {
     id,
@@ -440,7 +463,7 @@ export function spawnCreature(
     traits,
     gx,
     gy,
-    facing: rng.next() > 0.5 ? 's' : 'e',
+    facing,
     walkCycle: rng.next(),
     targetGx: NaN,
     targetGy: NaN,
@@ -456,6 +479,8 @@ export function spawnCreature(
     forageTarget: undefined,
     fleeDirX: 0,
     fleeDirY: 0,
+    faceDirX: facing === 'e' ? 1 : 0,
+    faceDirY: facing === 's' ? 1 : 0,
     fleeSpookTimer: 0,
     alarmTimer: 0,
     retaliateTimer: 0,
@@ -1209,12 +1234,24 @@ function moveWithSeparation(
   //    `dir` back toward the threat, which showed up as a jerky "look back" mid-sprint. `fleeDir`
   //    is already turn-rate-limited and scatter-fanned, so facing off it stays smooth and still
   //    matches the direction the animal is actually escaping.
-  let faceX = dirX;
-  let faceY = dirY;
+  // Turn-rate-limit the heading the sprite turns through. `dirX/dirY` is where the creature
+  // wants to point *this* tick; `faceDir` eases toward it so steering noise — a separation
+  // shove, a forage target a tile off the last one — doesn't spin the sprite, and the discrete
+  // `facing` below snaps off the eased vector so it commits through a turn instead of
+  // flip-flopping on the raw one. Exponential approach, `+ - *` only (Tier-A). While fleeing,
+  // `fleeDir` is *already* turn-rate-limited, so track it directly rather than easing an eased
+  // vector. Attack aims `facing` straight at the target elsewhere, so a lunging creature still
+  // faces its prey with no lag.
   if (c.state === 'flee' && (c.fleeDirX !== 0 || c.fleeDirY !== 0)) {
-    faceX = c.fleeDirX;
-    faceY = c.fleeDirY;
+    c.faceDirX = c.fleeDirX;
+    c.faceDirY = c.fleeDirY;
+  } else {
+    const turnBlend = Math.min(1, headingTurnRate(c) * dt);
+    c.faceDirX += (dirX - c.faceDirX) * turnBlend;
+    c.faceDirY += (dirY - c.faceDirY) * turnBlend;
   }
+  const faceX = c.faceDirX;
+  const faceY = c.faceDirY;
   const isCurrentlyHorizontal = c.facing === 'e' || c.facing === 'w';
   if (isCurrentlyHorizontal) {
     if (Math.abs(faceY) > Math.abs(faceX) * 1.35 && Math.abs(faceY) > 0.15) {

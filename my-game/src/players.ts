@@ -60,6 +60,13 @@ export interface Player {
   /** Current smoothed velocity vector for tactile physics momentum. */
   vx: number;
   vy: number;
+  /** Smoothed *visible* heading (unit-ish vector), turn-rate-limited toward the travel
+   *  direction so the body banks through a turn instead of snapping between 90° facings. The
+   *  discrete `facing` (which drives build/dig/attack target tiles) still updates instantly
+   *  above — only the rendered body lags. Presentation feed; no consumer until the sprite
+   *  work in phase 2. */
+  faceDirX: number;
+  faceDirY: number;
   /** Integer isometric tile coordinate targeted directly in front of player on the grid. */
   cursorGx: number;
   cursorGy: number;
@@ -151,6 +158,11 @@ const ACCEL = 22.0;
 /** Deceleration/friction rate when releasing keys. */
 const FRICTION = 16.0;
 
+/** How fast the player's smoothed visible heading (`faceDir`) rotates toward the travel
+ *  direction, in turns/sec-ish — same units as the creature `headingTurnRate`. Brisk enough
+ *  that the body never visibly lags a deliberate turn, slow enough to round off the corner. */
+const PLAYER_TURN_RATE = 9.0;
+
 /** Max player HP. */
 const MAX_HP = 100;
 
@@ -201,6 +213,8 @@ function makePlayer(index: 0 | 1, gx: number, gy: number): Player {
     gy,
     vx: 0,
     vy: 0,
+    faceDirX: 0,
+    faceDirY: 1,
     cursorGx: gx,
     cursorGy: gy + 1,
     facing: 's',
@@ -516,6 +530,13 @@ export function movePlayer(
 
   if (player.isMoving) {
     player.walkCycle = (player.walkCycle + currentSpeed * dt * 0.9) % 1;
+    // Ease the visible heading toward the actual travel direction. Only while genuinely moving:
+    // when the keys are released `vx/vy` decay toward zero, and chasing that would swing the
+    // body toward whatever axis died last instead of holding the final facing.
+    const inv = 1 / currentSpeed;
+    const turnBlend = Math.min(1.0, PLAYER_TURN_RATE * dt);
+    player.faceDirX += (player.vx * inv - player.faceDirX) * turnBlend;
+    player.faceDirY += (player.vy * inv - player.faceDirY) * turnBlend;
   } else {
     player.walkCycle = 0;
   }
