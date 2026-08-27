@@ -63,6 +63,7 @@ import {
 import { drawSky, farRanges } from './sky.js';
 import { drawAmbientEffects } from './ambient.js';
 import { drawPlayerHud, drawSplitDivider, drawInventoryOverlay, drawMissionBanner } from './hud.js';
+import { AIM_ARC_ANGLE } from './combat.js';
 import type { Projectile, VisualFx } from './combat.js';
 import type { FoodDrop } from './food.js';
 import { getTargetContext } from './players.js';
@@ -664,7 +665,7 @@ function drawViewport(
           if (fx.kind === 'slash') {
             // Curved sweeping blade slash arc
             const arcRadius = fx.size * (12 + progress * 8) * camera.zoom;
-            const arcAngle = fx.facing === 's' ? Math.PI * 0.5 : fx.facing === 'n' ? -Math.PI * 0.5 : fx.facing === 'e' ? 0 : Math.PI;
+            const arcAngle = AIM_ARC_ANGLE[fx.facing];
             const arcSpan = 1.2;
             const startA = arcAngle - arcSpan * 0.5;
             const endA = arcAngle + arcSpan * 0.5;

@@ -43,6 +43,7 @@ import {
 import {
   createPlayers,
   movePlayer,
+  setAttackAim,
   facingTile,
   buildAtFacing,
   interactAtFacing,
@@ -448,7 +449,7 @@ function resolveCompletedWork(player: Player, kind: WorkKind): void {
  * repeat the key. Combat stays an instant rising-edge press — winding up a sword swing would kill
  * the game's feel — so a creature target (or nothing at all) still fires `executeAttack` at once.
  */
-function runPlayerActions(player: Player, e: PlayerActionEdges, dt: number): void {
+function runPlayerActions(player: Player, e: PlayerActionEdges, dt: number, moveVec: Vec2Out): void {
   if (e.invToggle) {
     // A same-tick toggle wins outright — pressing Space in the same 16 ms frame as C/V should
     // never also open-and-immediately-select or close-and-immediately-act.
@@ -493,6 +494,9 @@ function runPlayerActions(player: Player, e: PlayerActionEdges, dt: number): voi
     if (work.kind !== 'none') {
       startWork(player, work.kind, target.gx, target.gy, work.seconds);
     } else if (player.attackCooldown <= 0) {
+      // Aim the swing/shot along whatever direction is being held this frame (eight-way), or
+      // straight ahead when standing still. Must run before executeAttack reads the aim.
+      setAttackAim(player, moveVec.dx, moveVec.dy);
       const baseH = heightAt(world.field, player.gx, player.gy) + player.elevationPx;
       const res = executeAttack(player, creatures, projectiles, baseH, fxPool, buildings, foodPool);
       audio.play(res.isRanged ? 'bow_shoot' : res.hit ? 'hit_meat' : 'attack');
@@ -536,9 +540,9 @@ loop.onUpdate((dt, tick) => {
 
   // ── Player Actions ────────────────────────────────────────────────────────────
   // Player 2 is skipped entirely while hidden — frozen where they stood until brought back.
-  runPlayerActions(p1, edges.p[0], dt);
+  runPlayerActions(p1, edges.p[0], dt, moveVec1);
   if (p2.active) {
-    runPlayerActions(p2, edges.p[1], dt);
+    runPlayerActions(p2, edges.p[1], dt, moveVec2);
   }
 
   // Snapshot held keys without heap allocations

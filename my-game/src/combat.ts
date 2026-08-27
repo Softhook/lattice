@@ -16,8 +16,8 @@ import { hex, type Rgba } from '@latticekit/draw';
 import type { WorldTerrain } from './world.js';
 import { W, H } from './world.js';
 import { SPECIES_REGISTRY, RETALIATE_SECONDS, type Species, type Creature } from './creatures.js';
-import type { Player } from './players.js';
-import { facingTile, triggerPlayerAction, isInForwardCone } from './players.js';
+import type { Player, AimDir } from './players.js';
+import { triggerPlayerAction, aimDirFromVec } from './players.js';
 import type { Building } from './buildings.js';
 import { isMissionStructure, BUILDING_REGISTRY, isTileOccupiedBySolidBuilding } from './buildings.js';
 import { spawnFoodDrop, type FoodDrop } from './food.js';
@@ -91,6 +91,11 @@ export const WEAPONS: Record<WeaponKind, WeaponDef> = {
 
 export const CRAFTABLE_WEAPONS: readonly WeaponKind[] = ['axe', 'sword', 'bow'];
 
+/** A melee swing connects with anything within reach whose bearing is within ~50° of the aim
+ *  line (`cos 50° ≈ 0.64`) — a 100°-wide arc, wide enough that the eight aim directions overlap
+ *  slightly instead of leaving un-hittable wedges between them. */
+const MELEE_CONE_COS = 0.64;
+
 // ── Combat & Harvest Visual FX (Zero Heap Allocation) ───────────────────────────
 
 export type FxKind = 'slash' | 'spark' | 'shockwave' | 'debris';
@@ -104,7 +109,9 @@ export interface VisualFx {
   vx: number;
   vy: number;
   vz: number;
-  facing: 'n' | 's' | 'e' | 'w';
+  /** For `slash` FX: the eight-way direction the blade arc sweeps. Other FX kinds leave this at
+   *  its default and never read it. */
+  facing: AimDir;
   color: Rgba;
   size: number;
   lifeSec: number;
@@ -112,6 +119,20 @@ export interface VisualFx {
 }
 
 export const MAX_FX = 256;
+
+/** Screen-space sweep angle for a slash arc per aim direction — the stylised mapping the FX
+ *  renderer expects (east = 0, south = +π/2, clockwise), extended from the original four axes to
+ *  all eight compass points. Shared with `render.ts`. */
+export const AIM_ARC_ANGLE: Record<AimDir, number> = {
+  e: 0,
+  se: Math.PI * 0.25,
+  s: Math.PI * 0.5,
+  sw: Math.PI * 0.75,
+  w: Math.PI,
+  nw: -Math.PI * 0.75,
+  n: -Math.PI * 0.5,
+  ne: -Math.PI * 0.25,
+};
 
 /** Fast deterministic linear congruential generator for particle kinematics. */
 let fxSeed = 1337;
@@ -149,7 +170,7 @@ export function spawnSlashFx(
   gx: number,
   gy: number,
   z: number,
-  facing: 'n' | 's' | 'e' | 'w',
+  facing: AimDir,
   color: Rgba = 0xffffffff,
   size = 1.1,
 ): void {
@@ -326,7 +347,30 @@ export function createProjectilePool(): Projectile[] {
 /** Gravity in world pixels per second squared for ballistic arcs. */
 const GRAVITY_PX = 460;
 
-/** Launch an arrow from player position in facing direction. */
+/** Reusable target for `aimComponents` — combat resolves an aim direction at most once per
+ *  attack, on the input thread, so a shared scratch is safe. */
+const AIM_SCRATCH: { x: number; y: number } = { x: 0, y: 0 };
+
+/** Resolve the unit-ish direction this attack fires along. Uses the eight-way `player.aim*` set
+ *  by `setAttackAim`, falling back to the 4-way `facing` when aim was never set (unit tests, or
+ *  the very first frame). Writes into `AIM_SCRATCH` and returns it — zero allocation. */
+function aimComponents(player: Player): { x: number; y: number } {
+  let x = player.aimX;
+  let y = player.aimY;
+  if (x === 0 && y === 0) {
+    switch (player.facing) {
+      case 'n': y = -1; break;
+      case 's': y = 1;  break;
+      case 'e': x = 1;  break;
+      case 'w': x = -1; break;
+    }
+  }
+  AIM_SCRATCH.x = x;
+  AIM_SCRATCH.y = y;
+  return AIM_SCRATCH;
+}
+
+/** Launch an arrow from player position in the current aim direction (eight-way). */
 export function launchArrow(
   pool: Projectile[],
   player: Player,
@@ -342,14 +386,9 @@ export function launchArrow(
   }
   if (p === undefined) return false;
 
-  let dirX = 0;
-  let dirY = 0;
-  switch (player.facing) {
-    case 'n': dirY = -1; break;
-    case 's': dirY = 1;  break;
-    case 'e': dirX = 1;  break;
-    case 'w': dirX = -1; break;
-  }
+  const aim = aimComponents(player);
+  const dirX = aim.x;
+  const dirY = aim.y;
 
   const speed = 15.0; // tiles per second
   p.x = player.gx + dirX * 0.4;
@@ -433,21 +472,27 @@ export function executeAttack(
     triggerPlayerAction(player, 'fist_punch', 0.20);
   }
 
-  // Spawn visual slash arc in front of player
+  // Eight-way aim for this swing: melee arc, knockback and the slash FX all read it.
+  const aim = aimComponents(player);
+  const aimX = aim.x;
+  const aimY = aim.y;
+
+  // Spawn visual slash arc in front of player, sweeping along the aim direction.
   if (fxPool !== undefined && (player.weapon === 'sword' || player.weapon === 'axe')) {
-    const fTile = facingTile(player);
     spawnSlashFx(
       fxPool,
-      fTile.gx,
-      fTile.gy,
+      player.gx + aimX * 0.7,
+      player.gy + aimY * 0.7,
       baseHeightPx + 14,
-      player.facing,
+      aimDirFromVec(aimX, aimY),
       player.weapon === 'sword' ? hex('#81ecec') : hex('#fab1a0'),
       player.weapon === 'axe' ? 1.4 : 1.2,
     );
   }
 
-  // Melee attack: check creatures in facing direction cone
+  // Melee attack: a creature counts as struck when it's within reach and within ~50° of the aim
+  // line (cos 0.64). A 100°-wide arc leaves a little forgiving overlap between the eight aim
+  // directions rather than a dead wedge between them.
   player.attackCooldown = weapon.cooldownSec;
   let bestDist = weapon.reach;
   let targetCreature: Creature | undefined;
@@ -458,16 +503,9 @@ export function executeAttack(
     const dx = c.gx - player.gx;
     const dy = c.gy - player.gy;
     const dist = Math.sqrt(dx * dx + dy * dy); // Tier A: sqrt is exact per spec — melee hit-check distance
-    if (dist <= weapon.reach) {
-      // Check facing alignment
-      let inCone = false;
-      switch (player.facing) {
-        case 'n': inCone = dy < 0 && Math.abs(dx) < 1.0; break;
-        case 's': inCone = dy > 0 && Math.abs(dx) < 1.0; break;
-        case 'e': inCone = dx > 0 && Math.abs(dy) < 1.0; break;
-        case 'w': inCone = dx < 0 && Math.abs(dy) < 1.0; break;
-      }
-      if (inCone && dist < bestDist) {
+    if (dist <= weapon.reach && dist > 0) {
+      const alignment = (dx * aimX + dy * aimY) / dist; // cos of the angle off the aim line
+      if (alignment >= MELEE_CONE_COS && dist < bestDist) {
         bestDist = dist;
         targetCreature = c;
       }
@@ -479,16 +517,8 @@ export function executeAttack(
     targetCreature.hp -= dmg;
     targetCreature.hurtTimer = 0.25; // Trigger creature damage flinch
 
-    // Apply knockback
-    let kx = 0;
-    let ky = 0;
-    switch (player.facing) {
-      case 'n': ky = -weapon.knockback; break;
-      case 's': ky = weapon.knockback;  break;
-      case 'e': kx = weapon.knockback;  break;
-      case 'w': kx = -weapon.knockback; break;
-    }
-    applyKnockback(targetCreature, kx, ky, buildings);
+    // Apply knockback along the aim line
+    applyKnockback(targetCreature, aimX * weapon.knockback, aimY * weapon.knockback, buildings);
     targetCreature.idleTimer = 0.4;
     // A defensive predator (crocodile) doesn't flee a hit like other non-apex animals — it turns
     // and fights back, and stays provoked for `RETALIATE_SECONDS` (see `updateOne` in
@@ -541,7 +571,7 @@ export function executeAttack(
     const dx = bcx - player.gx;
     const dy = bcy - player.gy;
     const dist = Math.sqrt(dx * dx + dy * dy); // Tier A: sqrt is exact per spec — melee hit-check distance
-    if (dist <= bestBDist && isInForwardCone(player.facing, dx, dy, 1.25)) {
+    if (dist <= bestBDist && dist > 0 && (dx * aimX + dy * aimY) / dist >= MELEE_CONE_COS) {
       bestBDist = dist;
       targetBuilding = b;
     }

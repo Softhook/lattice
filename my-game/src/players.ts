@@ -28,6 +28,12 @@ import type { Creature } from './creatures.js';
 
 export type Facing = 'n' | 's' | 'e' | 'w';
 
+/** Eight-way aim used by combat only (melee arc, knockback, arrow launch, slash FX). The body's
+ *  discrete `facing` stays 4-way — it drives build/dig/harvest target tiles, which are single
+ *  grid cells — but a swing or a shot can be released along any of the eight compass directions.
+ *  See `setAttackAim`. */
+export type AimDir = 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w' | 'nw';
+
 export type PlayerMode = 'move' | BuildingKind;
 
 export type PlayerActionType =
@@ -72,6 +78,12 @@ export interface Player {
   cursorGy: number;
   /** Which grid direction the player is facing. Affects action target tile. */
   facing: Facing;
+  /** Unit-ish aim vector for the next attack/shot, set from live movement input each time an
+   *  attack is pressed (`setAttackAim`). Lets melee and the bow fire on the four diagonals as
+   *  well as the axes. `(0, 0)` is the "not set this session" sentinel — combat then falls back
+   *  to the 4-way `facing`, which keeps direct-`facing` unit tests working. */
+  aimX: number;
+  aimY: number;
   /** World-pixel height standing above the tower footprint they're currently on, 0 at ground
    *  level. Extends bow arrow range (fired from higher up) and personal torchlight radius. */
   elevationPx: number;
@@ -218,6 +230,8 @@ function makePlayer(index: 0 | 1, gx: number, gy: number): Player {
     cursorGx: gx,
     cursorGy: gy + 1,
     facing: 's',
+    aimX: 0,
+    aimY: 0,
     elevationPx: 0,
     mode: 'move',
     buildKind: 'wood_wall',
@@ -643,6 +657,41 @@ export function facingTile(player: Player): TileCoord {
   const out: TileCoord = { gx: 0, gy: 0 };
   facingTileInto(player, out);
   return out;
+}
+
+/**
+ * Point the player's next attack/shot along the live movement input. Called on the attack press,
+ * before `executeAttack` reads `aimX`/`aimY`.
+ *
+ * - Any movement key held → aim runs along that input, so holding a diagonal (e.g. W+D) fires
+ *   NE. The vector is normalised so a diagonal shot isn't ~1.4x faster than an axis one.
+ * - Nothing held → aim collapses back to the 4-way `facing`, i.e. wherever the body last turned.
+ *
+ * The facing branch never yields `(0, 0)`, so combat can treat `(0, 0)` as "never aimed" and use
+ * `facing` directly — which is what keeps the unit tests that poke `player.facing` by hand green.
+ */
+export function setAttackAim(player: Player, inputDx: number, inputDy: number): void {
+  if (inputDx !== 0 || inputDy !== 0) {
+    const inv = inputDx !== 0 && inputDy !== 0 ? 0.70710678 : 1;
+    player.aimX = inputDx * inv;
+    player.aimY = inputDy * inv;
+    return;
+  }
+  player.aimX = player.facing === 'e' ? 1 : player.facing === 'w' ? -1 : 0;
+  player.aimY = player.facing === 's' ? 1 : player.facing === 'n' ? -1 : 0;
+}
+
+/** Classify a stylised aim vector (+x = east, +y = south) into one of the eight compass
+ *  directions. Sign/magnitude only — no `atan2` — so it stays cheap and exact. The 0.38 gate
+ *  cleanly splits an axis component (0 or ±1) from a normalised diagonal one (±0.707). */
+export function aimDirFromVec(x: number, y: number): AimDir {
+  const ax = x < 0 ? -x : x;
+  const ay = y < 0 ? -y : y;
+  if (ax > 0.38 && ay > 0.38) {
+    return y < 0 ? (x < 0 ? 'nw' : 'ne') : (x < 0 ? 'sw' : 'se');
+  }
+  if (ay >= ax) return y < 0 ? 'n' : 's';
+  return x < 0 ? 'w' : 'e';
 }
 
 /** Build the currently selected structure at the player's facing tile if affordable. */
