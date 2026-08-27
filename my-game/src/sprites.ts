@@ -30,6 +30,9 @@ import {
   DEER,
   DEER_BELLY,
   ANTLER_BONE,
+  IBEX,
+  IBEX_BELLY,
+  IBEX_HORN,
   WOLF,
   WOLF_MANE,
   WOLF_EYE,
@@ -660,6 +663,151 @@ const deerMassing: Massing = (w, v, _rng) => {
 
 export const DEER_SPRITE: SpriteDef = defineSprite({
   id: 'deer', w: 1, d: 1, massing: deerMassing,
+});
+
+// ── 3b. Alpine Ibex (Stocky High-Peak Grazer with Backswept Ridged Horns & Beard) ─
+//
+// Silhouette contrast with the deer it shares grazing animation code with: shorter, thicker
+// legs; a heavy shaggy back hump; a chin beard; and instead of the deer's tall branching
+// antlers, a pair of thick horns that sweep up and back in two ridged segments.
+
+const ibexMassing: Massing = (w, v, _rng) => {
+  const facing = v.flags & 3;
+  const stateCode = (v.flags >> 3) & 7;
+  const phase = ((v.level % 1000) / 1000);
+
+  const isGrazing = stateCode === 5 || stateCode === 6;
+  const isFleeing = stateCode === 2;
+
+  // @tier-b — sure-footed short stride or deep grazing head bend
+  const legSwing = Math.sin(phase * Math.PI * 2) * (isFleeing ? 0.12 : 0.055);
+  const grazeBend = isGrazing ? 0.5 : 0;
+  const grazeBob = isGrazing ? Math.sin(phase * Math.PI * 4) * 0.035 : 0;
+  const headBob = (Math.sin(phase * Math.PI * 2) * 0.018) - grazeBend + grazeBob;
+
+  const HOOF = BOOTS_DARK;
+  w.shadow(0.14, 0.14, 0.72, 0.72, 0.3);
+
+  if (facing === 1) {
+    // ── South: Facing Camera ──
+    const tailZ = isFleeing ? 1.05 : 0.9;
+    w.box(0.44, 0.12, 0.12, 0.10, { color: IBEX_BELLY, h: 0.14, z: tailZ });
+
+    // 4 short sturdy legs with dark hooves
+    w.box(0.24, 0.20 + legSwing, 0.15, 0.16, { color: IBEX, h: 0.52 });
+    w.box(0.24, 0.20 + legSwing, 0.15, 0.16, { color: HOOF, h: 0.10, z: 0 });
+    w.box(0.62, 0.20 - legSwing, 0.15, 0.16, { color: IBEX, h: 0.52 });
+    w.box(0.62, 0.20 - legSwing, 0.15, 0.16, { color: HOOF, h: 0.10, z: 0 });
+    w.box(0.24, 0.64 - legSwing, 0.15, 0.16, { color: IBEX, h: 0.52 });
+    w.box(0.24, 0.64 - legSwing, 0.15, 0.16, { color: HOOF, h: 0.10, z: 0 });
+    w.box(0.62, 0.64 + legSwing, 0.15, 0.16, { color: IBEX, h: 0.52 });
+    w.box(0.62, 0.64 + legSwing, 0.15, 0.16, { color: HOOF, h: 0.10, z: 0 });
+
+    // Barrel body, shaggy back hump, pale belly
+    w.box(0.20, 0.16, 0.60, 0.66, { color: IBEX, h: 0.50, z: 0.52 });
+    w.box(0.18, 0.18, 0.64, 0.42, { color: IBEX, h: 0.18, z: 0.86 });
+    w.box(0.26, 0.24, 0.48, 0.50, { color: IBEX_BELLY, h: 0.22, z: 0.52 });
+
+    // Short thick neck & blunt head
+    const neckZ = 0.98 + headBob * 0.6;
+    const hZ = 1.34 + headBob;
+    const neckY = 0.52 + (isGrazing ? 0.16 : 0);
+    const headY = 0.56 + (isGrazing ? 0.22 : 0);
+
+    w.box(0.34, neckY, 0.32, 0.30, { color: IBEX, h: 0.52, z: neckZ });
+    w.box(0.32, headY, 0.36, 0.32, { color: IBEX, h: 0.34, z: hZ });
+    w.box(0.40, headY + 0.22, 0.20, 0.16, { color: IBEX_BELLY, h: 0.16, z: hZ + 0.02 });
+    w.box(0.44, headY + 0.32, 0.12, 0.09, { color: 0x1c2833ff, h: 0.09, z: hZ + 0.09 });
+    // Chin beard
+    w.box(0.42, headY + 0.20, 0.16, 0.12, { color: IBEX_BELLY, h: 0.20, z: hZ - 0.18 });
+
+    // Eyes & ears
+    w.box(0.29, headY + 0.12, 0.04, 0.07, { color: 0x1c2833ff, h: 0.07, z: hZ + 0.16 });
+    w.box(0.67, headY + 0.12, 0.04, 0.07, { color: 0x1c2833ff, h: 0.07, z: hZ + 0.16 });
+    w.box(0.20, headY - 0.02, 0.11, 0.10, { color: IBEX, h: 0.15, z: hZ + 0.10 });
+    w.box(0.69, headY - 0.02, 0.11, 0.10, { color: IBEX, h: 0.15, z: hZ + 0.10 });
+
+    // Backswept ridged horns — two stacked segments per side, arcing up and toward the tail
+    w.post(0.30, headY - 0.02, hZ + 0.28, 0.40, IBEX_HORN, 0.055);
+    w.post(0.70, headY - 0.02, hZ + 0.28, 0.40, IBEX_HORN, 0.055);
+    w.post(0.29, headY - 0.20, hZ + 0.58, 0.38, IBEX_HORN, 0.05);
+    w.post(0.71, headY - 0.20, hZ + 0.58, 0.38, IBEX_HORN, 0.05);
+    w.box(0.24, headY - 0.34, 0.13, 0.12, { color: IBEX_HORN, h: 0.10, z: hZ + 0.82 });
+    w.box(0.63, headY - 0.34, 0.13, 0.12, { color: IBEX_HORN, h: 0.10, z: hZ + 0.82 });
+
+  } else if (facing === 0) {
+    // ── North: Facing Away ──
+    const hZ = 1.34 + headBob;
+    w.box(0.34, 0.14, 0.32, 0.30, { color: IBEX, h: 0.52, z: 0.98 + headBob * 0.6 });
+    w.box(0.32, 0.08, 0.36, 0.30, { color: IBEX, h: 0.34, z: hZ });
+    w.post(0.30, 0.16, hZ + 0.28, 0.40, IBEX_HORN, 0.055);
+    w.post(0.70, 0.16, hZ + 0.28, 0.40, IBEX_HORN, 0.055);
+    w.post(0.30, 0.34, hZ + 0.58, 0.38, IBEX_HORN, 0.05);
+    w.post(0.70, 0.34, hZ + 0.58, 0.38, IBEX_HORN, 0.05);
+
+    w.box(0.24, 0.20 - legSwing, 0.15, 0.16, { color: IBEX, h: 0.52 });
+    w.box(0.62, 0.20 + legSwing, 0.15, 0.16, { color: IBEX, h: 0.52 });
+    w.box(0.24, 0.64 + legSwing, 0.15, 0.16, { color: IBEX, h: 0.52 });
+    w.box(0.62, 0.64 - legSwing, 0.15, 0.16, { color: IBEX, h: 0.52 });
+    w.box(0.20, 0.16, 0.60, 0.66, { color: IBEX, h: 0.50, z: 0.52 });
+    w.box(0.18, 0.40, 0.64, 0.42, { color: IBEX, h: 0.18, z: 0.86 });
+
+    w.box(0.44, 0.74, 0.12, 0.10, { color: IBEX_BELLY, h: 0.14, z: isFleeing ? 1.05 : 0.9 });
+
+  } else if (facing === 2) {
+    // ── East: Facing +gx ──
+    const hZ = 1.34 + headBob;
+    const hX = 0.58 + (isGrazing ? 0.15 : 0);
+    w.box(0.08, 0.42, 0.12, 0.14, { color: IBEX_BELLY, h: 0.14, z: isFleeing ? 1.05 : 0.9 });
+    w.box(0.20 + legSwing, 0.22, 0.16, 0.15, { color: IBEX, h: 0.52 });
+    w.box(0.20 - legSwing, 0.64, 0.16, 0.15, { color: IBEX, h: 0.52 });
+    w.box(0.62 - legSwing, 0.22, 0.16, 0.15, { color: IBEX, h: 0.52 });
+    w.box(0.62 + legSwing, 0.64, 0.16, 0.15, { color: IBEX, h: 0.52 });
+
+    w.box(0.16, 0.20, 0.66, 0.60, { color: IBEX, h: 0.50, z: 0.52 });
+    w.box(0.14, 0.22, 0.44, 0.56, { color: IBEX, h: 0.18, z: 0.86 });
+    w.box(0.52, 0.34, 0.30, 0.32, { color: IBEX, h: 0.52, z: 0.98 + headBob * 0.6 });
+    w.box(hX, 0.32, 0.34, 0.36, { color: IBEX, h: 0.34, z: hZ });
+    w.box(hX + 0.22, 0.38, 0.16, 0.24, { color: IBEX_BELLY, h: 0.16, z: hZ + 0.02 });
+    w.box(hX + 0.30, 0.42, 0.10, 0.16, { color: 0x1c2833ff, h: 0.09, z: hZ + 0.09 });
+    w.box(hX + 0.08, 0.42, 0.12, 0.14, { color: IBEX_BELLY, h: 0.20, z: hZ - 0.18 });
+    w.box(hX + 0.12, 0.30, 0.05, 0.05, { color: 0x1c2833ff, h: 0.06, z: hZ + 0.14 });
+    w.post(hX + 0.02, 0.34, hZ + 0.28, 0.38, IBEX_HORN, 0.055);
+    w.post(hX + 0.02, 0.66, hZ + 0.28, 0.38, IBEX_HORN, 0.055);
+    w.post(hX - 0.20, 0.34, hZ + 0.56, 0.36, IBEX_HORN, 0.05);
+    w.post(hX - 0.20, 0.66, hZ + 0.56, 0.36, IBEX_HORN, 0.05);
+    w.box(hX - 0.36, 0.32, 0.13, 0.12, { color: IBEX_HORN, h: 0.10, z: hZ + 0.80 });
+    w.box(hX - 0.36, 0.60, 0.13, 0.12, { color: IBEX_HORN, h: 0.10, z: hZ + 0.80 });
+
+  } else {
+    // ── West: Facing -gx ──
+    const hZ = 1.34 + headBob;
+    const hX = 0.08 - (isGrazing ? 0.15 : 0);
+    w.box(0.80, 0.42, 0.12, 0.14, { color: IBEX_BELLY, h: 0.14, z: isFleeing ? 1.05 : 0.9 });
+    w.box(0.20 - legSwing, 0.22, 0.16, 0.15, { color: IBEX, h: 0.52 });
+    w.box(0.20 + legSwing, 0.64, 0.16, 0.15, { color: IBEX, h: 0.52 });
+    w.box(0.62 + legSwing, 0.22, 0.16, 0.15, { color: IBEX, h: 0.52 });
+    w.box(0.62 - legSwing, 0.64, 0.16, 0.15, { color: IBEX, h: 0.52 });
+
+    w.box(0.18, 0.20, 0.66, 0.60, { color: IBEX, h: 0.50, z: 0.52 });
+    w.box(0.42, 0.22, 0.44, 0.56, { color: IBEX, h: 0.18, z: 0.86 });
+    w.box(0.18, 0.34, 0.30, 0.32, { color: IBEX, h: 0.52, z: 0.98 + headBob * 0.6 });
+    w.box(hX, 0.32, 0.34, 0.36, { color: IBEX, h: 0.34, z: hZ });
+    w.box(hX - 0.04, 0.38, 0.16, 0.24, { color: IBEX_BELLY, h: 0.16, z: hZ + 0.02 });
+    w.box(hX - 0.04, 0.42, 0.10, 0.16, { color: 0x1c2833ff, h: 0.09, z: hZ + 0.09 });
+    w.box(hX + 0.12, 0.42, 0.12, 0.14, { color: IBEX_BELLY, h: 0.20, z: hZ - 0.18 });
+    w.box(hX + 0.20, 0.30, 0.05, 0.05, { color: 0x1c2833ff, h: 0.06, z: hZ + 0.14 });
+    w.post(hX + 0.30, 0.34, hZ + 0.28, 0.38, IBEX_HORN, 0.055);
+    w.post(hX + 0.30, 0.66, hZ + 0.28, 0.38, IBEX_HORN, 0.055);
+    w.post(hX + 0.52, 0.34, hZ + 0.56, 0.36, IBEX_HORN, 0.05);
+    w.post(hX + 0.52, 0.66, hZ + 0.56, 0.36, IBEX_HORN, 0.05);
+    w.box(hX + 0.56, 0.32, 0.13, 0.12, { color: IBEX_HORN, h: 0.10, z: hZ + 0.80 });
+    w.box(hX + 0.56, 0.60, 0.13, 0.12, { color: IBEX_HORN, h: 0.10, z: hZ + 0.80 });
+  }
+};
+
+export const IBEX_SPRITE: SpriteDef = defineSprite({
+  id: 'ibex', w: 1, d: 1, massing: ibexMassing,
 });
 
 // ── 4. Wolf (Menacing Slate-Grey Apex Stalker with Snapping Fang Bite Lunge) ─────
@@ -1468,6 +1616,7 @@ export const SHADE_SPRITE: SpriteDef = defineSprite({
 export const CREATURE_SPRITES: Record<Creature['species'], SpriteDef> = {
   rabbit: RABBIT_SPRITE,
   deer:   DEER_SPRITE,
+  ibex:   IBEX_SPRITE,
   fox:    FOX_SPRITE,
   wolf:   WOLF_SPRITE,
   troll:  TROLL_SPRITE,

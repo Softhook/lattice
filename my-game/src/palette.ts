@@ -88,6 +88,10 @@ export const RABBIT_EAR   = hex('#f5b8be');
 export const DEER         = hex('#a66a38');
 export const DEER_BELLY   = hex('#e6cfb8');
 export const ANTLER_BONE  = hex('#dcd2b8');
+/** Alpine Ibex — sure-footed high-mountain herbivore: greyed coat, pale belly, dark ridged scimitar horns. */
+export const IBEX         = hex('#8a7a63');
+export const IBEX_BELLY   = hex('#d2c4a8');
+export const IBEX_HORN    = hex('#463f34');
 /** Wolf — predator, low silhouette, dark. */
 export const WOLF         = hex('#424754');
 export const WOLF_MANE    = hex('#6a7282');

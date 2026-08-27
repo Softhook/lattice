@@ -26,7 +26,7 @@ import { SpatialGrid } from './spatial.js';
 
 // ── Species & Declarative Registry ────────────────────────────────────────────
 
-export type Species = 'rabbit' | 'deer' | 'fox' | 'wolf' | 'troll' | 'bear' | 'boar' | 'croc' | 'shade';
+export type Species = 'rabbit' | 'deer' | 'ibex' | 'fox' | 'wolf' | 'troll' | 'bear' | 'boar' | 'croc' | 'shade';
 
 export type DietType = 'herbivore' | 'carnivore' | 'omnivore';
 export type BehaviorArchetype = 'skittish' | 'defensive' | 'territorial' | 'ambush' | 'apex';
@@ -66,6 +66,11 @@ export interface SpeciesDefinition {
    *  mission-conjured monsters (`shade`) share it so a wizard's minions actually threaten a base,
    *  not just whichever player happens to be standing nearby. */
   readonly attacksBuildings?: boolean;
+  /** Whether this species flocks. Herding species (hare, deer, ibex) get a gentle cohesion pull
+   *  toward the centroid of nearby same-species animals in `moveWithSeparation` — so a herd reads
+   *  as a herd instead of a scattered gas — and they propagate alarm: one member entering `flee`
+   *  spooks its herd-mates in `updateOne` even if they never saw the predator themselves. */
+  readonly herds?: boolean;
 }
 
 /** Trait vector. These are the "genes" that evolve each generation. */
@@ -101,6 +106,7 @@ export const SPECIES_REGISTRY: Record<Species, SpeciesDefinition> = {
     predatorThreats: ['fox', 'wolf', 'croc', 'troll'],
     loot: { fiber: 4 },
     fearsFire: true,
+    herds: true,
   },
   deer: {
     species: 'deer',
@@ -122,6 +128,33 @@ export const SPECIES_REGISTRY: Record<Species, SpeciesDefinition> = {
     predatorThreats: ['wolf', 'bear', 'croc', 'troll'],
     loot: { wood: 6, fiber: 8 },
     fearsFire: true,
+    herds: true,
+  },
+  ibex: {
+    species: 'ibex',
+    name: 'Alpine Ibex',
+    icon: '🐐',
+    baseHp: 14,
+    // The resident grazer of the peaks: without it, wolf / bear / troll all live at high
+    // elevation with no prey up there and are forced to descend to the meadows to eat. Wary
+    // (high noticeRange), sure-footed, and a herd animal — and hardy meat for a player willing
+    // to hunt in troll country (see `FOOD_YIELD` in `food.ts`).
+    baseTraits: { speed: 1.5, aggression: 0.12, size: 1.0, fertility: 1.4 },
+    diet: 'herbivore',
+    behavior: 'skittish',
+    preferredBiomes: ['alpine', 'taiga'],
+    elevationRange: [12, 24],
+    initialSpawnCount: 90,
+    minPopulation: 24,
+    maxPopulation: 150,
+    attackDamage: 0,
+    attackRange: 1.2,
+    noticeRange: 10,
+    preyTargets: [],
+    predatorThreats: ['wolf', 'bear', 'troll'],
+    loot: { fiber: 8, stone: 4 },
+    fearsFire: true,
+    herds: true,
   },
   boar: {
     species: 'boar',
@@ -181,7 +214,7 @@ export const SPECIES_REGISTRY: Record<Species, SpeciesDefinition> = {
     attackDamage: 22,
     attackRange: 1.3,
     noticeRange: 9,
-    preyTargets: ['deer', 'rabbit', 'boar'],
+    preyTargets: ['deer', 'rabbit', 'boar', 'ibex'],
     predatorThreats: ['bear', 'troll'],
     loot: { stone: 8, fiber: 10 },
     fearsFire: true,
@@ -227,7 +260,7 @@ export const SPECIES_REGISTRY: Record<Species, SpeciesDefinition> = {
     attackDamage: 44,
     attackRange: 1.7,
     noticeRange: 6,
-    preyTargets: ['deer', 'boar', 'wolf'],
+    preyTargets: ['deer', 'boar', 'wolf', 'ibex'],
     predatorThreats: [],
     loot: { wood: 16, stone: 18, fiber: 16 },
     fearsFire: true,
@@ -248,7 +281,7 @@ export const SPECIES_REGISTRY: Record<Species, SpeciesDefinition> = {
     attackDamage: 36,
     attackRange: 2.3,
     noticeRange: 10,
-    preyTargets: ['deer', 'wolf', 'bear'],
+    preyTargets: ['deer', 'wolf', 'bear', 'ibex'],
     predatorThreats: [],
     loot: { wood: 20, stone: 24, fiber: 12 },
     fearsFire: false,
@@ -320,6 +353,11 @@ export interface Creature {
   fleeDirY: number;
   /** Seconds remaining to keep fleeing after the last threat was seen, so brief dips out of noticeRange don't flip the state every tick. */
   fleeSpookTimer: number;
+  /** Seconds this animal will keep broadcasting alarm to its herd. Set only when it detects a
+   *  *real* threat itself (predator, player, fire) — never by catching a herd-mate's alarm. That
+   *  asymmetry is what stops two spooked deer re-triggering each other's panic forever: the
+   *  herd calms within ~a second of the predator actually leaving. Herding species only. */
+  alarmTimer: number;
   /** Seconds a normally player-indifferent `defensive` predator (the crocodile) stays provoked
    *  and will chase and bite the player who attacked it. Set by `executeAttack` /
    *  `stepProjectiles` on a player hit, counted down in `updateOne`. 0 = back to basking and
@@ -351,6 +389,26 @@ const FLEE_TURN_RATE = 6.0;
 
 /** Seconds a creature keeps fleeing after its last threat sighting, so brushing the edge of noticeRange doesn't flicker the state. */
 const FLEE_SPOOK_DURATION = 0.6;
+
+/** Half-width, in radians, of the fixed per-animal fan added to a flee heading (~46°). Without
+ *  it every animal spooked by the same predator computes a near-identical away-vector and the
+ *  whole herd sprints off as one clump; with it each animal peels off at its own stable angle,
+ *  so a fleeing pack splits into diverging paths. Derived from the creature id (not its RNG
+ *  stream), so a given animal always breaks the same way instead of jittering frame to frame,
+ *  and never so wide that it turns back toward the threat. */
+const FLEE_SCATTER_RADIANS = 0.8;
+
+/** Seconds a herd animal keeps raising the alarm to nearby herd-mates after it last saw a real
+ *  threat itself. Slightly longer than `FLEE_SPOOK_DURATION` so the alarm outlives one animal's
+ *  own flee window and the panic reliably reaches the rest of the herd, but short enough that
+ *  the whole group settles about a second after the predator actually clears out. */
+const ALARM_BROADCAST_SECONDS = 1.1;
+
+/** Weight of a herd-mate's alarm in the flee-heading average, in the same units as a real
+ *  threat's distance vector — roughly "a predator this many tiles away". Enough to trip the
+ *  flee state and turn a startled few into a stampede, not so much that it buries a real,
+ *  closer sighting the animal can see for itself. */
+const ALARM_CONTAGION_WEIGHT = 4.0;
 
 /** Seconds a provoked `defensive` predator (crocodile) stays locked onto the player who hit it.
  *  Long enough that a single arrow means a real fight, short enough that backing off ends it. */
@@ -399,6 +457,7 @@ export function spawnCreature(
     fleeDirX: 0,
     fleeDirY: 0,
     fleeSpookTimer: 0,
+    alarmTimer: 0,
     retaliateTimer: 0,
   };
 }
@@ -646,6 +705,9 @@ function updateOne(
   if (c.retaliateTimer > 0) {
     c.retaliateTimer = Math.max(0, c.retaliateTimer - dt);
   }
+  if (c.alarmTimer > 0) {
+    c.alarmTimer = Math.max(0, c.alarmTimer - dt);
+  }
 
   // Slow natural idle/breathing cadence
   const idleRate = c.species === 'rabbit' ? 0.15 : c.species === 'croc' ? 0.08 : 0.3;
@@ -663,6 +725,10 @@ function updateOne(
   let threatDx = 0;
   let threatDy = 0;
   let threatCount = 0;
+  // True once this animal detects a threat *itself* (fire, player, predator) — as opposed to
+  // only catching a herd-mate's alarm. Gates `alarmTimer` so panic doesn't echo around a herd
+  // indefinitely (see `ALARM_BROADCAST_SECONDS`).
+  let sawRealThreat = false;
 
   // Fire / Light warding: basic predators (wolves, foxes, etc.) and wild beasts are warded off by
   // campfires and bright beacons. Reads the per-tick `WARD_SOURCES` cache, not the raw building list.
@@ -682,6 +748,7 @@ function updateOne(
           threatDx += (dx / d) * weight;
           threatDy += (dy / d) * weight;
           threatCount++;
+          sawRealThreat = true;
         }
         // Immediate singe / burn damage if touching campfire flames directly
         if (src.isFire && d < FIRE_BURN_RADIUS) {
@@ -705,12 +772,21 @@ function updateOne(
         threatDx += dx;
         threatDy += dy;
         threatCount++;
+        sawRealThreat = true;
       }
     }
   }
 
   // Check predator threats via spatial query (defensive creatures flee only when wounded)
   const shouldCheckPredatorThreats = def.behavior === 'skittish' || (def.behavior === 'defensive' && c.hp < c.maxHp * 0.4);
+  // Herd-mates' alarm, accumulated separately from first-hand threats: it's only folded into the
+  // flee heading below if this animal saw nothing itself. An animal that *can* see the predator
+  // flees from what it sees (plus its own scatter fan) and ignores the peer pressure — otherwise
+  // every rabbit in a warren copies the herd-average vector and they clump into one blob instead
+  // of splitting up.
+  let alarmDx = 0;
+  let alarmDy = 0;
+  let alarmCount = 0;
   if (shouldCheckPredatorThreats && def.predatorThreats.length > 0) {
     // Cap the scan: the flee heading is an average of threat vectors, so a handful of the
     // nearest predators settles it — no need to walk every animal in a packed warren.
@@ -727,8 +803,30 @@ function updateOne(
         threatDx += dx;
         threatDy += dy;
         threatCount++;
+        sawRealThreat = true;
+      } else if (def.herds && other.species === c.species && other.alarmTimer > 0) {
+        // A herd-mate that saw a real threat is raising the alarm. `-fleeDir` so this animal
+        // would run the same way the alarmed one is running. Gated on `alarmTimer` (set only by
+        // a first-hand sighting), so second-hand panic can't loop back and self-sustain.
+        alarmDx -= other.fleeDirX;
+        alarmDy -= other.fleeDirY;
+        alarmCount++;
       }
     }
+  }
+
+  // Fold the herd alarm in only for an animal with no threat of its own to run from.
+  if (alarmCount > 0 && !sawRealThreat) {
+    threatDx += (alarmDx / alarmCount) * ALARM_CONTAGION_WEIGHT;
+    threatDy += (alarmDy / alarmCount) * ALARM_CONTAGION_WEIGHT;
+    threatCount++;
+  }
+
+  // A first-hand threat sighting arms this herd animal as an alarm source for the next second
+  // or so; herd-mates read `alarmTimer` above. Only real sightings set it — contagion never
+  // does — so the alarm dies out shortly after the threat itself is gone.
+  if (sawRealThreat && def.herds) {
+    c.alarmTimer = ALARM_BROADCAST_SECONDS;
   }
 
   // If threatened, scatter and FLEE!
@@ -745,8 +843,16 @@ function updateOne(
     const avgThreatDy = threatDy / threatCount;
     const threatDist = Math.sqrt(avgThreatDx * avgThreatDx + avgThreatDy * avgThreatDy); // Tier A: sqrt is exact per spec
     if (threatDist > 0.01) {
-      const rawFleeDx = -avgThreatDx / threatDist;
-      const rawFleeDy = -avgThreatDy / threatDist;
+      const awayX = -avgThreatDx / threatDist;
+      const awayY = -avgThreatDy / threatDist;
+      // Fan the pack out: rotate this animal's escape heading by a fixed offset unique to it
+      // (hashed from its id, so it's stable across ticks) so a fleeing herd diverges instead of
+      // clumping into a single sprinting blob. @tier-b — heading rotation, no sim-state hash.
+      const scatter = ((hash2(c.id, 0x5ca77e, 0) >>> 0) / 4294967296 - 0.5) * 2 * FLEE_SCATTER_RADIANS;
+      const cs = Math.cos(scatter);
+      const sn = Math.sin(scatter);
+      const rawFleeDx = awayX * cs - awayY * sn;
+      const rawFleeDy = awayX * sn + awayY * cs;
       const turn = Math.min(1, FLEE_TURN_RATE * dt);
       c.fleeDirX += (rawFleeDx - c.fleeDirX) * turn;
       c.fleeDirY += (rawFleeDy - c.fleeDirY) * turn;
@@ -950,8 +1056,34 @@ function updateOne(
   if (c.idleTimer <= 0 || isNaN(c.targetGx)) {
     const angle = c.rng.next() * 6.28318; // @tier-b — wander angle, pixels only
     const dist  = 3 + c.rng.next() * 5;
-    const candGx = clamp(Math.round(c.gx + Math.cos(angle) * dist), 8, W - 9); // @tier-b
-    const candGy = clamp(Math.round(c.gy + Math.sin(angle) * dist), 8, H - 9); // @tier-b
+    let candGx = clamp(Math.round(c.gx + Math.cos(angle) * dist), 8, W - 9); // @tier-b
+    let candGy = clamp(Math.round(c.gy + Math.sin(angle) * dist), 8, H - 9); // @tier-b
+
+    // Herd cohesion, waypoint half: a herding animal picking its next wander target biases it
+    // toward the centre of the same-species animals around it. The per-tick force in
+    // `moveWithSeparation` keeps spacing tidy; this is what actually stops a straggler wandering
+    // off for good. The query only runs on a waypoint change (every few seconds per creature),
+    // so it's off the hot path.
+    if (SPECIES_REGISTRY[c.species].herds === true) {
+      const hc = CREATURE_SPATIAL.queryRadius(c.gx, c.gy, 12, 16);
+      let hx = 0;
+      let hy = 0;
+      let hn = 0;
+      for (let q = 0; q < hc; q++) {
+        const oi = CREATURE_SPATIAL.queryBuffer[q];
+        if (oi === undefined) continue;
+        const o = allCreatures[oi];
+        if (o === undefined || o.hp <= 0 || o.id === c.id || o.species !== c.species) continue;
+        hx += o.gx;
+        hy += o.gy;
+        hn++;
+      }
+      if (hn > 0) {
+        candGx = clamp(Math.round(candGx + (hx / hn - candGx) * 0.5), 8, W - 9);
+        candGy = clamp(Math.round(candGy + (hy / hn - candGy) * 0.5), 8, H - 9);
+      }
+    }
+
     if (!fearsFire || !isInsideWardSanctuary(candGx, candGy, 4.0)) {
       c.targetGx  = candGx;
       c.targetGy  = candGy;
@@ -999,10 +1131,23 @@ function moveWithSeparation(
 
   // 1. Soft Boid Separation force (accelerated via local spatial query, capped — a dozen of the
   //    closest neighbors is more than enough to push out of a crowd, and this loop runs for
-  //    every moving creature every tick).
+  //    every moving creature every tick). For a herding species that ISN'T currently fleeing the
+  //    same neighbor walk also accumulates the centroid of nearby same-species animals, so a
+  //    gentle cohesion pull can be applied below — one query does both, and the radius is
+  //    widened past the tight separation band so cohesion can see the rest of the herd.
+  //
+  //    Cohesion is deliberately off during flee: the herd centroid usually sits *between* a
+  //    fleeing animal and the threat it's running from, so pulling toward it fights the escape
+  //    and, in a packed warren, momentarily swings the movement vector backward — which reads
+  //    as the animal jerkily "looking back" mid-sprint. A fleeing herd stays together anyway
+  //    because its members all get near-identical threat vectors.
+  const cohesion = SPECIES_REGISTRY[c.species].herds === true && c.state !== 'flee';
   let sepX = 0;
   let sepY = 0;
-  const nearbyBoids = CREATURE_SPATIAL.queryRadius(c.gx, c.gy, 1.2, BOID_SCAN_CAP);
+  let cohX = 0;
+  let cohY = 0;
+  let herdN = 0;
+  const nearbyBoids = CREATURE_SPATIAL.queryRadius(c.gx, c.gy, cohesion ? 4.0 : 1.2, BOID_SCAN_CAP);
   for (let q = 0; q < nearbyBoids; q++) {
     const otherIdx = CREATURE_SPATIAL.queryBuffer[q];
     if (otherIdx === undefined) continue;
@@ -1016,6 +1161,30 @@ function moveWithSeparation(
       const strength = (1.2 - dist) / 1.2;
       sepX += (ox / dist) * strength * 0.35;
       sepY += (oy / dist) * strength * 0.35;
+    }
+    if (cohesion && other.species === c.species) {
+      cohX += other.gx;
+      cohY += other.gy;
+      herdN++;
+    }
+  }
+
+  // 1b. Herd cohesion: steer toward the centroid of nearby herd-mates, but only once this
+  //     animal has drifted a couple of tiles clear of it — inside a tight cluster cohesion and
+  //     separation would just fight. Gentle relative to the unit target vector it's added to,
+  //     so it biases a wander or forage path back toward the group without ever pinning the
+  //     animal to a single plant. (Never runs while fleeing — see `cohesion` above.)
+  if (herdN > 0) {
+    const hx = cohX / herdN - c.gx;
+    const hy = cohY / herdN - c.gy;
+    const hd = Math.sqrt(hx * hx + hy * hy); // Tier A: sqrt is exact per spec
+    if (hd > 1.5) {
+      // Ramp with distance: a gentle bias while loosely grouped, firming up to roughly the
+      // strength of the target vector itself once an animal is a long way out, so a genuinely
+      // separated herd-mate hurries back rather than trickling.
+      const pull = Math.min(1.1, (hd - 1.5) * 0.18);
+      sepX += (hx / hd) * pull;
+      sepY += (hy / hd) * pull;
     }
   }
 
@@ -1034,19 +1203,30 @@ function moveWithSeparation(
   const dirX = moveX / moveLen;
   const dirY = moveY / moveLen;
 
-  // 3. Directional Hysteresis: prevent rapid facing oscillation along diagonal movement
+  // 3. Directional Hysteresis: prevent rapid facing oscillation along diagonal movement.
+  //    While fleeing, face the smoothed flee heading (`fleeDir`) rather than the actual movement
+  //    vector: in a packed warren the separation shove between fleeing animals can briefly point
+  //    `dir` back toward the threat, which showed up as a jerky "look back" mid-sprint. `fleeDir`
+  //    is already turn-rate-limited and scatter-fanned, so facing off it stays smooth and still
+  //    matches the direction the animal is actually escaping.
+  let faceX = dirX;
+  let faceY = dirY;
+  if (c.state === 'flee' && (c.fleeDirX !== 0 || c.fleeDirY !== 0)) {
+    faceX = c.fleeDirX;
+    faceY = c.fleeDirY;
+  }
   const isCurrentlyHorizontal = c.facing === 'e' || c.facing === 'w';
   if (isCurrentlyHorizontal) {
-    if (Math.abs(dirY) > Math.abs(dirX) * 1.35 && Math.abs(dirY) > 0.15) {
-      c.facing = dirY > 0 ? 's' : 'n';
-    } else if (Math.abs(dirX) > 0.1) {
-      c.facing = dirX > 0 ? 'e' : 'w';
+    if (Math.abs(faceY) > Math.abs(faceX) * 1.35 && Math.abs(faceY) > 0.15) {
+      c.facing = faceY > 0 ? 's' : 'n';
+    } else if (Math.abs(faceX) > 0.1) {
+      c.facing = faceX > 0 ? 'e' : 'w';
     }
   } else {
-    if (Math.abs(dirX) > Math.abs(dirY) * 1.35 && Math.abs(dirX) > 0.15) {
-      c.facing = dirX > 0 ? 'e' : 'w';
-    } else if (Math.abs(dirY) > 0.1) {
-      c.facing = dirY > 0 ? 's' : 'n';
+    if (Math.abs(faceX) > Math.abs(faceY) * 1.35 && Math.abs(faceX) > 0.15) {
+      c.facing = faceX > 0 ? 'e' : 'w';
+    } else if (Math.abs(faceY) > 0.1) {
+      c.facing = faceY > 0 ? 's' : 'n';
     }
   }
 

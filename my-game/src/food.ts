@@ -24,6 +24,7 @@ import { feedPlayer, type Player } from './players.js';
 export const FOOD_YIELD: Partial<Record<Species, number>> = {
   rabbit: 16,
   deer: 42,
+  ibex: 38,
   boar: 48,
 };
 

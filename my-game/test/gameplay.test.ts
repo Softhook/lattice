@@ -164,10 +164,11 @@ describe('Verdant Gameplay Logic', () => {
     const initialCount = creatures.length;
     expect(initialCount).toBeGreaterThan(0);
 
-    // Verify all 8 species are present in the world ecosystem
+    // Verify all 9 world-gen species are present in the world ecosystem (shade is mission-only)
     const speciesPresent = new Set(creatures.map((c) => c.species));
     expect(speciesPresent.has('rabbit')).toBe(true);
     expect(speciesPresent.has('deer')).toBe(true);
+    expect(speciesPresent.has('ibex')).toBe(true);
     expect(speciesPresent.has('boar')).toBe(true);
     expect(speciesPresent.has('fox')).toBe(true);
     expect(speciesPresent.has('wolf')).toBe(true);
@@ -183,6 +184,155 @@ describe('Verdant Gameplay Logic', () => {
       expect(Number.isFinite(c.gy)).toBe(true);
       expect(Number.isFinite(c.hp)).toBe(true);
     }
+  });
+
+  it('herding prey propagate alarm — one deer bolting spooks the whole herd (contagion)', () => {
+    const world = createWorld(42);
+    const [p1, p2] = createPlayers();
+    p1.gx = -100; // keep players out of it entirely
+    p2.gx = -100;
+    const flora = populateFlora(42, world);
+
+    // First inland walkable patch, well clear of the map edge.
+    let bx = 0;
+    let by = 0;
+    outer: for (let y = 60; y < H - 60; y++) {
+      for (let x = 60; x < W - 60; x++) {
+        if (isWalkable(world, x, y) && isWalkable(world, x + 1, y) && isWalkable(world, x, y + 1)) {
+          bx = x; by = y; break outer;
+        }
+      }
+    }
+
+    // A tight herd of deer and NOT ONE predator anywhere on the map.
+    const herd = [
+      spawnCreature('deer', bx, by, 42),
+      spawnCreature('deer', bx + 0.8, by, 42),
+      spawnCreature('deer', bx + 1.6, by, 42),
+      spawnCreature('deer', bx + 0.8, by + 0.8, 42),
+    ];
+    // Panic exactly one of them by hand, as if it alone caught a scent: fleeing, and raising
+    // the alarm (`alarmTimer`) the way a first-hand predator sighting would.
+    herd[0]!.state = 'flee';
+    herd[0]!.fleeSpookTimer = 0.6;
+    herd[0]!.alarmTimer = 1.0;
+    herd[0]!.fleeDirX = 1;
+    herd[0]!.fleeDirY = 0;
+
+    const events = createCreatureEvents();
+    for (let i = 0; i < 15; i++) {
+      updateCreatures(herd, world, [p1, p2], flora, [], 0, 1 / 60, events);
+    }
+
+    // The alarm has spread with no predator ever present — the herd-mates are fleeing purely
+    // because a neighbour is.
+    const fleeing = herd.filter((c) => c.state === 'flee').length;
+    expect(fleeing).toBeGreaterThanOrEqual(3);
+
+    // And once the initiator's alarm lapses (no real threat to renew it), the panic burns out
+    // instead of the herd re-triggering each other forever.
+    for (let i = 0; i < 240; i++) {
+      updateCreatures(herd, world, [p1, p2], flora, [], 0, 1 / 60, events);
+    }
+    expect(herd.every((c) => c.state !== 'flee')).toBe(true);
+  });
+
+  it('herding prey show cohesion — a lone deer drifts back toward its herd', () => {
+    const world = createWorld(42);
+    const [p1, p2] = createPlayers();
+    p1.gx = -100;
+    p2.gx = -100;
+    // No flora: isolate the wander + cohesion steering from the foraging drift that would
+    // otherwise dominate where the deer walk.
+    const flora: never[] = [];
+
+    let bx = 0;
+    let by = 0;
+    outer: for (let y = 80; y < H - 80; y++) {
+      for (let x = 80; x < W - 80; x++) {
+        if (isWalkable(world, x, y) && isWalkable(world, x + 4, y) && isWalkable(world, x, y + 4)) {
+          bx = x; by = y; break outer;
+        }
+      }
+    }
+
+    // A compact 4-deer herd plus one straggler 8 tiles off.
+    const herd = [
+      spawnCreature('deer', bx, by, 7),
+      spawnCreature('deer', bx + 0.6, by, 7),
+      spawnCreature('deer', bx, by + 0.6, 7),
+      spawnCreature('deer', bx + 0.6, by + 0.6, 7),
+      spawnCreature('deer', bx + 8, by, 7),
+    ];
+    const straggler = herd[4]!;
+    const centroidDist = () => {
+      let cx = 0;
+      let cy = 0;
+      for (let i = 0; i < 4; i++) { cx += herd[i]!.gx; cy += herd[i]!.gy; }
+      cx /= 4; cy /= 4;
+      return Math.hypot(straggler.gx - cx, straggler.gy - cy);
+    };
+
+    const before = centroidDist();
+    const events = createCreatureEvents();
+    let closest = before;
+    let farthest = 0;
+    for (let i = 0; i < 3600; i++) {
+      updateCreatures(herd, world, [p1, p2], flora, [], 0, 1 / 60, events);
+      const d = centroidDist();
+      if (d < closest) closest = d;
+      if (i > 1200 && d > farthest) farthest = d;
+    }
+
+    // Cohesion actually reeled the straggler into the herd at some point …
+    expect(closest).toBeLessThan(2.5);
+    // … and it never wandered off past where it started (without cohesion a lone wandering deer
+    // walks clean away — 10+ tiles out).
+    expect(farthest).toBeLessThan(before);
+  }, 20000);
+
+  it('a spooked herd fans out — flee headings diverge instead of clumping into one vector', () => {
+    const world = createWorld(42);
+    const [p1, p2] = createPlayers();
+    const flora: never[] = [];
+
+    let bx = 0;
+    let by = 0;
+    outer: for (let y = 60; y < H - 60; y++) {
+      for (let x = 60; x < W - 60; x++) {
+        if (isWalkable(world, x, y) && isWalkable(world, x + 2, y) && isWalkable(world, x, y + 2)) {
+          bx = x; by = y; break outer;
+        }
+      }
+    }
+
+    // A tight cluster of rabbits and one player right on top of them, so every rabbit is
+    // spooked by the exact same threat at the exact same bearing.
+    const herd = Array.from({ length: 8 }, (_, i) =>
+      spawnCreature('rabbit', bx + (i % 3) * 0.4, by + Math.floor(i / 3) * 0.4, 3),
+    );
+    p1.gx = bx - 2;
+    p1.gy = by - 2;
+    p1.respawnTimer = 0;
+    p2.gx = -100;
+
+    const events = createCreatureEvents();
+    for (let i = 0; i < 40; i++) {
+      updateCreatures(herd, world, [p1, p2], flora, [], 0, 1 / 60, events);
+    }
+
+    expect(herd.every((c) => c.state === 'flee')).toBe(true);
+
+    // Widest angle between any two flee headings. Boid separation alone leaves this near 0 (they
+    // all compute the same away-vector); the per-animal scatter fan opens it right up.
+    let widest = 0;
+    for (let a = 0; a < herd.length; a++) {
+      for (let b = a + 1; b < herd.length; b++) {
+        const dot = herd[a]!.fleeDirX * herd[b]!.fleeDirX + herd[a]!.fleeDirY * herd[b]!.fleeDirY;
+        widest = Math.max(widest, Math.acos(Math.max(-1, Math.min(1, dot))));
+      }
+    }
+    expect(widest).toBeGreaterThan(0.5);
   });
 
   it('evolution holds each species to its ceiling — the hare never monocultures the continent', () => {
@@ -282,7 +432,7 @@ describe('Verdant Gameplay Logic', () => {
 
     // 3. Species Registry
     const speciesKeys = Object.keys(SPECIES_REGISTRY);
-    expect(speciesKeys.length).toBe(9);
+    expect(speciesKeys.length).toBe(10);
     for (const key of speciesKeys) {
       const s = SPECIES_REGISTRY[key as keyof typeof SPECIES_REGISTRY];
       expect(s.baseHp).toBeGreaterThan(0);
