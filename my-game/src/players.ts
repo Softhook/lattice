@@ -664,15 +664,17 @@ export function facingTile(player: Player): TileCoord {
  * before `executeAttack` reads `aimX`/`aimY`.
  *
  * - Any movement key held → aim runs along that input, so holding a diagonal (e.g. W+D) fires
- *   NE. The vector is normalised so a diagonal shot isn't ~1.4x faster than an axis one.
+ *   NE. The vector is normalized so a diagonal shot isn't ~1.4x faster than an axis one — the
+ *   `0.7071` diagonal factor is the same one `movePlayer` uses for diagonal walk speed.
  * - Nothing held → aim collapses back to the 4-way `facing`, i.e. wherever the body last turned.
  *
  * The facing branch never yields `(0, 0)`, so combat can treat `(0, 0)` as "never aimed" and use
  * `facing` directly — which is what keeps the unit tests that poke `player.facing` by hand green.
+ * Pure Tier A arithmetic: multiply only, no transcendentals, so a replay lands on the same shot.
  */
 export function setAttackAim(player: Player, inputDx: number, inputDy: number): void {
   if (inputDx !== 0 || inputDy !== 0) {
-    const inv = inputDx !== 0 && inputDy !== 0 ? 0.70710678 : 1;
+    const inv = inputDx !== 0 && inputDy !== 0 ? 0.7071 : 1;
     player.aimX = inputDx * inv;
     player.aimY = inputDy * inv;
     return;
@@ -681,9 +683,9 @@ export function setAttackAim(player: Player, inputDx: number, inputDy: number): 
   player.aimY = player.facing === 's' ? 1 : player.facing === 'n' ? -1 : 0;
 }
 
-/** Classify a stylised aim vector (+x = east, +y = south) into one of the eight compass
+/** Classify a stylized aim vector (+x = east, +y = south) into one of the eight compass
  *  directions. Sign/magnitude only — no `atan2` — so it stays cheap and exact. The 0.38 gate
- *  cleanly splits an axis component (0 or ±1) from a normalised diagonal one (±0.707). */
+ *  cleanly splits an axis component (0 or ±1) from a normalized diagonal one (±0.7071). */
 export function aimDirFromVec(x: number, y: number): AimDir {
   const ax = x < 0 ? -x : x;
   const ay = y < 0 ? -y : y;

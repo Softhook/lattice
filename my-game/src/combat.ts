@@ -120,10 +120,11 @@ export interface VisualFx {
 
 export const MAX_FX = 256;
 
-/** Screen-space sweep angle for a slash arc per aim direction — the stylised mapping the FX
+/** Screen-space sweep angle for a slash arc per aim direction — the stylized mapping the FX
  *  renderer expects (east = 0, south = +π/2, clockwise), extended from the original four axes to
- *  all eight compass points. Shared with `render.ts`. */
-export const AIM_ARC_ANGLE: Record<AimDir, number> = {
+ *  all eight compass points. Render-only (feeds `Math.cos`/`Math.sin` for pixels), never hashed.
+ *  Shared with `render.ts`. */
+export const AIM_ARC_ANGLE: Readonly<Record<AimDir, number>> = {
   e: 0,
   se: Math.PI * 0.25,
   s: Math.PI * 0.5,
@@ -503,9 +504,11 @@ export function executeAttack(
     const dx = c.gx - player.gx;
     const dy = c.gy - player.gy;
     const dist = Math.sqrt(dx * dx + dy * dy); // Tier A: sqrt is exact per spec — melee hit-check distance
-    if (dist <= weapon.reach && dist > 0) {
-      const alignment = (dx * aimX + dy * aimY) / dist; // cos of the angle off the aim line
-      if (alignment >= MELEE_CONE_COS && dist < bestDist) {
+    // `bestDist` starts at the weapon's reach and only shrinks, so `dist < bestDist` subsumes the
+    // reach test; `dist > 0` guards the divide against a creature sharing the player's tile.
+    if (dist > 0 && dist < bestDist) {
+      const alignment = (dx * aimX + dy * aimY) / dist; // cos of angle between target bearing and aim
+      if (alignment >= MELEE_CONE_COS) {
         bestDist = dist;
         targetCreature = c;
       }

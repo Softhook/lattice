@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { heightAt } from '@latticekit/iso';
 import { createWorld } from '../src/world.js';
 
-import { createPlayers, canAffordWeapon, craftWeapon, cycleWeapon, craftNextAvailable } from '../src/players.js';
+import { createPlayers, canAffordWeapon, craftWeapon, cycleWeapon, craftNextAvailable, setAttackAim, aimDirFromVec } from '../src/players.js';
 import {
   WEAPONS,
   createProjectilePool,
@@ -93,6 +93,54 @@ describe('Combat & Weapon Crafting System', () => {
     expect(creatures[0]?.hp).toBeLessThanOrEqual(0);
     // Wolf dropped loot into inventory
     expect(p1.inventory.stone).toBeGreaterThan(initialStone);
+  });
+
+  it('aims melee and arrows on the four diagonals, not just the axes', () => {
+    const [p1] = createPlayers();
+    p1.gx = 10;
+    p1.gy = 10;
+    p1.weapon = 'sword';
+    p1.facing = 'e';
+
+    // A target north-north-east of the player: outside the east swing's arc.
+    const target = spawnCreature('wolf', 10.1, 9.0, 7);
+    target.hp = 60;
+    const pool = createProjectilePool();
+
+    // No movement held, body facing east → aim falls back to 'e' and the swing misses.
+    setAttackAim(p1, 0, 0);
+    expect(executeAttack(p1, [target], pool, 0).hit).toBe(false);
+    expect(target.hp).toBe(60);
+
+    // Holding W+D this frame aims the same swing north-east and it connects.
+    setAttackAim(p1, 1, -1);
+    expect(aimDirFromVec(p1.aimX, p1.aimY)).toBe('ne');
+    const len = Math.sqrt(p1.aimX * p1.aimX + p1.aimY * p1.aimY);
+    expect(len).toBeGreaterThan(0.98); // ~unit length: a diagonal must not out-range an axis
+    expect(len).toBeLessThan(1.02);
+    expect(executeAttack(p1, [target], pool, 0).hit).toBe(true);
+    expect(target.hp).toBeLessThan(60);
+
+    // Bow fires along the same diagonal: both velocity components set and balanced.
+    p1.weapon = 'bow';
+    setAttackAim(p1, 1, -1);
+    expect(launchArrow(pool, p1, 0)).toBe(true);
+    const arrow = pool.find((pr) => pr.live);
+    expect(arrow?.vx).toBeGreaterThan(0);
+    expect(arrow?.vy).toBeLessThan(0);
+    expect(Math.abs((arrow?.vx ?? 0) + (arrow?.vy ?? 0))).toBeLessThan(0.001); // |vx| === |vy|
+  });
+
+  it('collapses aim back to the 4-way facing when no movement key is held', () => {
+    const [p1] = createPlayers();
+    p1.facing = 'w';
+    setAttackAim(p1, 0, 0);
+    expect(p1.aimX).toBe(-1);
+    expect(p1.aimY).toBe(0);
+    p1.facing = 'n';
+    setAttackAim(p1, 0, 0);
+    expect(p1.aimX).toBe(0);
+    expect(p1.aimY).toBe(-1);
   });
 
   it('launches and simulates 3D ballistic projectiles (Arrows)', () => {
