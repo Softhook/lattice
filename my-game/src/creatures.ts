@@ -86,8 +86,8 @@ export const SPECIES_REGISTRY: Record<Species, SpeciesDefinition> = {
     behavior: 'skittish',
     preferredBiomes: ['meadow', 'wetlands', 'taiga'],
     elevationRange: [2, 16],
-    initialSpawnCount: 120,
-    minPopulation: 30,
+    initialSpawnCount: 240,
+    minPopulation: 60,
     attackDamage: 0,
     attackRange: 1.0,
     noticeRange: 8,
@@ -106,8 +106,8 @@ export const SPECIES_REGISTRY: Record<Species, SpeciesDefinition> = {
     behavior: 'skittish',
     preferredBiomes: ['meadow', 'wetlands'],
     elevationRange: [3, 16],
-    initialSpawnCount: 75,
-    minPopulation: 20,
+    initialSpawnCount: 150,
+    minPopulation: 40,
     attackDamage: 0,
     attackRange: 1.2,
     noticeRange: 8,
@@ -126,8 +126,8 @@ export const SPECIES_REGISTRY: Record<Species, SpeciesDefinition> = {
     behavior: 'defensive',
     preferredBiomes: ['meadow', 'wetlands'],
     elevationRange: [2, 14],
-    initialSpawnCount: 65,
-    minPopulation: 16,
+    initialSpawnCount: 130,
+    minPopulation: 32,
     attackDamage: 24,
     attackRange: 1.3,
     noticeRange: 7,
@@ -146,8 +146,8 @@ export const SPECIES_REGISTRY: Record<Species, SpeciesDefinition> = {
     behavior: 'skittish',
     preferredBiomes: ['meadow', 'taiga', 'badlands', 'wetlands', 'coastal'],
     elevationRange: [2, 18],
-    initialSpawnCount: 55,
-    minPopulation: 14,
+    initialSpawnCount: 110,
+    minPopulation: 28,
     attackDamage: 18,
     attackRange: 1.3,
     noticeRange: 8,
@@ -166,8 +166,8 @@ export const SPECIES_REGISTRY: Record<Species, SpeciesDefinition> = {
     behavior: 'apex',
     preferredBiomes: ['taiga', 'alpine'],
     elevationRange: [6, 22],
-    initialSpawnCount: 45,
-    minPopulation: 10,
+    initialSpawnCount: 90,
+    minPopulation: 20,
     attackDamage: 22,
     attackRange: 1.3,
     noticeRange: 9,
@@ -186,8 +186,8 @@ export const SPECIES_REGISTRY: Record<Species, SpeciesDefinition> = {
     behavior: 'ambush',
     preferredBiomes: ['wetlands', 'coastal'],
     elevationRange: [1, 5],
-    initialSpawnCount: 40,
-    minPopulation: 10,
+    initialSpawnCount: 80,
+    minPopulation: 20,
     attackDamage: 32,
     attackRange: 1.3,
     noticeRange: 7,
@@ -206,8 +206,8 @@ export const SPECIES_REGISTRY: Record<Species, SpeciesDefinition> = {
     behavior: 'territorial',
     preferredBiomes: ['alpine', 'taiga'],
     elevationRange: [7, 22],
-    initialSpawnCount: 30,
-    minPopulation: 8,
+    initialSpawnCount: 60,
+    minPopulation: 16,
     attackDamage: 44,
     attackRange: 1.7,
     noticeRange: 6,
@@ -226,8 +226,8 @@ export const SPECIES_REGISTRY: Record<Species, SpeciesDefinition> = {
     behavior: 'apex',
     preferredBiomes: ['alpine'],
     elevationRange: [14, 24],
-    initialSpawnCount: 20,
-    minPopulation: 6,
+    initialSpawnCount: 40,
+    minPopulation: 12,
     attackDamage: 36,
     attackRange: 2.3,
     noticeRange: 10,
@@ -310,7 +310,7 @@ export interface Creature {
 export const GENERATION_TICKS = 600;
 
 /** Maximum creatures alive at once across the massive continent. */
-export const MAX_CREATURES = 600;
+export const MAX_CREATURES = 1200;
 
 /** Mutation magnitude per generation (trait drift). */
 const MUTATION = 0.08;
@@ -970,6 +970,38 @@ function moveWithSeparation(
   }
 }
 
+/**
+ * Nudge a creature clear of solid buildings, searching outward in expanding square rings for
+ * the nearest open tile. A one-off relocation, not part of the hot 60 Hz path — `main.ts` calls
+ * this once per creature right after restoring a save's buildings, because creatures are never
+ * persisted (see `storage.ts`): they're re-derived from `worldSeed` alone on every load, at fixed
+ * deterministic tiles, *before* that save's buildings are restored on top of them. Without this,
+ * a creature whose deterministic spawn tile coincides with a wall the player built last session
+ * reappears standing inside that wall on every single load of the save, not just once.
+ */
+export function relocateClearOfBuildings(c: Creature, buildings: readonly Building[], world: WorldTerrain): void {
+  const startX = Math.floor(c.gx);
+  const startY = Math.floor(c.gy);
+  if (isWalkable(world, startX, startY) && !isTileOccupiedBySolidBuilding(startX, startY, buildings, 'animal')) return;
+
+  const MAX_RADIUS = 12;
+  for (let r = 1; r <= MAX_RADIUS; r++) {
+    for (let dx = -r; dx <= r; dx++) {
+      for (let dy = -r; dy <= r; dy++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue; // only this ring's perimeter
+        const gx = startX + dx;
+        const gy = startY + dy;
+        if (gx < 2 || gy < 2 || gx >= W - 2 || gy >= H - 2) continue;
+        if (isWalkable(world, gx, gy) && !isTileOccupiedBySolidBuilding(gx, gy, buildings, 'animal')) {
+          c.gx = gx + 0.5;
+          c.gy = gy + 0.5;
+          return;
+        }
+      }
+    }
+  }
+}
+
 // ── Evolution ──────────────────────────────────────────────────────────────────
 
 /**
@@ -981,6 +1013,7 @@ export function evolveGeneration(
   creatures: Creature[],
   worldSeed: number,
   world: WorldTerrain,
+  buildings: readonly Building[],
 ): void {
   // Remove dead creatures
   let i = creatures.length;
@@ -1021,7 +1054,12 @@ export function evolveGeneration(
       const rng = createRng(hash2(worldSeed, n + 1, current * 17 + 5));
       const gx = Math.floor(12 + rng.next() * (W - 24));
       const gy = Math.floor(12 + rng.next() * (H - 24));
-      if (isWalkable(world, gx, gy)) {
+      // Population-floor replenishment runs continuously during real play, when a player's
+      // buildings already exist — without the occupancy check, a species dipping below its
+      // floor could materialize a fresh rabbit/wolf/whatever directly inside a walled base. No
+      // wall was ever crossed, but from the player's side of it that's indistinguishable from
+      // "a creature just walked through my wall."
+      if (isWalkable(world, gx, gy) && !isTileOccupiedBySolidBuilding(gx, gy, buildings, 'animal')) {
         toAdd.push(spawnCreature(def.species, gx, gy, worldSeed));
       }
     }

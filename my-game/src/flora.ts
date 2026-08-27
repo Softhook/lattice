@@ -1145,7 +1145,14 @@ export function findClosestEdibleFlora(
 
 let regrowthTimer = 0;
 
-/** Slowly regrow small flora (flowers, mushrooms, bushes) in the ecosystem. */
+/**
+ * The only flora kinds that ever come back. Rocks and stone are deliberately excluded
+ * and must never be added here: boulders and rock spires are a finite resource — once
+ * mined they are gone for good, so the world slowly, permanently runs out of stone.
+ */
+const REGROWABLE_KINDS = ['flowers', 'bush', 'mushroom'] as const;
+
+/** Slowly regrow small, soft flora (flowers, mushrooms, bushes) in the ecosystem. Never rocks. */
 export function tickFloraRegrowth(
   seed: number,
   flora: FloraItem[],
@@ -1169,7 +1176,7 @@ export function tickFloraRegrowth(
   if (FLORA_SPATIAL.queryRadius(gx, gy, 0.8) > 0) return;
 
   const roll = rng.next();
-  const kind: FloraKind = roll < 0.5 ? 'flowers' : roll < 0.8 ? 'bush' : 'mushroom';
+  const kind: FloraKind = roll < 0.5 ? REGROWABLE_KINDS[0] : roll < 0.8 ? REGROWABLE_KINDS[1] : REGROWABLE_KINDS[2];
 
   const newIdx = flora.length;
   flora.push({

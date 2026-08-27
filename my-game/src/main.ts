@@ -32,6 +32,7 @@ import {
   evolveGeneration,
   GENERATION_TICKS,
   SPECIES_REGISTRY,
+  relocateClearOfBuildings,
 } from './creatures.js';
 import {
   placeMissionSites,
@@ -211,6 +212,17 @@ if (opened.source === 'save' && opened.state && opened.state.p1 && opened.state.
       const sb = s.buildings[i];
       if (sb !== undefined && sb.hp > 0) {
         buildings.push(restoreBuilding(sb.kind, sb.gx, sb.gy, sb.hp, sb.maxHp, world));
+      }
+    }
+
+    // Creatures were populated from SEED alone, above, before these buildings existed — nudge
+    // clear any that landed on a tile the player has since built on. See
+    // `relocateClearOfBuildings`'s doc comment for why this has to run here rather than at
+    // `populateWorld` time.
+    if (buildings.length > 0) {
+      for (let i = 0; i < creatures.length; i++) {
+        const c = creatures[i];
+        if (c !== undefined) relocateClearOfBuildings(c, buildings, world);
       }
     }
   }
@@ -596,7 +608,7 @@ loop.onUpdate((dt, tick) => {
   // ── Evolution ─────────────────────────────────────────────────────────────────
   tickCount++;
   if (tickCount % GENERATION_TICKS === 0) {
-    evolveGeneration(creatures, SEED, world);
+    evolveGeneration(creatures, SEED, world, buildings);
   }
 
   // ── Player regen & respawn ────────────────────────────────────────────────────

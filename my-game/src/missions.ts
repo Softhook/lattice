@@ -23,7 +23,7 @@ import { createRng, hash2 } from '@latticekit/core';
 import type { WorldTerrain, BiomeKind } from './world.js';
 import { W, H, isWalkable, getBiomeAt } from './world.js';
 import type { Building, BuildingKind } from './buildings.js';
-import { restoreBuilding, hpFor } from './buildings.js';
+import { restoreBuilding, hpFor, isTileOccupiedBySolidBuilding } from './buildings.js';
 import type { Creature, Species } from './creatures.js';
 import { spawnCreature } from './creatures.js';
 import type { Player } from './players.js';
@@ -334,6 +334,10 @@ export function updateMissions(
         const dist = 2.2 + rng.next() * def.spawnRadius;
         const sx = Math.min(W - 3, Math.max(2, cx + Math.cos(angle) * dist)); // @tier-b
         const sy = Math.min(H - 3, Math.max(2, cy + Math.sin(angle) * dist)); // @tier-b
+        // A player who walls off the tower itself (a reasonable containment tactic) shouldn't
+        // find monsters spawning inside that ring — skip this slot if the roll landed on a
+        // blocked tile; the next wave rolls fresh angles and tries again.
+        if (isTileOccupiedBySolidBuilding(Math.floor(sx), Math.floor(sy), buildings, 'animal')) continue;
         const monster = spawnCreature(def.monsterSpecies, sx, sy, worldSeed);
         creatures.push(monster);
         m.monsterIds.push(monster.id);

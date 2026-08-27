@@ -19,7 +19,7 @@ import { SPECIES_REGISTRY, type Species, type Creature } from './creatures.js';
 import type { Player } from './players.js';
 import { facingTile, triggerPlayerAction, isInForwardCone } from './players.js';
 import type { Building } from './buildings.js';
-import { isMissionStructure, BUILDING_REGISTRY } from './buildings.js';
+import { isMissionStructure, BUILDING_REGISTRY, isTileOccupiedBySolidBuilding } from './buildings.js';
 
 export type WeaponKind = 'hands' | 'axe' | 'sword' | 'bow';
 
@@ -374,6 +374,27 @@ export interface AttackResult {
   msg: string;
 }
 
+/** Knockback substep count. A hit weapon's knockback (axe: 1.2 tiles) can exceed a wall's own
+ *  1-tile thickness, so a single unchecked displacement can shove a creature standing next to a
+ *  wall straight through it — the bug this function exists to close. Sweeping in fixed
+ *  substeps, each checked against building collision, catches both a knockback landing *inside*
+ *  a wall tile and one strong enough to clear a thin wall in a single hop; a plain "check only
+ *  the final tile" version would miss the second case. */
+const KNOCKBACK_STEPS = 8;
+
+/** Displace a creature by (dx, dy) tiles in place, stopping at the last substep that doesn't
+ *  land on a solid building. See `KNOCKBACK_STEPS`'s doc comment for why this isn't a single
+ *  clamped jump. */
+function applyKnockback(c: Creature, dx: number, dy: number, buildings: readonly Building[]): void {
+  for (let i = 0; i < KNOCKBACK_STEPS; i++) {
+    const nx = clamp(c.gx + dx / KNOCKBACK_STEPS, 2, W - 3);
+    const ny = clamp(c.gy + dy / KNOCKBACK_STEPS, 2, H - 3);
+    if (isTileOccupiedBySolidBuilding(Math.floor(nx), Math.floor(ny), buildings, 'animal')) break;
+    c.gx = nx;
+    c.gy = ny;
+  }
+}
+
 /** Perform an attack with the player's equipped weapon and trigger animations & effects.
  *  `buildings` defaults to empty — callers that only exercise creature combat (most of the unit
  *  suite) don't need to know mission structures exist. */
@@ -464,8 +485,7 @@ export function executeAttack(
       case 'e': kx = weapon.knockback;  break;
       case 'w': kx = -weapon.knockback; break;
     }
-    targetCreature.gx = clamp(targetCreature.gx + kx, 2, W - 3);
-    targetCreature.gy = clamp(targetCreature.gy + ky, 2, H - 3);
+    applyKnockback(targetCreature, kx, ky, buildings);
     targetCreature.idleTimer = 0.4;
     targetCreature.state = SPECIES_REGISTRY[targetCreature.species].behavior === 'apex' ? 'chase' : 'flee';
 
@@ -600,8 +620,7 @@ export function stepProjectiles(
         c.hurtTimer = 0.25; // Trigger hit flinch
         // Knockback along projectile vector
         const mag = Math.sqrt(p.vx * p.vx + p.vy * p.vy) || 1; // Tier A: sqrt is exact per spec
-        c.gx = clamp(c.gx + (p.vx / mag) * 0.6, 2, W - 3);
-        c.gy = clamp(c.gy + (p.vy / mag) * 0.6, 2, H - 3);
+        applyKnockback(c, (p.vx / mag) * 0.6, (p.vy / mag) * 0.6, buildings);
         c.idleTimer = 0.3;
         c.state = SPECIES_REGISTRY[c.species].behavior === 'apex' ? 'chase' : 'flee';
 
