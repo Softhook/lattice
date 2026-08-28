@@ -16,6 +16,7 @@ import {
   isoTile,
   drawSprite,
   drawGhost,
+  drawSpecter,
   drawFootprint,
   SELECT_LIFT,
   renderFrame,
@@ -35,7 +36,9 @@ import {
   DepthSorter,
   footprintBase,
   heightAt,
+  HALF_H,
   type Camera,
+  type HeightField,
 } from '@latticekit/iso';
 import { noise2 } from '@latticekit/core';
 import type { WorldTerrain } from './world.js';
@@ -116,6 +119,81 @@ function setTargetBox(x: number, y: number, w: number, h: number): Float64Array 
   TARGET_BOX_SCRATCH[4] = x + w; TARGET_BOX_SCRATCH[5] = y + h;
   TARGET_BOX_SCRATCH[6] = x;     TARGET_BOX_SCRATCH[7] = y + h;
   return TARGET_BOX_SCRATCH;
+}
+
+// ── Terrain occlusion → spectral entities ─────────────────────────────────────
+//
+// The renderer paints all terrain, then all entities: `DepthSorter` sorts by ground-plane
+// footprint and never reads height, so a player at the bottom of a dug shaft (or behind a
+// hill) is drawn full-strength on top of the ground that should hide them. Rather than a true
+// per-pixel occlusion pass, we test each moving entity against the heightfield and, when the
+// terrain in front would bury it, swap `drawSprite` for `drawSpecter` — a pale translucent
+// silhouette that still says *where* it is while reading clearly as "out of sight".
+
+/** How many tiles camera-ward to probe for an occluding lip. A pit's rim is 1–3 tiles away;
+ *  5 covers a wide crater without wasting `heightAt` calls on terrain that cannot reach. */
+const OCCLUSION_LOOKAHEAD = 5;
+/** Occluded fraction of a sprite's height at or above which it renders as a specter. Half hidden
+ *  is the point where a solid sprite drawn on top stops being a plausible picture. */
+const SPECTER_THRESHOLD = 0.5;
+/** Pale cyan — a spectral, diagrammatic hue that never collides with the warm/green world or
+ *  with the placement ghost's ok/bad. */
+const SPECTER_TINT = hex('#8fd9ff');
+const SPECTER_ALPHA = 0.4;
+/** World-pixel drop in screen-y for each step of `(+1, +1)` tiles — `2 * HALF_H`. Height
+ *  subtracts from screen-y at 1:1, and camera zoom scales both terms, so the ratio this feeds
+ *  is zoom-invariant and needs no camera. */
+const SCREEN_Y_PER_DIAG_STEP = 2 * HALF_H;
+
+/**
+ * Fraction `[0, 1]` of an entity's sprite height that foreground terrain hides.
+ *
+ * Probes the tiles on the entity's own screen column (`gx + k, gy + k`) — the only ones that
+ * can stand between it and the camera. Terrain of height `hk` there covers the entity's column
+ * up to `hk - groundPx - SCREEN_Y_PER_DIAG_STEP * k` world pixels above its feet. The worst
+ * (deepest) cover over the probe wins. Samples past the map rim are skipped: the void beyond
+ * the edge is not an occluder, and reading it as height 0 would falsely bury a sub-sea entity.
+ */
+export function occludedFraction(
+  field: HeightField,
+  gx: number,
+  gy: number,
+  groundPx: number,
+  spriteTopPx: number,
+): number {
+  const spriteH = spriteTopPx - groundPx;
+  if (spriteH <= 0) return 0;
+  let cover = 0;
+  for (let k = 1; k <= OCCLUSION_LOOKAHEAD; k++) {
+    const sx = gx + k;
+    const sy = gy + k;
+    if (sx > W || sy > H) break;
+    const c = heightAt(field, sx, sy) - groundPx - SCREEN_Y_PER_DIAG_STEP * k;
+    if (c > cover) cover = c;
+  }
+  return cover <= 0 ? 0 : cover >= spriteH ? 1 : cover / spriteH;
+}
+
+/**
+ * Draw a moving entity's sprite — solid when it can be seen, or a spectral silhouette once
+ * foreground terrain has buried more than `SPECTER_THRESHOLD` of it. Keeps the entity in its
+ * existing depth slot; only *what* is drawn there changes.
+ */
+function drawEntity(
+  pen: Pen,
+  field: HeightField,
+  def: Parameters<typeof drawSprite>[1],
+  gx: number,
+  gy: number,
+  v: Parameters<typeof drawSprite>[4],
+  basePx: number,
+): void {
+  const topPx = basePx + spriteHeightPx(def, v);
+  if (occludedFraction(field, gx, gy, basePx, topPx) >= SPECTER_THRESHOLD) {
+    drawSpecter(pen, def, gx, gy, v, SPECTER_TINT, basePx, SPECTER_ALPHA);
+  } else {
+    drawSprite(pen, def, gx, gy, v, basePx);
+  }
 }
 
 // ── Palette ────────────────────────────────────────────────────────────────────
@@ -556,7 +634,7 @@ function drawViewport(
           const def    = spriteForCreature(c.species);
           const v      = creatureVariant(c);
           const basePx = heightAt(world.field, c.gx, c.gy);
-          drawSprite(pen, def, c.gx, c.gy, v, basePx);
+          drawEntity(pen, world.field, def, c.gx, c.gy, v, basePx);
 
           // Hostile predators emit subtle auras in darkness — falloff 1: soft glow, no bright
           // inner disc
@@ -582,7 +660,7 @@ function drawViewport(
           const def    = PLAYER_SPRITES[p.index];
           const v      = playerVariant(p);
           const basePx = heightAt(world.field, p.gx, p.gy) + p.elevationPx;
-          drawSprite(pen, def, p.gx, p.gy, v, basePx);
+          drawEntity(pen, world.field, def, p.gx, p.gy, v, basePx);
 
           // Player torchlight at night — falloff 1 removes the hard bright inner disc,
           // leaving only the soft outer glow. Standing atop a tower's lookout platform

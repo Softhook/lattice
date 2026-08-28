@@ -327,7 +327,7 @@ export function drawInventoryOverlay(pen: Pen, player: Player): void {
       pen,
       panelX + 18,
       gridTop,
-      `🪵 ${player.inventory.wood}   🪨 ${player.inventory.stone}   🌿 ${player.inventory.fiber}`,
+      `🪵 ${player.inventory.wood}   🪨 ${player.inventory.stone}   🌿 ${player.inventory.fiber}   ⛓️ ${player.inventory.iron}   💎 ${player.inventory.gems}`,
       hex('#d4a373'),
       textStyle(12, 700, -1, 0),
     );
@@ -374,8 +374,9 @@ export function drawInventoryOverlay(pen: Pen, player: Player): void {
         highlight = ROW_OWNED;
       } else {
         const fiberCost = def.cost.fiber ? ` ${def.cost.fiber}🌿` : '';
+        const ironCost = def.cost.iron ? ` ${def.cost.iron}⛓️` : '';
         const affordable = canAffordWeapon(player, kind);
-        status = `${def.cost.wood}🪵 ${def.cost.stone}🪨${fiberCost}`;
+        status = `${def.cost.wood}🪵 ${def.cost.stone}🪨${fiberCost}${ironCost}`;
         statusColor = affordable ? UI_TOOL_GOLD : ROW_TEXT_DENY;
         highlight = statusColor;
       }

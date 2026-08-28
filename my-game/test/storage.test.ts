@@ -17,6 +17,8 @@ describe('Verdant Storage', () => {
     const [p1, p2] = createPlayers();
     p1.inventory.wood = 55;
     p1.inventory.stone = 23;
+    p1.inventory.iron = 7;
+    p1.inventory.gems = 4;
     p1.hp = 80;
     p1.weapon = 'sword';
     p1.craftedWeapons = ['hands', 'axe', 'sword'];
@@ -37,6 +39,8 @@ describe('Verdant Storage', () => {
     expect(save.seed).toBe(42);
     expect(save.p1.wood).toBe(55);
     expect(save.p1.stone).toBe(23);
+    expect(save.p1.iron).toBe(7);
+    expect(save.p1.gems).toBe(4);
     expect(save.p1.hp).toBe(80);
     expect(save.p1.weapon).toBe('sword');
     expect(save.p1.craftedWeapons).toEqual(['hands', 'axe', 'sword']);
@@ -77,6 +81,8 @@ describe('Verdant Storage', () => {
     expect(recognized.seed).toBe(123);
     expect(recognized.p1.wood).toBe(10);
     expect(recognized.p1.stone).toBe(0);
+    expect(recognized.p1.iron).toBe(0);
+    expect(recognized.p1.gems).toBe(0);
     expect(recognized.p1.hp).toBe(100);
     expect(recognized.p1.weapon).toBe('hands');
     expect(recognized.p1.craftedWeapons).toEqual(['hands']);
@@ -151,6 +157,22 @@ describe('Verdant Storage', () => {
     applyTerrainDeltas(freshWorld, saveState.terrainHeights!, saveState.terrainSurfaces!);
     expect(freshWorld.heights.get(10, 10)).toBe(initialH + 3);
     expect(freshWorld.surface.get(10, 10)).toBe(1);
+  }, 15000);
+
+  it('round-trips a deep sub-sea-level dig through the unsigned height store', () => {
+    const world = createWorld(77);
+    // A mine shaft sunk well below sea level — a negative gameplay height.
+    world.heights.set(12, 12, -30);
+    world.heightDeltas.set(12 * (W + 1) + 12, -30);
+    expect(world.heights.get(12, 12)).toBe(-30);
+
+    const [p1, p2] = createPlayers();
+    const saveState = extractSaveState(77, [p1, p2], [], world);
+    expect(saveState.terrainHeights?.[0]).toEqual({ x: 12, y: 12, h: -30 });
+
+    const freshWorld = createWorld(77);
+    applyTerrainDeltas(freshWorld, saveState.terrainHeights!, []);
+    expect(freshWorld.heights.get(12, 12)).toBe(-30);
   }, 15000);
 
   it('persists and restores harvested and living flora landscape', () => {

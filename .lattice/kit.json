@@ -396,6 +396,7 @@
         "defineSprite",
         "drawFootprint",
         "drawGhost",
+        "drawSpecter",
         "drawSprite",
         "endFrame",
         "extendStops",

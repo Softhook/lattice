@@ -28,6 +28,20 @@ export const MAX_HEIGHT_UNITS = 24;
 /** Maximum terrain height in world pixels — what cameras and input.setTerrain need. */
 export const MAX_HEIGHT_PX = MAX_HEIGHT_UNITS * STEP_PX;
 
+/**
+ * How far below sea level a player may dig, in height units.
+ *
+ * The vertex store is an unsigned `Uint8` grid, so "below sea level" cannot live in it as a
+ * negative number. Instead every stored height carries this value as a bias
+ * (`stored = gameplayUnits + UNDERGROUND_DEPTH`) and {@link WorldTerrain.heights} subtracts it
+ * straight back off. Nothing outside this module sees the biased number: `heights.get`,
+ * `heightAt`, the renderer and `input` all work in gameplay units, which now run from
+ * `-UNDERGROUND_DEPTH` at the floor of the deepest mine to `MAX_HEIGHT_UNITS` at an alpine peak.
+ * 40 units is 400 px of digging beneath the waves — deep enough for a real descent, and
+ * `40 + MAX_HEIGHT_UNITS = 64` still fits an 8-bit cell with room to spare.
+ */
+export const UNDERGROUND_DEPTH = 40;
+
 // ── Biome Registry & Definitions ──────────────────────────────────────────────
 
 export type BiomeKind = 'alpine' | 'taiga' | 'meadow' | 'badlands' | 'wetlands' | 'coastal';
@@ -230,8 +244,15 @@ import { DIRT, getTileColor } from './palette.js';
 
 /** The live height field handed to `input` and `draw`. */
 export interface WorldTerrain {
-  /** W+1 × H+1 vertex heights, in height units (not world px). */
-  readonly heights: TileGrid;
+  /** The seed this world was generated from. Kept so deterministic per-tile lookups (ore seams
+   *  in `underground.ts`, and anything else that must agree across a replay) don't have to be
+   *  threaded the seed separately. */
+  readonly seed: number;
+  /** W+1 × H+1 vertex heights, in **gameplay** height units (not world px): sea level is 0, an
+   *  alpine peak is `MAX_HEIGHT_UNITS`, the floor of the deepest mine is `-UNDERGROUND_DEPTH`.
+   *  A thin accessor over an unsigned store that holds every value biased up by
+   *  `UNDERGROUND_DEPTH` — `get`/`set`/`fillFrom` translate, so callers never meet the bias. */
+  readonly heights: MutableTileSource;
   /** Per-tile material id. W × H. */
   readonly surface: TileGrid;
   /** Precalculated 32-bit RGBA tile colors for instant zero-allocation render lookup. W × H. */
@@ -257,8 +278,11 @@ export interface WorldTerrain {
  * - Meadows: Soft rolling pastoral hills.
  */
 export function createWorld(seed: number): WorldTerrain {
-  // Vertices: one more than tile count on each axis.
-  const heights = new TileGrid(W + 1, H + 1);
+  // Vertices: one more than tile count on each axis. `rawHeights` is the unsigned store and
+  // holds every height biased up by UNDERGROUND_DEPTH; `heights` is the gameplay-units accessor
+  // over it (see UNDERGROUND_DEPTH) and is the only thing that ever touches `rawHeights` again.
+  const rawHeights = new TileGrid(W + 1, H + 1);
+  const heights = biasedHeightSource(rawHeights, W + 1, H + 1);
   const surface = new TileGrid(W, H);
   const tileColors = new Uint32Array(W * H);
 
@@ -349,11 +373,12 @@ export function createWorld(seed: number): WorldTerrain {
   });
 
   const field: HeightField = {
-    heights: boundedHeightSource(heights, W + 1, H + 1),
+    heights,
     stepPx:  STEP_PX,
   };
 
   return {
+    seed,
     heights,
     surface,
     tileColors,
@@ -424,7 +449,11 @@ export function extractTerrainDeltas(world: WorldTerrain): {
  * The four vertices of tile (gx,gy) are at grid positions (gx,gy), (gx+1,gy), (gx,gy+1),
  * (gx+1,gy+1). Digging lowers all four equally; the tile becomes a bowl.
  *
- * Returns true if anything changed (i.e. at least one vertex was above 0).
+ * The floor is `-UNDERGROUND_DEPTH` gameplay units, not sea level: a player can sink a shaft
+ * well below the waves. A tile dug below sea level is turned to dirt, not flooded — the water
+ * a lake holds is a material, and digging does not connect a pit to it.
+ *
+ * Returns true if anything changed (i.e. at least one vertex was above the dig floor).
  */
 export function dig(world: WorldTerrain, gx: number, gy: number): boolean {
   if (gx < 0 || gy < 0 || gx >= W || gy >= H) return false;
@@ -434,7 +463,7 @@ export function dig(world: WorldTerrain, gx: number, gy: number): boolean {
       const x = gx + dx;
       const y = gy + dy;
       const cur = world.heights.get(x, y);
-      if (cur > 0) {
+      if (cur > -UNDERGROUND_DEPTH) {
         const next = cur - 1;
         world.heights.set(x, y, next);
         world.heightDeltas.set(y * (W + 1) + x, next);
@@ -487,19 +516,26 @@ export function raise(world: WorldTerrain, gx: number, gy: number): boolean {
 
 
 /**
- * A bounded `TileSource` adapter over `TileGrid`.
+ * A gameplay-units `MutableTileSource` over the unsigned, `UNDERGROUND_DEPTH`-biased vertex
+ * store.
  *
- * `tileSourceOf` from iso returns `has() = true` everywhere, which makes off-map taps
- * return a grid coordinate instead of `onGround: false`. This adapter properly bounds it.
+ * `get` subtracts the bias, `set`/`fill`/`fillFrom` add it, so every reader — the renderer,
+ * `heightAt`, `input`, dig/raise, save extraction — works in the units where sea level is 0
+ * and a mine floor is negative, and no one else has to know the store is unsigned. An
+ * out-of-bounds read still returns 0, not `-UNDERGROUND_DEPTH`: past the rim there is no
+ * ground, and a phantom dip there would tug on the terrain march and the edge tiles.
+ *
+ * It also bounds `has` properly: `tileSourceOf` from iso answers `true` everywhere, which
+ * turns an off-map tap into a plausible tile instead of "the ray left the map".
  */
-function boundedHeightSource(grid: TileGrid, w: number, h: number): MutableTileSource {
+function biasedHeightSource(grid: TileGrid, w: number, h: number): MutableTileSource {
   return {
-    get(gx, gy)  { return grid.get(gx, gy); },
-    set(gx, gy, v) { grid.set(gx, gy, v); },
+    get(gx, gy)  { return grid.has(gx, gy) ? grid.get(gx, gy) - UNDERGROUND_DEPTH : 0; },
+    set(gx, gy, v) { grid.set(gx, gy, v + UNDERGROUND_DEPTH); },
     has(gx, gy)  { return gx >= 0 && gy >= 0 && gx < w && gy < h; },
     get version()  { return grid.version; },
-    fill(v) { grid.fill(v); },
-    fillFrom(getVal) { grid.fillFrom(getVal); },
+    fill(v) { grid.fill(v + UNDERGROUND_DEPTH); },
+    fillFrom(getVal) { grid.fillFrom((gx, gy) => getVal(gx, gy) + UNDERGROUND_DEPTH); },
   };
 }
 

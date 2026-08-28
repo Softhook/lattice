@@ -181,6 +181,7 @@ export {
   defineSprite,
   drawFootprint,
   drawGhost,
+  drawSpecter,
   drawSprite,
   spriteBounds,
   spriteHeightPx,

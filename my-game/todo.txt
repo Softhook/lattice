@@ -10,9 +10,6 @@ Allow the player to use the mouse to click in the world and make a text bar pop 
 
 
 
-Timings of things being built or chopped down or mined is not right. Currently it's instant and it needs to take different amounts of time to Interact with different elements 
-
-
 
 Allow player to dig down much further into the ground. Investigate if we could let them build caves and tunnels that don't pull down the surface with it?
 
@@ -22,8 +19,6 @@ underground aloow player to discover gold and gems
 weather pattners rain, lighting that can set forest on fire
 wind that can make trees sway
 
-Create missions such as a necromancer that spawns in a tower And creates particlum monsters let go towards the players and attacks them.
-A mission announcement text pops up telling them that a necromancer tower has been discovered. Make the Necromancer Tower look visually interesting and foreboding with some magic effects. 
 
 Consequence, not just decoration — weather igniting forests, digging causing cave-ins, chopping a tree changing a biome's look over time. You listed weather/fire already; the "soul" part is making these effects linger (burnt ground, regrowth) instead of reverting.
 

@@ -48,6 +48,10 @@ export interface SavedPlayer {
   readonly wood: number;
   readonly stone: number;
   readonly fiber: number;
+  /** Iron ore carried. Absent in pre-underground saves — defaulted to 0 on load. */
+  readonly iron: number;
+  /** Gemstones carried. Absent in pre-underground saves — defaulted to 0 on load. */
+  readonly gems: number;
   readonly hp: number;
   /** Satiety at save time. Absent in pre-hunger saves — `recognizePlayer` defaults those to
    *  full so an old world doesn't load its players mid-starvation. */
@@ -76,6 +80,8 @@ function recognizePlayer(v: unknown, label: string, defaultGx: number, defaultGy
   const wood = typeof o['wood'] === 'number' ? o['wood'] : 0;
   const stone = typeof o['stone'] === 'number' ? o['stone'] : 0;
   const fiber = typeof o['fiber'] === 'number' ? o['fiber'] : 0;
+  const iron = typeof o['iron'] === 'number' ? o['iron'] : 0;
+  const gems = typeof o['gems'] === 'number' ? o['gems'] : 0;
   const hp = typeof o['hp'] === 'number' ? o['hp'] : 100;
   const hunger = typeof o['hunger'] === 'number' ? o['hunger'] : 100;
   const mode = typeof o['mode'] === 'string' ? o['mode'] : 'move';
@@ -85,7 +91,7 @@ function recognizePlayer(v: unknown, label: string, defaultGx: number, defaultGy
   const gx = typeof o['gx'] === 'number' ? o['gx'] : defaultGx;
   const gy = typeof o['gy'] === 'number' ? o['gy'] : defaultGy;
 
-  return { wood, stone, fiber, hp, hunger, mode, weapon, craftedWeapons, gx, gy };
+  return { wood, stone, fiber, iron, gems, hp, hunger, mode, weapon, craftedWeapons, gx, gy };
 }
 
 function recognizeBuilding(v: unknown, index: number): SavedBuilding {
@@ -207,6 +213,8 @@ export function extractSaveState(
       wood: p1.inventory.wood,
       stone: p1.inventory.stone,
       fiber: p1.inventory.fiber,
+      iron: p1.inventory.iron,
+      gems: p1.inventory.gems,
       hp: p1.hp,
       hunger: p1.hunger,
       mode: p1.mode,
@@ -219,6 +227,8 @@ export function extractSaveState(
       wood: p2.inventory.wood,
       stone: p2.inventory.stone,
       fiber: p2.inventory.fiber,
+      iron: p2.inventory.iron,
+      gems: p2.inventory.gems,
       hp: p2.hp,
       hunger: p2.hunger,
       mode: p2.mode,

@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { createWorld, W, H, isWalkable, dig, raise, BIOME_REGISTRY } from '../src/world.js';
-import { createPlayers, movePlayer, interactAtFacing, cycleBuildKind, buildAtFacing, canAffordBuilding, tickPlayer, getTargetContext, facingTile, isInForwardCone } from '../src/players.js';
+import { heightAt } from '@latticekit/iso';
+import { createWorld, W, H, isWalkable, dig, raise, BIOME_REGISTRY, UNDERGROUND_DEPTH, STEP_PX } from '../src/world.js';
+import { createPlayers, movePlayer, interactAtFacing, cycleBuildKind, buildAtFacing, canAffordBuilding, tickPlayer, getTargetContext, facingTile, digAtFacing, isInForwardCone } from '../src/players.js';
+import { oreAt } from '../src/underground.js';
 import { populateFlora, FLORA_REGISTRY } from '../src/flora.js';
 import { BUILDING_COSTS, BUILDING_REGISTRY, placeBuilding, type Building } from '../src/buildings.js';
 import { populateWorld, updateCreatures, createCreatureEvents, evolveGeneration, GENERATION_TICKS, MAX_CREATURES, SPECIES_REGISTRY, spawnCreature, isNearActiveFireOrLight, FIRE_WARD_RADIUS, FIRE_SAFE_ZONE_RADIUS, type CreatureState } from '../src/creatures.js';
@@ -8,8 +10,8 @@ import { populateWorld, updateCreatures, createCreatureEvents, evolveGeneration,
 describe('Verdant Gameplay Logic', () => {
   it('initializes world and terrain grid with bounds', () => {
     const world = createWorld(42);
-    expect(world.heights.w).toBe(W + 1);
-    expect(world.heights.h).toBe(H + 1);
+    expect(world.heights.has(W, H)).toBe(true);
+    expect(world.heights.has(W + 1, H + 1)).toBe(false);
     expect(world.surface.w).toBe(W);
     expect(world.surface.h).toBe(H);
     expect(world.currentMaxHeightPx).toBeGreaterThan(0);
@@ -25,6 +27,55 @@ describe('Verdant Gameplay Logic', () => {
     const raised = raise(world, 20, 20);
     expect(raised).toBe(true);
     expect(world.heights.get(20, 20)).toBe(h0);
+  });
+
+  it('digs far below sea level and bottoms out at the underground floor', () => {
+    const world = createWorld(42);
+    const gx = 30;
+    const gy = 30;
+
+    for (let i = 0; i < 200; i++) dig(world, gx, gy);
+
+    const floor = Math.min(
+      world.heights.get(gx, gy),
+      world.heights.get(gx + 1, gy),
+      world.heights.get(gx, gy + 1),
+      world.heights.get(gx + 1, gy + 1),
+    );
+    expect(floor).toBe(-UNDERGROUND_DEPTH);
+    expect(floor).toBeLessThan(0);
+    // The field the renderer and input read reports the same negative depth in pixels.
+    expect(heightAt(world.field, gx + 0.5, gy + 0.5)).toBe(-UNDERGROUND_DEPTH * STEP_PX);
+    // Nothing left to remove once every corner sits on the floor.
+    expect(dig(world, gx, gy)).toBe(false);
+  });
+
+  it('turns up iron when a shaft reaches an iron seam', () => {
+    const world = createWorld(20260828);
+    const [p1] = createPlayers();
+
+    // Locate a reachable iron seam deterministically from this world's seed.
+    let seam: { gx: number; gy: number } | null = null;
+    for (let gx = 12; gx < 64 && seam === null; gx++) {
+      for (let gy = 12; gy < 64 && seam === null; gy++) {
+        for (let level = -3; level >= -UNDERGROUND_DEPTH; level--) {
+          if (oreAt(world.seed, gx, gy, level) === 'iron') {
+            seam = { gx, gy };
+            break;
+          }
+        }
+      }
+    }
+    expect(seam).not.toBeNull();
+
+    p1.gx = seam!.gx - 1;
+    p1.gy = seam!.gy;
+    p1.facing = 'e';
+    expect(facingTile(p1)).toEqual({ gx: seam!.gx, gy: seam!.gy });
+
+    const startIron = p1.inventory.iron;
+    for (let i = 0; i < 400 && p1.inventory.iron === startIron; i++) digAtFacing(p1, world);
+    expect(p1.inventory.iron).toBeGreaterThan(startIron);
   });
 
   it('moves player and updates facing direction', () => {

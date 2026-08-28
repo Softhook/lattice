@@ -28,6 +28,9 @@ export interface WeaponCost {
   readonly wood: number;
   readonly stone: number;
   readonly fiber: number;
+  /** Iron ore — only the sword needs it, and it is the one material you cannot gather on the
+   *  surface, so a blade is a reward for digging deep. */
+  readonly iron: number;
 }
 
 export interface WeaponDef {
@@ -52,7 +55,7 @@ export const WEAPONS: Record<WeaponKind, WeaponDef> = {
     reach: 1.1,
     cooldownSec: 0.22,
     knockback: 0.4,
-    cost: { wood: 0, stone: 0, fiber: 0 },
+    cost: { wood: 0, stone: 0, fiber: 0, iron: 0 },
   },
   axe: {
     kind: 'axe',
@@ -63,18 +66,18 @@ export const WEAPONS: Record<WeaponKind, WeaponDef> = {
     reach: 1.35,
     cooldownSec: 0.38,
     knockback: 1.2,
-    cost: { wood: 8, stone: 4, fiber: 0 },
+    cost: { wood: 8, stone: 4, fiber: 0, iron: 0 },
   },
   sword: {
     kind: 'sword',
-    name: 'Stone Blade',
+    name: 'Iron Sword',
     icon: '⚔️',
     isRanged: false,
     damage: 38,
     reach: 1.45,
     cooldownSec: 0.28,
     knockback: 0.8,
-    cost: { wood: 6, stone: 10, fiber: 0 },
+    cost: { wood: 4, stone: 0, fiber: 0, iron: 3 },
   },
   bow: {
     kind: 'bow',
@@ -85,7 +88,7 @@ export const WEAPONS: Record<WeaponKind, WeaponDef> = {
     reach: 14.0,
     cooldownSec: 0.42,
     knockback: 0.6,
-    cost: { wood: 10, stone: 0, fiber: 6 },
+    cost: { wood: 10, stone: 0, fiber: 6, iron: 0 },
   },
 };
 

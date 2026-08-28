@@ -27,6 +27,7 @@ import {
   defineSprite,
   drawFootprint,
   drawGhost,
+  drawSpecter,
   drawSprite,
   spriteBounds,
   spriteHeightPx,
@@ -337,6 +338,108 @@ describe('drawGhost', () => {
     const { surface, pen } = scene();
     expect(() => drawGhost(pen, bad, 0, 0, VARIANT_ZERO, true)).toThrow('nope');
     expect(opsOf(surface, 'alpha').map((op) => op.value)).toEqual([0.55, 1]);
+  });
+});
+
+describe('drawSpecter', () => {
+  const SPECTRE = rgba(140, 220, 255, 255);
+
+  it('forces every fill to the caller-given tint and brackets the draw with the alpha', () => {
+    const { surface, pen, palette } = scene();
+    drawSpecter(pen, TOWER, 0, 0, VARIANT_ZERO, SPECTRE, 0, 0.3);
+    for (const op of opsOf(surface, 'poly')) {
+      expect(op.colors[0]).not.toBe(palette.get('brand'));
+    }
+    // The top face is the tint undiluted — not a palette slot.
+    expect(opsOf(surface, 'poly').map((op) => op.colors[0])).toContain(SPECTRE);
+    const alphas = opsOf(surface, 'alpha');
+    expect(alphas[0]?.value).toBe(0.3);
+    expect(alphas[alphas.length - 1]?.value).toBe(1);
+  });
+
+  it('defaults alpha to 0.4', () => {
+    const { surface, pen } = scene();
+    drawSpecter(pen, SHED, 0, 0, VARIANT_ZERO, SPECTRE);
+    expect(opsOf(surface, 'alpha')[0]?.value).toBe(0.4);
+  });
+
+  it('sits on the ground, not lifted like a ghost — it is a fact, not a proposal', () => {
+    const { surface, pen } = scene({ snap: false });
+    drawSprite(pen, SHED, 0, 0, VARIANT_ZERO);
+    const grounded = firstOp(surface, 'stroke').xy[1] as number;
+    surface.reset();
+    drawSpecter(pen, SHED, 0, 0, VARIANT_ZERO, SPECTRE);
+    expect(firstOp(surface, 'stroke').xy[1] as number).toBe(grounded);
+  });
+
+  it('honours zPx the same way drawSprite does', () => {
+    const { surface, pen } = scene({ snap: false });
+    drawSpecter(pen, SHED, 0, 0, VARIANT_ZERO, SPECTRE, 0);
+    const atSea = firstOp(surface, 'stroke').xy[1] as number;
+    surface.reset();
+    drawSpecter(pen, SHED, 0, 0, VARIANT_ZERO, SPECTRE, levelsToPx(2));
+    // Higher ground → drawn higher on screen (smaller y).
+    expect(firstOp(surface, 'stroke').xy[1] as number).toBeLessThan(atSea);
+  });
+
+  it('runs neither animate nor emit', () => {
+    let live = 0;
+    const def = defineSprite({
+      id: 'live-specter',
+      w: 1,
+      d: 1,
+      massing: (s) => s.box(0, 0, 1, 1, { color: 'brand', h: 1 }),
+      animate: () => void (live += 1),
+      emit: () => void (live += 1),
+    });
+    const { surface, pen } = scene();
+    const field = createLightField(surface);
+    const framePen = { ...pen, light: field };
+    field.begin(framePen, 1, 'night');
+    drawSpecter(framePen, def, 0, 0, VARIANT_ZERO, SPECTRE);
+    expect(live).toBe(0);
+  });
+
+  it('composes its alpha with the massing’s own per-box alpha', () => {
+    const translucent = defineSprite({
+      id: 'translucent-specter',
+      w: 1,
+      d: 1,
+      massing: (s) => s.box(0, 0, 1, 1, { color: 'brand', h: 1, alpha: 0.5 }),
+    });
+    const { surface, pen } = scene();
+    drawSpecter(pen, translucent, 0, 0, VARIANT_ZERO, SPECTRE, 0, 0.4);
+    const values = opsOf(surface, 'alpha').map((op) => op.value);
+    expect(values[1]).toBeLessThan(values[0] ?? 1);
+  });
+
+  it('restores the multiplier even when the massing throws', () => {
+    const bad = defineSprite({
+      id: 'bad-specter',
+      w: 1,
+      d: 1,
+      massing: () => {
+        throw new Error('nope');
+      },
+    });
+    const { surface, pen } = scene();
+    expect(() => drawSpecter(pen, bad, 0, 0, VARIANT_ZERO, SPECTRE, 0, 0.3)).toThrow('nope');
+    expect(opsOf(surface, 'alpha').map((op) => op.value)).toEqual([0.3, 1]);
+  });
+
+  it('throws on a non-finite ground elevation', () => {
+    const { pen } = scene();
+    expect(() => drawSpecter(pen, SHED, 0, 0, VARIANT_ZERO, SPECTRE, Number.NaN)).toThrow(
+      'drawSpecter',
+    );
+  });
+
+  it('is deterministic for a fixed seed', () => {
+    const a = scene();
+    const b = scene();
+    drawSpecter(a.pen, TOWER, 2, 3, variant({ seed: 77, label: 'X' }), SPECTRE);
+    drawSpecter(b.pen, TOWER, 2, 3, variant({ seed: 77, label: 'X' }), SPECTRE);
+    expect(a.surface.ops).toEqual(b.surface.ops);
   });
 });
 

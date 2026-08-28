@@ -210,7 +210,7 @@ function makePlayerMassing(bodyColor: Ink): Massing {
         w.post(nearArmX + 0.05, nearArmY + 0.14, axeZ, 0.85, woodShaft, 0.05);
         w.box(nearArmX + 0.01, nearArmY + 0.16, 0.22, 0.12, { color: bladeSteel, h: 0.28, z: axeZ + 0.65 });
       } else if (weaponCode === 2 || actionCode === 1) {
-        // Stone Blade (Sword)
+        // Iron Sword
         const swordZ = nearArmZ - 0.30;
         w.box(nearArmX + 0.03, nearArmY + 0.13, 0.06, 0.14, { color: bladeSteel, h: 0.95, z: swordZ });
         w.box(nearArmX - 0.02, nearArmY + 0.12, 0.16, 0.16, { color: hiltGold, h: 0.08, z: swordZ + 0.25 });

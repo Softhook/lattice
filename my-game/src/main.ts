@@ -186,6 +186,8 @@ if (opened.source === 'save' && opened.state && opened.state.p1 && opened.state.
   p1.inventory.wood = s.p1.wood;
   p1.inventory.stone = s.p1.stone;
   p1.inventory.fiber = s.p1.fiber;
+  p1.inventory.iron = s.p1.iron;
+  p1.inventory.gems = s.p1.gems;
   p1.hp = s.p1.hp;
   p1.hunger = s.p1.hunger;
   p1.gx = s.p1.gx;
@@ -196,6 +198,8 @@ if (opened.source === 'save' && opened.state && opened.state.p1 && opened.state.
   p2.inventory.wood = s.p2.wood;
   p2.inventory.stone = s.p2.stone;
   p2.inventory.fiber = s.p2.fiber;
+  p2.inventory.iron = s.p2.iron;
+  p2.inventory.gems = s.p2.gems;
   p2.hp = s.p2.hp;
   p2.hunger = s.p2.hunger;
   p2.gx = s.p2.gx;
@@ -244,44 +248,23 @@ if (opened.source === 'save' && opened.state && opened.state.p1 && opened.state.
 
 // ── DOM Bottom Inventory Bar Helper ───────────────────────────────────────────
 
-let lastP1W = -1;
-let lastP1S = -1;
-let lastP1F = -1;
-let lastP2W = -1;
-let lastP2S = -1;
-let lastP2F = -1;
-
-const p1WoodEl = document.getElementById('p1-wood');
-const p1StoneEl = document.getElementById('p1-stone');
-const p1FiberEl = document.getElementById('p1-fiber');
-const p2WoodEl = document.getElementById('p2-wood');
-const p2StoneEl = document.getElementById('p2-stone');
-const p2FiberEl = document.getElementById('p2-fiber');
+// One slot per resource, per player. -1 forces the first paint.
+const domHudSlots = (['wood', 'stone', 'fiber', 'iron', 'gems'] as const).flatMap((res) =>
+  ([0, 1] as const).map((idx) => ({
+    res,
+    player: idx === 0 ? p1 : p2,
+    el: document.getElementById(`p${idx + 1}-${res}`),
+    last: -1,
+  })),
+);
 
 function updateDomHud(): void {
-  if (p1.inventory.wood !== lastP1W && p1WoodEl) {
-    lastP1W = p1.inventory.wood;
-    p1WoodEl.textContent = String(lastP1W);
-  }
-  if (p1.inventory.stone !== lastP1S && p1StoneEl) {
-    lastP1S = p1.inventory.stone;
-    p1StoneEl.textContent = String(lastP1S);
-  }
-  if (p1.inventory.fiber !== lastP1F && p1FiberEl) {
-    lastP1F = p1.inventory.fiber;
-    p1FiberEl.textContent = String(lastP1F);
-  }
-  if (p2.inventory.wood !== lastP2W && p2WoodEl) {
-    lastP2W = p2.inventory.wood;
-    p2WoodEl.textContent = String(lastP2W);
-  }
-  if (p2.inventory.stone !== lastP2S && p2StoneEl) {
-    lastP2S = p2.inventory.stone;
-    p2StoneEl.textContent = String(lastP2S);
-  }
-  if (p2.inventory.fiber !== lastP2F && p2FiberEl) {
-    lastP2F = p2.inventory.fiber;
-    p2FiberEl.textContent = String(lastP2F);
+  for (const slot of domHudSlots) {
+    const value = slot.player.inventory[slot.res];
+    if (value !== slot.last && slot.el) {
+      slot.last = value;
+      slot.el.textContent = String(value);
+    }
   }
 }
 
@@ -410,11 +393,20 @@ function resolveCompletedWork(player: Player, kind: WorkKind): void {
 
   if (kind === 'dig' || kind === 'raise') {
     const targetTile = facingTile(player);
-    const changed = kind === 'dig' ? digAtFacing(player, world) : raiseAtFacing(player, world);
+    let changed: boolean;
+    let struckOre = false;
+    if (kind === 'dig') {
+      const outcome = digAtFacing(player, world);
+      changed = outcome.dug;
+      struckOre = outcome.ore !== 'none';
+    } else {
+      changed = raiseAtFacing(player, world);
+    }
     if (changed) {
-      audio.play(kind);
+      audio.play(struckOre ? 'mine' : kind);
       const targetBaseH = heightAt(world.field, targetTile.gx, targetTile.gy);
-      spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, kind === 'dig' ? 0x795548ff : 0x8d6e63ff);
+      const debrisColor = struckOre ? 0xfff3b0ff : kind === 'dig' ? 0x795548ff : 0x8d6e63ff;
+      spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, debrisColor);
       input.setTerrain({ field: world.field, maxHeightPx: world.currentMaxHeightPx });
     } else {
       audio.play('deny');

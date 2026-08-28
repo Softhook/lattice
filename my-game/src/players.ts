@@ -16,6 +16,7 @@ import { heightAt } from '@latticekit/iso';
 import { hex, type Rgba } from '@latticekit/draw';
 import type { WorldTerrain } from './world.js';
 import { dig, raise, isWalkable, W, H } from './world.js';
+import { oreAt, type OreKind } from './underground.js';
 import type { Building, BuildingKind } from './buildings.js';
 import { placeBuilding, isTileOccupiedBySolidBuilding, BUILDING_COSTS, BUILD_WORK_SECONDS, findTowerAt, towerPlatformPx, isMissionStructure } from './buildings.js';
 import type { FloraItem } from './flora.js';
@@ -56,6 +57,10 @@ export interface Inventory {
   wood: number;
   stone: number;
   fiber: number;
+  /** Iron ore, dug from deep underground. Consumed only to forge the sword. */
+  iron: number;
+  /** Gemstones, dug from deeper still. Carried and tallied; no use wired up yet. */
+  gems: number;
 }
 
 export interface Player {
@@ -103,7 +108,7 @@ export interface Player {
   actionTimer: number;
   /** Total duration in seconds of the current action animation for normalized phase calculations. */
   actionDuration: number;
-  /** Resource inventory: wood, stone, fiber. */
+  /** Resource inventory: wood, stone, fiber, iron, gems. */
   inventory: Inventory;
   /** Hit points. 0 → player is knocked down (respawns after 3 s). */
   hp: number;
@@ -245,6 +250,8 @@ function makePlayer(index: 0 | 1, gx: number, gy: number): Player {
       wood: 12,
       stone: 8,
       fiber: 4,
+      iron: 0,
+      gems: 0,
     },
     hp: MAX_HP,
     hunger: MAX_HUNGER,
@@ -277,7 +284,8 @@ export function canAffordWeapon(player: Player, kind: WeaponKind): boolean {
   return (
     player.inventory.wood >= cost.wood &&
     player.inventory.stone >= cost.stone &&
-    player.inventory.fiber >= cost.fiber
+    player.inventory.fiber >= cost.fiber &&
+    player.inventory.iron >= cost.iron
   );
 }
 
@@ -296,13 +304,15 @@ export function craftWeapon(player: Player, kind: WeaponKind): boolean {
   }
   const def = WEAPONS[kind];
   if (!canAffordWeapon(player, kind)) {
-    player.lastActionMsg = `NEED ${def.cost.wood}W ${def.cost.stone}S ${def.cost.fiber}F`;
+    const ironNeed = def.cost.iron > 0 ? ` ${def.cost.iron}I` : '';
+    player.lastActionMsg = `NEED ${def.cost.wood}W ${def.cost.stone}S ${def.cost.fiber}F${ironNeed}`;
     player.msgTimer = 2.5;
     return false;
   }
   player.inventory.wood -= def.cost.wood;
   player.inventory.stone -= def.cost.stone;
   player.inventory.fiber -= def.cost.fiber;
+  player.inventory.iron -= def.cost.iron;
   player.craftedWeapons.push(kind);
   player.weapon = kind;
   player.lastActionMsg = `CRAFTED ${def.name.toUpperCase()}!`;
@@ -827,15 +837,57 @@ export function interactAtFacing(
   return { type: 'none', label: '' };
 }
 
-/** Dig (lower ground) at the player's facing tile. */
-export function digAtFacing(player: Player, world: WorldTerrain): boolean {
-  if (player.respawnTimer > 0) return false;
+/** What a dig at the facing tile did, for `main.ts` to sound and spark. */
+export interface DigOutcome {
+  /** True if at least one vertex actually dropped — false once the tile sits on the dig floor. */
+  readonly dug: boolean;
+  /** The seam this dig struck, already added to the player's inventory, or `'none'`. */
+  readonly ore: OreKind;
+}
+
+const DIG_NOTHING: DigOutcome = { dug: false, ore: 'none' };
+
+/** Lowest of a tile's four corner heights, in gameplay units — the floor of its bowl. */
+function tileFloor(world: WorldTerrain, gx: number, gy: number): number {
+  return Math.min(
+    world.heights.get(gx, gy),
+    world.heights.get(gx + 1, gy),
+    world.heights.get(gx, gy + 1),
+    world.heights.get(gx + 1, gy + 1),
+  );
+}
+
+/**
+ * Dig (lower ground) at the player's facing tile, and pick up whatever the newly cleared layer
+ * held.
+ *
+ * A seam is rolled only when this dig actually deepened the bowl's floor by a unit
+ * (`after < before`), so each layer of each tile is checked exactly once over a world's life —
+ * see `underground.oreAt` for why that makes the ore need no saved state of its own.
+ */
+export function digAtFacing(player: Player, world: WorldTerrain): DigOutcome {
+  if (player.respawnTimer > 0) return DIG_NOTHING;
   const { gx, gy } = facingTile(player);
-  const ok = dig(world, gx, gy);
-  if (ok) {
-    triggerPlayerAction(player, 'dig', 0.32);
+  const before = tileFloor(world, gx, gy);
+  const dug = dig(world, gx, gy);
+  if (!dug) return DIG_NOTHING;
+  triggerPlayerAction(player, 'dig', 0.32);
+
+  const after = tileFloor(world, gx, gy);
+  let ore: OreKind = 'none';
+  if (after < before) {
+    ore = oreAt(world.seed, gx, gy, after);
+    if (ore === 'iron') {
+      player.inventory.iron += 1;
+      player.lastActionMsg = 'STRUCK IRON  ⛓️ +1';
+      player.msgTimer = 2.0;
+    } else if (ore === 'gem') {
+      player.inventory.gems += 1;
+      player.lastActionMsg = 'FOUND A GEM  💎 +1';
+      player.msgTimer = 2.0;
+    }
   }
-  return ok;
+  return { dug, ore };
 }
 
 /** Raise (mound ground) at the player's facing tile. */

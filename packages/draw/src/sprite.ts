@@ -795,6 +795,54 @@ export function drawGhost(
 }
 
 /**
+ * The sprite as a flat single-colour ghost of itself — every fill and outline forced to `tint`
+ * and the whole thing drawn at `alpha` — for showing *where* an entity is when solid geometry
+ * would otherwise hide it: a player at the bottom of a pit, a unit under fog, an x-ray view, a
+ * spectator's avatar.
+ *
+ * It is a separate function from {@link drawGhost}, not a colour argument on it, because the two
+ * say different things. A ghost is a *proposal* — it sits half a level up under the cursor and
+ * is tinted by a legality the palette owns (`ok`/`bad`). A specter is a *fact drawn through a
+ * wall* — it sits on the ground at its real `zPx`, with no lift, and its colour is the caller's
+ * to choose because "hidden" has no kit-wide colour the way "you may build here" does. Exposing
+ * it is also the only way a game gets a tinted, faded massing at all: the writer that does the
+ * tinting is module-private, so a caller cannot assemble one from the public primitives.
+ *
+ * Like {@link drawGhost} it runs `massing` alone — no `animate`, no `emit`. A hidden thing that
+ * lit the cave around it would defeat the point, and one that kept twitching would read as a
+ * bug rather than as an outline.
+ *
+ * @param tint Every fill, top face and outline becomes this. A cool, unsaturated colour reads
+ *   as "not really there"; a warm or saturated one competes with the solid sprites beside it.
+ * @param zPx The ground under the footprint, in world pixels — the same number {@link drawSprite}
+ *   is given, so the specter stands exactly where the real sprite would. See {@link drawSprite}.
+ * @param alpha Opacity of the whole draw, composed with any per-box alpha in the massing the
+ *   same way {@link drawGhost}'s fade is. Default 0.4 — present enough to track, faint enough
+ *   to stay clearly behind the world.
+ * @throws RangeError if `zPx` is not finite.
+ */
+export function drawSpecter(
+  pen: Pen,
+  def: SpriteDef,
+  gx: number,
+  gy: number,
+  v: Variant,
+  tint: Rgba,
+  zPx = 0,
+  alpha = 0.4,
+): void {
+  expectFiniteGround('drawSpecter', zPx);
+  const writer = acquire(pen, gx, gy, tint, pxToLevels(zPx), alpha);
+  const previous = pen.surface.alpha(alpha);
+  try {
+    def.massing(writer, v, streamFor(v.seed, SALT_MASSING));
+  } finally {
+    depth -= 1;
+    pen.surface.alpha(previous);
+  }
+}
+
+/**
  * The marching-ant footprint rectangle on its own — selection rims, build sites, ranges.
  *
  * The dash marches off `pen.t`, which is the frame's clock and arrived as a parameter, so two

@@ -28,7 +28,7 @@ describe('Combat & Weapon Crafting System', () => {
     expect(WEAPONS.bow.isRanged).toBe(true);
 
     expect(WEAPONS.axe.cost.wood).toBeGreaterThan(0);
-    expect(WEAPONS.sword.cost.stone).toBeGreaterThan(0);
+    expect(WEAPONS.sword.cost.iron).toBeGreaterThan(0);
     expect(WEAPONS.bow.cost.fiber).toBeGreaterThan(0);
   });
 
@@ -42,6 +42,10 @@ describe('Combat & Weapon Crafting System', () => {
     p1.inventory.stone = 20;
     p1.inventory.fiber = 10;
 
+    // The sword needs iron, which only comes from digging deep — without it, no blade.
+    expect(canAffordWeapon(p1, 'sword')).toBe(false);
+    p1.inventory.iron = 10;
+
     expect(canAffordWeapon(p1, 'axe')).toBe(true);
     expect(canAffordWeapon(p1, 'sword')).toBe(true);
     expect(canAffordWeapon(p1, 'bow')).toBe(true);
@@ -53,11 +57,12 @@ describe('Combat & Weapon Crafting System', () => {
     expect(p1.craftedWeapons).toContain('axe');
     expect(p1.inventory.wood).toBe(22); // 30 - 8
 
-    // Craft Sword
+    // Craft Sword — consumes iron
     const swordCrafted = craftWeapon(p1, 'sword');
     expect(swordCrafted).toBe(true);
     expect(p1.weapon).toBe('sword');
     expect(p1.craftedWeapons).toContain('sword');
+    expect(p1.inventory.iron).toBe(10 - WEAPONS.sword.cost.iron);
 
     // Cycle through crafted weapons
     const next1 = cycleWeapon(p1);
