@@ -11,7 +11,7 @@
  * Placing buildings consumes Wood and Stone according to building costs.
  */
 
-import { clamp } from '@latticekit/core';
+import { Rng, clamp } from '@latticekit/core';
 import { heightAt } from '@latticekit/iso';
 import { hex, type Rgba } from '@latticekit/draw';
 import type { WorldTerrain } from './world.js';
@@ -776,6 +776,9 @@ export function interactAtFacing(
       player.inventory.wood += harvest.wood + axeBonus;
       player.inventory.stone += harvest.stone;
       player.inventory.fiber += harvest.fiber;
+      if (harvest.food > 0) {
+        player.hunger = Math.min(MAX_HUNGER, player.hunger + harvest.food);
+      }
 
       triggerPlayerAction(player, isTree ? 'chop' : isRock ? 'mine' : 'forage', isTree ? 0.32 : isRock ? 0.35 : 0.28);
 
@@ -1435,6 +1438,42 @@ export function damagePlayer(player: Player, amount: number): void {
     player.hp = 0;
     player.respawnTimer = RESPAWN_TIME;
   }
+}
+
+/**
+ * Reposition a player to a random legal location on the map upon respawn.
+ * Picks a random walkable coordinate clear of solid buildings.
+ */
+export function respawnPlayerAtRandomLocation(
+  player: Player,
+  world: WorldTerrain,
+  rng: Rng,
+  buildings?: readonly Building[],
+): void {
+  const margin = 16;
+  let targetGx = 160.5;
+  let targetGy = 160.5;
+  for (let attempts = 0; attempts < 200; attempts++) {
+    const gx = Math.floor(margin + rng.next() * (W - margin * 2));
+    const gy = Math.floor(margin + rng.next() * (H - margin * 2));
+    if (!isWalkable(world, gx, gy)) continue;
+    if (buildings !== undefined && isTileOccupiedBySolidBuilding(gx, gy, buildings, 'player')) continue;
+    targetGx = gx + 0.5;
+    targetGy = gy + 0.5;
+    break;
+  }
+  player.gx = targetGx;
+  player.gy = targetGy;
+  player.vx = 0;
+  player.vy = 0;
+  player.elevationPx = 0;
+  player.cursorGx = Math.floor(targetGx);
+  player.cursorGy = Math.floor(targetGy) + 1;
+  player.facing = 's';
+  player.faceDirX = 0;
+  player.faceDirY = 1;
+  player.workKind = 'none';
+  player.workProgress = 0;
 }
 
 export { MAX_HP, MAX_HUNGER };

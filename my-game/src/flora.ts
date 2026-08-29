@@ -85,6 +85,9 @@ export interface FloraHarvest {
   readonly wood?: number;
   readonly stone?: number;
   readonly fiber?: number;
+  /** Hunger points restored when this flora is foraged. Never enters inventory — applied
+   *  directly to satiety via `feedPlayer` in `interactAtFacing`. */
+  readonly food?: number;
 }
 
 export interface FloraDefinition {
@@ -676,10 +679,10 @@ export const FLORA_REGISTRY: Record<FloraKind, FloraDefinition> = {
   },
   bush: {
     kind: 'bush',
-    name: 'Bush',
+    name: 'Berry Bush',
     category: 'shrub',
-    harvest: { wood: 2, fiber: 2 },
-    harvestVerb: 'HARVESTED',
+    harvest: { wood: 2, fiber: 1, food: 8 },
+    harvestVerb: 'PICKED',
     edible: true,
     preferredBiomes: ['meadow', 'taiga', 'wetlands', 'coastal'],
     toolMultiplier: { axe: 1.2 },
@@ -702,7 +705,7 @@ export const FLORA_REGISTRY: Record<FloraKind, FloraDefinition> = {
     kind: 'mushroom',
     name: 'Mushroom',
     category: 'fungus',
-    harvest: { fiber: 2 },
+    harvest: { food: 12 },
     harvestVerb: 'FORAGED',
     edible: true,
     preferredBiomes: ['wetlands', 'taiga', 'meadow'],
@@ -1154,6 +1157,7 @@ export interface HarvestYield {
   readonly wood: number;
   readonly stone: number;
   readonly fiber: number;
+  readonly food: number;
   readonly label: string;
 }
 
@@ -1183,14 +1187,16 @@ export function harvestFloraAt(flora: FloraItem[], gx: number, gy: number): Harv
   const wood = def.harvest.wood ?? 0;
   const stone = def.harvest.stone ?? 0;
   const fiber = def.harvest.fiber ?? 0;
+  const food = def.harvest.food ?? 0;
 
   const parts: string[] = [];
   if (wood > 0) parts.push(`+${wood} WOOD`);
   if (stone > 0) parts.push(`+${stone} STONE`);
   if (fiber > 0) parts.push(`+${fiber} FIBER`);
+  if (food > 0) parts.push(`+${food} FOOD`);
   const label = `${parts.join(', ')} (${def.name.toUpperCase()} ${def.harvestVerb})`;
 
-  return { item, wood, stone, fiber, label };
+  return { item, wood, stone, fiber, food, label };
 }
 
 const DEFAULT_EDIBLE_KINDS: readonly FloraKind[] = ['flowers', 'bush', 'mushroom'];

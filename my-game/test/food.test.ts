@@ -1,5 +1,14 @@
 import { describe, it, expect } from 'vitest';
-import { createPlayers, tickPlayer, MAX_HUNGER } from '../src/players.js';
+import { createRng } from '@latticekit/core';
+import { createWorld, isWalkable } from '../src/world.js';
+import { rebuildFloraSpatial, type FloraItem } from '../src/flora.js';
+import {
+  createPlayers,
+  tickPlayer,
+  interactAtFacing,
+  respawnPlayerAtRandomLocation,
+  MAX_HUNGER,
+} from '../src/players.js';
 import {
   createFoodPool,
   createFoodEvents,
@@ -113,5 +122,84 @@ describe('Hunger & Food Drops', () => {
 
     expect(res.creatureDefeated).toBe(true);
     expect(pool.some((f) => f.live && f.species === 'rabbit')).toBe(true);
+  });
+
+  it('foraging mushrooms restores hunger and gives no fiber', () => {
+    const world = createWorld(42);
+    const [p1] = createPlayers();
+    p1.gx = 10;
+    p1.gy = 10;
+    p1.facing = 's';
+    p1.hunger = 40;
+    const initialFiber = p1.inventory.fiber;
+
+    const mushroom: FloraItem = {
+      id: 99,
+      kind: 'mushroom',
+      gx: 10,
+      gy: 11,
+      w: 1,
+      d: 1,
+      basePx: 0,
+      scale: 1,
+      subType: 0,
+    };
+    const flora = [mushroom];
+    rebuildFloraSpatial(flora);
+
+    const result = interactAtFacing(p1, world, flora, []);
+    expect(result.type).toBe('forage');
+    expect(p1.hunger).toBeGreaterThan(40);
+    expect(p1.inventory.fiber).toBe(initialFiber);
+    expect(flora.length).toBe(0);
+  });
+
+  it('picking berries from bushes restores hunger and gives wood/fiber', () => {
+    const world = createWorld(42);
+    const [p1] = createPlayers();
+    p1.gx = 10;
+    p1.gy = 10;
+    p1.facing = 's';
+    p1.hunger = 40;
+    const initialFiber = p1.inventory.fiber;
+    const initialWood = p1.inventory.wood;
+
+    const bush: FloraItem = {
+      id: 100,
+      kind: 'bush',
+      gx: 10,
+      gy: 11,
+      w: 1,
+      d: 1,
+      basePx: 0,
+      scale: 1,
+      subType: 0,
+    };
+    const flora = [bush];
+    rebuildFloraSpatial(flora);
+
+    const result = interactAtFacing(p1, world, flora, []);
+    expect(result.type).toBe('forage');
+    expect(p1.hunger).toBeGreaterThan(40);
+    expect(p1.inventory.wood).toBeGreaterThan(initialWood);
+    expect(p1.inventory.fiber).toBeGreaterThan(initialFiber);
+    expect(flora.length).toBe(0);
+  });
+
+  it('respawnPlayerAtRandomLocation places the player at a walkable legal location', () => {
+    const world = createWorld(42);
+    const [p1] = createPlayers();
+    const rng = createRng(12345);
+
+    for (let i = 0; i < 20; i++) {
+      respawnPlayerAtRandomLocation(p1, world, rng, []);
+      expect(isWalkable(world, Math.floor(p1.gx), Math.floor(p1.gy))).toBe(true);
+      expect(p1.gx).toBeGreaterThanOrEqual(16);
+      expect(p1.gx).toBeLessThanOrEqual(640 - 16);
+      expect(p1.gy).toBeGreaterThanOrEqual(16);
+      expect(p1.gy).toBeLessThanOrEqual(640 - 16);
+      expect(p1.vx).toBe(0);
+      expect(p1.vy).toBe(0);
+    }
   });
 });

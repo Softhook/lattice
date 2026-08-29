@@ -1,5 +1,5 @@
 /**
- * Keyboard input for two players.
+ * Keyboard input for two players, with optional gamepad augmentation for Player 2.
  *
  * Player movement is continuous (held-key), tracked in a set.
  * Actions (dig, raise, attack/place, toggle inventory) use rising-edge detection so they fire
@@ -14,26 +14,25 @@
  * Key layout:
  *
  *   Player 1 (Left Viewport)         Player 2 (Right Viewport)
- *   W / S    → move N / S            I / K    → move N / S
- *   A / D    → move W / E            J / L    → move W / E
- *   Q        → Dig ground            U        → Dig ground
- *   R        → Raise ground          Y        → Raise ground
+ *   W / S    → move N / S            I / K    → move N / S  (or left-stick / D-pad)
+ *   A / D    → move W / E            J / L    → move W / E  (or left-stick / D-pad)
+ *   Q        → Dig ground            U        → Dig ground   (or West/□ button)
+ *   R        → Raise ground          Y        → Raise ground (or North/△ button)
  *   Space    → Interact / Attack /   N        → Interact / Attack /
- *              Place armed building             Place armed building
- *   C or V   → Open/close Inventory  , or .   → Open/close Inventory
+ *              Place armed building             Place armed building (or South/× button)
+ *   C or V   → Open/close Inventory  , or .   → Open/close Inventory (or LB/RB/Start)
  *
  * Space/N is one contextual button: it places the currently armed build kind if one is armed,
- * otherwise it's interact-or-attack. What to build and which weapon to equip is chosen ahead of
- * time in the Inventory overlay (C/V, ,/.) — not by cycling through options in the world — so a
- * player is never mid-decision when a fight starts. While the Inventory is open, the movement
- * keys re-purpose as up/down/left/right navigation (`navUp` etc. below) instead of moving the
- * player, and Space/N confirms the highlighted entry.
+ * otherwise it's interact-or-attack. While the Inventory is open, the movement keys re-purpose
+ * as up/down/left/right navigation (and D-pad does the same via the gamepad bridge in
+ * `gamepad.ts`) — the player stands still instead of walking off.
  */
 
 export interface KeyState {
   readonly held: Set<string>;
 }
 
+/** Out-param shape for a movement vector. Written in-place to stay allocation-free at 60 Hz. */
 export interface Vec2Out {
   dx: number;
   dy: number;
@@ -57,14 +56,8 @@ export interface PlayerActionEdges {
 
 function createPlayerActionEdges(): PlayerActionEdges {
   return {
-    dig: false,
-    raise: false,
-    attack: false,
-    invToggle: false,
-    navUp: false,
-    navDown: false,
-    navLeft: false,
-    navRight: false,
+    dig: false, raise: false, attack: false, invToggle: false,
+    navUp: false, navDown: false, navLeft: false, navRight: false,
   };
 }
 
@@ -84,9 +77,7 @@ export function createKeyState(): { state: KeyState; dispose: () => void } {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
     held.add(e.code);
   };
-  const onUp = (e: KeyboardEvent) => {
-    held.delete(e.code);
-  };
+  const onUp = (e: KeyboardEvent) => { held.delete(e.code); };
   document.addEventListener('keydown', onDown);
   document.addEventListener('keyup',   onUp);
   return {
@@ -98,12 +89,11 @@ export function createKeyState(): { state: KeyState; dispose: () => void } {
   };
 }
 
-// ── Movement polls (Zero-allocation) ──────────────────────────────────────────
+// ── Movement polls (zero-allocation) ──────────────────────────────────────────
 
 /** Poll movement directions for Player 1 into an out-parameter. */
 export function pollP1Movement(keys: ReadonlySet<string>, out: Vec2Out): void {
-  let dx = 0;
-  let dy = 0;
+  let dx = 0, dy = 0;
   if (keys.has('KeyA') || keys.has('ArrowLeft'))  dx -= 1;
   if (keys.has('KeyD') || keys.has('ArrowRight')) dx += 1;
   if (keys.has('KeyW') || keys.has('ArrowUp'))    dy -= 1;
@@ -112,22 +102,36 @@ export function pollP1Movement(keys: ReadonlySet<string>, out: Vec2Out): void {
   out.dy = dy;
 }
 
-/** Poll movement directions for Player 2 into an out-parameter. */
-export function pollP2Movement(keys: ReadonlySet<string>, out: Vec2Out): void {
-  let dx = 0;
-  let dy = 0;
+/**
+ * Poll movement directions for Player 2, merging keyboard and analog-stick sources.
+ *
+ * `stickDx`/`stickDy` come from `PlayerGamepad.readStick()` (deadzone already applied,
+ * range [-1, 1]). Keyboard keys contribute ±1 on top. The result is clamped to [-1, 1]
+ * so pressing a key and pushing the stick in the same direction doesn't overshoot.
+ *
+ * Pass `stickDx = 0, stickDy = 0` (or call without a connected pad) and this is identical
+ * to a plain keyboard-only poll. D-pad directions arrive here as keyboard codes via the
+ * gamepad bridge in `gamepad.ts`, so they go through the same `keys.has(...)` path.
+ */
+export function pollP2Movement(
+  keys: ReadonlySet<string>,
+  stickDx: number,
+  stickDy: number,
+  out: Vec2Out,
+): void {
+  let dx = stickDx, dy = stickDy;
   if (keys.has('KeyJ')) dx -= 1;
   if (keys.has('KeyL')) dx += 1;
   if (keys.has('KeyI')) dy -= 1;
   if (keys.has('KeyK')) dy += 1;
-  out.dx = dx;
-  out.dy = dy;
+  out.dx = dx < -1 ? -1 : dx > 1 ? 1 : dx;
+  out.dy = dy < -1 ? -1 : dy > 1 ? 1 : dy;
 }
 
-// ── Action edge detection (Zero-allocation) ───────────────────────────────────
+// ── Action edge detection (zero-allocation) ────────────────────────────────────
 
-/** The `KeyboardEvent.code`s bound to one player's actions — the single source of truth `Key
- *  layout` above is generated from. */
+/** The `KeyboardEvent.code`s bound to one player's actions. Single source of truth from
+ *  which the key-layout comment above is generated. */
 interface PlayerKeyMap {
   readonly dig: string;
   readonly raise: string;
@@ -159,15 +163,15 @@ function pollPlayerActions(
   keys: PlayerKeyMap,
   out: PlayerActionEdges,
 ): void {
-  out.dig    = curr.has(keys.dig) && !prev.has(keys.dig);
-  out.raise  = curr.has(keys.raise) && !prev.has(keys.raise);
+  out.dig    = curr.has(keys.dig)    && !prev.has(keys.dig);
+  out.raise  = curr.has(keys.raise)  && !prev.has(keys.raise);
   out.attack = curr.has(keys.attack) && !prev.has(keys.attack);
   out.invToggle =
     (curr.has(keys.invToggleA) && !prev.has(keys.invToggleA)) ||
     (curr.has(keys.invToggleB) && !prev.has(keys.invToggleB));
-  out.navUp    = curr.has(keys.navUp) && !prev.has(keys.navUp);
-  out.navDown  = curr.has(keys.navDown) && !prev.has(keys.navDown);
-  out.navLeft  = curr.has(keys.navLeft) && !prev.has(keys.navLeft);
+  out.navUp    = curr.has(keys.navUp)    && !prev.has(keys.navUp);
+  out.navDown  = curr.has(keys.navDown)  && !prev.has(keys.navDown);
+  out.navLeft  = curr.has(keys.navLeft)  && !prev.has(keys.navLeft);
   out.navRight = curr.has(keys.navRight) && !prev.has(keys.navRight);
 }
 
@@ -184,7 +188,5 @@ export function pollActions(
 /** Copy current held set into `target` Set in-place without reallocating. */
 export function copyKeys(source: ReadonlySet<string>, target: Set<string>): void {
   target.clear();
-  for (const k of source) {
-    target.add(k);
-  }
+  for (const k of source) target.add(k);
 }

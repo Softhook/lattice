@@ -1,7 +1,7 @@
 {
-  "$comment": "Every number the landing page prints, with the command that produced it. Nothing on the page may state a figure that is not in this file or read live off the running kit. If you cannot name the command, the number does not go on the page. `npm run measured` re-runs every command here and fails the build when this file disagrees with the repository \u2014 the rule above was stated from the first day and drifted anyway, in nine figures, because nothing re-ran the commands.",
-  "commit": "b9ed713",
-  "measuredOn": "2026-08-25",
+  "$comment": "Every number the landing page prints, with the command that produced it. Nothing on the page may state a figure that is not in this file or read live off the running kit. If you cannot name the command, the number does not go on the page. `npm run measured` re-runs every command here and fails the build when this file disagrees with the repository — the rule above was stated from the first day and drifted anyway, in nine figures, because nothing re-ran the commands.",
+  "commit": "552a8a1",
+  "measuredOn": "2026-08-29",
   "machine": "Apple Silicon, Node v24.18",
   "figures": {
     "packages": {
@@ -20,31 +20,31 @@
       "source": "find packages -type f -not -path '*/node_modules/*' -not -path '*/dist/*' -not -path '*/coverage/*' — 207 .ts, 19 .json, 9 .md, nothing else"
     },
     "tests": {
-      "value": 2706,
+      "value": 2763,
       "unit": "",
-      "source": "npx vitest run — 2706 passed (2706)"
+      "source": "npx vitest run — 2763 passed (2763)"
     },
 
     "testFiles": {
-      "value": 107,
+      "value": 111,
       "unit": "",
-      "source": "npx vitest run — 107 passed (107)"
+      "source": "npx vitest run — 111 passed (111)"
     },
 
     "publicSymbols": {
-      "value": 527,
+      "value": 528,
       "unit": "",
       "source": "unique names across .lattice/kit.json packages.*.exports (raw sum 544; VERSION appears in eight)"
     },
     "gzipTotal": {
-      "value": 82.82,
+      "value": 82.87,
       "unit": "kB",
-      "source": "npm run size \u2014 total 82.82 kB, exclusive backends charged at the heaviest, never summed"
+      "source": "npm run size — total 82.87 kB, exclusive backends charged at the heaviest, never summed"
     },
     "frameBudget": {
       "value": 8,
       "unit": "ms",
-      "source": ".lattice/kit.json \u2014 budgets.maxFrameBudgetMs"
+      "source": ".lattice/kit.json — budgets.maxFrameBudgetMs"
     },
     "spriteDraw": {
       "value": "2.14 ms",
@@ -95,9 +95,9 @@
     },
     {
       "package": "draw",
-      "gzipKb": 12.27,
+      "gzipKb": 12.32,
       "budgetKb": 12.5,
-      "note": "exclusive backends, charged at the heaviest: canvas2d 12.27 charged, record 11.31, shared 10.19"
+      "note": "exclusive backends, charged at the heaviest: canvas2d 12.32 charged, record 11.31, shared 10.19"
     },
     {
       "package": "loop",

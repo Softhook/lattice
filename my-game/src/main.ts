@@ -5,7 +5,7 @@
  * No game logic lives here. This file is the ordering that cannot be wrong.
  */
 
-import { hashString, hashStep, toUnit, clamp } from '@latticekit/core';
+import { hashString, hashStep, toUnit, clamp, createRng, hash2 } from '@latticekit/core';
 import {
   createCamera,
   tileBounds,
@@ -50,6 +50,7 @@ import {
   digAtFacing,
   raiseAtFacing,
   tickPlayer,
+  respawnPlayerAtRandomLocation,
   toggleInventory,
   inventoryNav,
   activateInventorySelection,
@@ -85,6 +86,7 @@ import {
   resizeCameras,
 } from './render.js';
 import { createGameAudio } from './audio.js';
+import { PlayerGamepad } from './gamepad.js';
 import { createVerdantStore, extractSaveState } from './storage.js';
 import {
   createProjectilePool,
@@ -155,7 +157,7 @@ const missions = placeMissionSites(SEED, world);
 // From the browser console: `verdant.triggerMission()` teleports Player 1 to mission 0's site,
 // which fires the same proximity trigger a player walking there would — announcement, tower,
 // and monster spawns all play out exactly as in real play, just without the walk.
-if (import.meta.env.DEV) {
+if ((import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV) {
   (window as unknown as { verdant: unknown }).verdant = {
     missions,
     buildings,
@@ -339,6 +341,16 @@ const edges = createActionEdges();
 const moveVec1: Vec2Out = { dx: 0, dy: 0 };
 const moveVec2: Vec2Out = { dx: 0, dy: 0 };
 
+// ── Player 2 Gamepad ───────────────────────────────────────────────────────────
+//
+// Gamepad index 0 (the first connected controller) is assigned to Player 2. Player 1 remains
+// keyboard-only for now; a second `PlayerGamepad` with `gamepadIndex: 1` would cover P1 when
+// that is wired up. `stickVec2` is the per-tick zero-allocation scratch used to read P2's
+// analog stick before it is merged with keyboard input in `pollP2Movement`.
+
+const gamepadP2 = new PlayerGamepad({ gamepadIndex: 0, playerLabel: 'Player 2', toast: true });
+const stickVec2: Vec2Out = { dx: 0, dy: 0 };
+
 // Unlock audio on first keypress or canvas interaction
 function onFirstGesture(): void {
   audio.unlock();
@@ -511,6 +523,11 @@ function runPlayerActions(player: Player, e: PlayerActionEdges, dt: number, move
 loop.onUpdate((dt, tick) => {
   input.tick(tick);
 
+  // Poll gamepad first so any synthetic keydown/keyup events it fires are visible to
+  // `pollActions` in the same tick — the document listener in `createKeyState` picks them up
+  // synchronously during `dispatchEvent`.
+  gamepadP2.pollTick();
+
   const curr = keyState.held;
   pollActions(prevKeys, curr, edges);
 
@@ -522,7 +539,10 @@ loop.onUpdate((dt, tick) => {
   const p1Stepped = movePlayer(p1, moveVec1.dx, moveVec1.dy, world, buildings, dt);
   let p2Stepped = false;
   if (p2.active) {
-    pollP2Movement(curr, moveVec2);
+    // Merge keyboard and analog stick — readStick returns (0,0) when no pad is connected,
+    // making this identical to a plain keyboard poll in that case.
+    gamepadP2.readStick(stickVec2);
+    pollP2Movement(curr, stickVec2.dx, stickVec2.dy, moveVec2);
     if (p2.invOpen) { moveVec2.dx = 0; moveVec2.dy = 0; }
     p2Stepped = movePlayer(p2, moveVec2.dx, moveVec2.dy, world, buildings, dt);
   }
@@ -635,8 +655,15 @@ loop.onUpdate((dt, tick) => {
 
   // ── Player regen & respawn ────────────────────────────────────────────────────
   const p1Respawned = tickPlayer(p1, dt);
+  if (p1Respawned) {
+    const rng = createRng(hash2(SEED ^ 0x7e59a11, tickCount, p1.index));
+    respawnPlayerAtRandomLocation(p1, world, rng, buildings);
+    audio.play('respawn');
+  }
   const p2Respawned = p2.active && tickPlayer(p2, dt);
-  if (p1Respawned || p2Respawned) {
+  if (p2Respawned) {
+    const rng = createRng(hash2(SEED ^ 0x7e59a11, tickCount, p2.index));
+    respawnPlayerAtRandomLocation(p2, world, rng, buildings);
     audio.play('respawn');
   }
 
@@ -811,6 +838,7 @@ function dispose(): void {
   loop.stop();
   input.dispose();
   disposeKeys();
+  gamepadP2.dispose();
   audio.dispose();
   window.removeEventListener('resize', fit);
 }
