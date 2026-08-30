@@ -122,6 +122,8 @@ export interface Player {
   hurtFlash: number;
   /** Respawn timer in seconds. > 0 means knocked down. */
   respawnTimer: number;
+  /** Whether the player is currently resting / lying down in a bed. */
+  sleeping: boolean;
   /** Accumulated movement distance for footstep sound cadence. */
   moveAccum: number;
   /** Walk animation phase [0, 1) for continuous leg swing. */
@@ -203,6 +205,7 @@ const STARVE_DAMAGE_PER_SEC = 3;
 export const PLAYER_MODES: readonly PlayerMode[] = [
   'move',
   'campfire',
+  'bed',
   'palisade',
   'wood_wall',
   'stone_wall',
@@ -258,6 +261,7 @@ function makePlayer(index: 0 | 1, gx: number, gy: number): Player {
     combatCooldown: 0,
     hurtFlash: 0,
     respawnTimer: 0,
+    sleeping: false,
     moveAccum: 0,
     walkCycle: 0,
     isMoving: false,
@@ -509,6 +513,17 @@ export function movePlayer(
     }
   }
 
+  if (player.sleeping) {
+    if (inputDx !== 0 || inputDy !== 0) {
+      player.sleeping = false;
+    } else {
+      player.isMoving = false;
+      player.vx = 0;
+      player.vy = 0;
+      return false;
+    }
+  }
+
   // Target input velocity
   let targetVx = 0;
   let targetVy = 0;
@@ -742,7 +757,7 @@ export function buildAtFacing(
   return placed;
 }
 
-export type InteractType = 'chop' | 'mine' | 'forage' | 'repair' | 'stoke' | 'none';
+export type InteractType = 'chop' | 'mine' | 'forage' | 'repair' | 'stoke' | 'sleep' | 'none';
 
 export interface InteractResult {
   type: InteractType;
@@ -814,7 +829,33 @@ export function interactAtFacing(
     }
   }
 
-  // 3. Building repair
+  // 3. Bed resting / sleep
+  if (target.kind === 'bed') {
+    if (player.sleeping) {
+      player.sleeping = false;
+      const msg = 'WOKE UP';
+      player.lastActionMsg = msg;
+      player.msgTimer = 1.5;
+      return { type: 'sleep', label: msg };
+    }
+    for (let i = 0; i < buildings.length; i++) {
+      const b = buildings[i];
+      if (b !== undefined && b.kind === 'bed' && b.hp > 0 && target.gx >= b.gx && target.gx < b.gx + b.w && target.gy >= b.gy && target.gy < b.gy + b.d) {
+        player.sleeping = true;
+        player.gx = b.gx;
+        player.gy = b.gy;
+        player.vx = 0;
+        player.vy = 0;
+        player.facing = 's';
+        const msg = 'RESTING IN BED';
+        player.lastActionMsg = msg;
+        player.msgTimer = 2.0;
+        return { type: 'sleep', label: msg };
+      }
+    }
+  }
+
+  // 4. Building repair
   if (target.kind === 'repair') {
     for (let i = 0; i < buildings.length; i++) {
       const b = buildings[i];
@@ -934,7 +975,7 @@ export function cycleBuildKind(player: Player): PlayerMode {
 
 // ── Target & Context Cursor ───────────────────────────────────────────────────
 
-export type TargetContextKind = 'creature' | 'flora' | 'campfire' | 'repair' | 'building' | 'build' | 'terrain' | 'none';
+export type TargetContextKind = 'creature' | 'flora' | 'campfire' | 'bed' | 'repair' | 'building' | 'build' | 'terrain' | 'none';
 
 export interface TargetContext {
   kind: TargetContextKind;
@@ -1117,6 +1158,17 @@ function resolveBuildingTarget(
       TARGET_SCRATCH.color = hex('#ff9f43');
       return true;
     }
+    if (b.kind === 'bed') {
+      TARGET_SCRATCH.kind = 'bed';
+      TARGET_SCRATCH.gx = b.gx;
+      TARGET_SCRATCH.gy = b.gy;
+      TARGET_SCRATCH.basePx = b.basePx;
+      TARGET_SCRATCH.actionKey = actKey;
+      TARGET_SCRATCH.actionLabel = player.sleeping ? 'WAKE UP' : 'REST IN BED';
+      TARGET_SCRATCH.subLabel = 'BED';
+      TARGET_SCRATCH.color = hex('#a29bfe');
+      return true;
+    }
     if (b.hp < b.maxHp) {
       TARGET_SCRATCH.kind = 'repair';
       TARGET_SCRATCH.gx = b.gx;
@@ -1159,6 +1211,18 @@ export function getTargetContext(
     TARGET_SCRATCH.kind = 'none';
     TARGET_SCRATCH.actionLabel = '';
     TARGET_SCRATCH.subLabel = '';
+    return TARGET_SCRATCH;
+  }
+
+  if (player.sleeping) {
+    TARGET_SCRATCH.kind = 'bed';
+    TARGET_SCRATCH.gx = Math.floor(player.gx);
+    TARGET_SCRATCH.gy = Math.floor(player.gy);
+    TARGET_SCRATCH.basePx = heightAt(world.field, player.gx, player.gy);
+    TARGET_SCRATCH.actionKey = actKey;
+    TARGET_SCRATCH.actionLabel = 'WAKE UP';
+    TARGET_SCRATCH.subLabel = 'BED';
+    TARGET_SCRATCH.color = hex('#a29bfe');
     return TARGET_SCRATCH;
   }
 
@@ -1358,8 +1422,11 @@ export function clearWork(player: Player): void {
 
 // ── HP and respawn ─────────────────────────────────────────────────────────────
 
+/** Fast HP regen rate when resting in bed. */
+const BED_REGEN_RATE = 12;
+
 /** Update HP regen, damage flash, message timer, action animation timer, and respawn timer. Returns true if player just respawned. */
-export function tickPlayer(player: Player, dt: number): boolean {
+export function tickPlayer(player: Player, dt: number, isNight = false): boolean {
   if (player.actionTimer > 0) {
     player.actionTimer = Math.max(0, player.actionTimer - dt);
     if (player.actionTimer <= 0) {
@@ -1382,6 +1449,7 @@ export function tickPlayer(player: Player, dt: number): boolean {
       player.hp = MAX_HP;
       player.hunger = MAX_HUNGER;
       player.respawnTimer = 0;
+      player.sleeping = false;
       player.combatCooldown = 0;
       player.hurtFlash = 0;
       player.actionType = 'none';
@@ -1389,6 +1457,20 @@ export function tickPlayer(player: Player, dt: number): boolean {
       return true; // Respawned!
     }
     return false;
+  }
+
+  if (player.sleeping) {
+    player.walkCycle = (player.walkCycle + dt * 0.5) % 1;
+    if (isNight) {
+      // At night in bed: hunger does NOT decrease, and health recovers
+      if (player.combatCooldown > 0) {
+        player.combatCooldown = Math.max(0, player.combatCooldown - dt);
+      }
+      if (player.hp < MAX_HP) {
+        player.hp = Math.min(MAX_HP, player.hp + BED_REGEN_RATE * dt);
+      }
+      return false;
+    }
   }
 
   // Hunger drains whenever the player is up and about. At empty it bleeds HP directly (not via
@@ -1403,6 +1485,7 @@ export function tickPlayer(player: Player, dt: number): boolean {
     if (player.hurtFlash <= 0) player.hurtFlash = 0.6;
     if (player.hp <= 0) {
       player.hp = 0;
+      player.sleeping = false;
       player.respawnTimer = RESPAWN_TIME;
       return false;
     }
@@ -1411,7 +1494,7 @@ export function tickPlayer(player: Player, dt: number): boolean {
   if (player.combatCooldown > 0) {
     player.combatCooldown = Math.max(0, player.combatCooldown - dt);
   } else if (!starving && player.hp < MAX_HP) {
-    player.hp = Math.min(MAX_HP, player.hp + REGEN_RATE * dt);
+    player.hp = Math.min(MAX_HP, player.hp + (player.sleeping ? BED_REGEN_RATE : REGEN_RATE) * dt);
   }
   return false;
 }
@@ -1423,6 +1506,7 @@ export function tickPlayer(player: Player, dt: number): boolean {
  */
 export function feedPlayer(player: Player, amount: number, species: string): void {
   if (player.respawnTimer > 0) return;
+  player.sleeping = false;
   player.hunger = Math.min(MAX_HUNGER, player.hunger + amount);
   player.lastActionMsg = `ATE ${species.toUpperCase()} MEAT (+${Math.round(amount)} FOOD)`;
   player.msgTimer = 2.0;
@@ -1431,6 +1515,7 @@ export function feedPlayer(player: Player, amount: number, species: string): voi
 /** Apply incoming damage. Triggers respawn if HP reaches 0. */
 export function damagePlayer(player: Player, amount: number): void {
   if (player.respawnTimer > 0) return;
+  player.sleeping = false;
   player.hp = Math.max(0, player.hp - amount);
   player.combatCooldown = 3.0;
   player.hurtFlash = 0.35;
@@ -1450,6 +1535,7 @@ export function respawnPlayerAtRandomLocation(
   rng: Rng,
   buildings?: readonly Building[],
 ): void {
+  player.sleeping = false;
   const margin = 16;
   let targetGx = 160.5;
   let targetGy = 160.5;

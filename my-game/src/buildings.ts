@@ -49,7 +49,7 @@ export const WIZARD_TRIM       = hex('#3a2a52');
  *  `players.ts`'s `PLAYER_MODES` / the Inventory craft tab. It still lives in this same registry
  *  because doing so gets it depth-sorted rendering, HP/destruction, and player-facing block/attack
  *  collision for free — the entire reason a "mission tower" is modeled as a `Building` at all. */
-export type BuildingKind = 'campfire' | 'palisade' | 'wood_wall' | 'stone_wall' | 'wood_tower' | 'stone_tower' | 'floor' | 'gate' | 'wizard_tower';
+export type BuildingKind = 'campfire' | 'bed' | 'palisade' | 'wood_wall' | 'stone_wall' | 'wood_tower' | 'stone_tower' | 'floor' | 'gate' | 'wizard_tower';
 
 export interface BuildingCost {
   readonly wood: number;
@@ -59,6 +59,7 @@ export interface BuildingCost {
 
 export const BUILDING_COSTS: Record<BuildingKind, BuildingCost> = {
   campfire:    { wood: 4,  stone: 2, fiber: 2 },
+  bed:         { wood: 4,  stone: 0, fiber: 4 },
   palisade:    { wood: 2,  stone: 0 },
   wood_wall:   { wood: 4,  stone: 0 },
   stone_wall:  { wood: 0,  stone: 4 },
@@ -74,6 +75,7 @@ export const BUILDING_COSTS: Record<BuildingKind, BuildingCost> = {
  *  structure. Roughly tracks material cost — see `workSecondsFor` in `players.ts`. */
 export const BUILD_WORK_SECONDS: Record<BuildingKind, number> = {
   campfire:    0.8,
+  bed:         0.6,
   palisade:    0.3,
   wood_wall:   0.6,
   stone_wall:  1.1,
@@ -311,6 +313,38 @@ const campfireMassing: Massing = (w: SolidWriter, v: Variant, _rng: Rng) => {
 
 export const CAMPFIRE_DEF: SpriteDef = defineSprite({ id: 'bld_campfire', w: 1, d: 1, massing: campfireMassing });
 
+/** Bed: Wooden frame, carved posts, headboard, comfortable linen mattress, fluffy pillow, and cozy quilt. */
+const bedMassing: Massing = (w: SolidWriter, _v: Variant, _rng: Rng) => {
+  w.shadow(0.08, 0.08, 0.84, 0.84, 0.35);
+
+  // Corner wooden posts
+  w.post(0.12, 0.12, 0, 0.65, WALL_BEAM, 0.04);
+  w.post(0.88, 0.12, 0, 0.65, WALL_BEAM, 0.04);
+  w.post(0.12, 0.88, 0, 0.35, WALL_BEAM, 0.04);
+  w.post(0.88, 0.88, 0, 0.35, WALL_BEAM, 0.04);
+
+  // Headboard at North end
+  w.box(0.12, 0.08, 0.76, 0.08, { color: WALL_WOOD, h: 0.60, z: 0.0 });
+
+  // Footboard at South end
+  w.box(0.12, 0.84, 0.76, 0.08, { color: WALL_WOOD, h: 0.30, z: 0.0 });
+
+  // Bed wooden frame / rails
+  w.box(0.12, 0.14, 0.76, 0.72, { color: WALL_WOOD, h: 0.16, z: 0.08 });
+
+  // Mattress (soft cream/linen)
+  w.box(0.16, 0.16, 0.68, 0.68, { color: hex('#f5f0eb'), h: 0.14, z: 0.24 });
+
+  // Pillow at the North end
+  w.box(0.24, 0.16, 0.52, 0.20, { color: hex('#ffffff'), h: 0.08, z: 0.36 });
+
+  // Folded sheet rim and cozy blanket / quilt covering lower mattress
+  w.box(0.16, 0.38, 0.68, 0.05, { color: hex('#eae6df'), h: 0.04, z: 0.37 });
+  w.box(0.15, 0.42, 0.70, 0.43, { color: hex('#3d5a80'), h: 0.12, z: 0.28 });
+};
+
+export const BED_DEF: SpriteDef = defineSprite({ id: 'bld_bed', w: 1, d: 1, massing: bedMassing });
+
 /** Wizard Tower: a foreboding conjured spire — twisted obsidian tiers, a jagged crown, pulsing
  *  purple rune bands, and a floating crystal orb overhead. Raised by `missions.ts` when a player
  *  discovers it, never by a player's own Inventory. The pulse and the orb's bob share one
@@ -382,6 +416,17 @@ export const BUILDING_REGISTRY: Record<BuildingKind, BuildingDefinition> = {
     blocksPlayers: false,
     blocksAnimals: false,
     spriteDef: CAMPFIRE_DEF,
+    playerBuilt: true,
+  },
+  bed: {
+    kind: 'bed',
+    name: 'Bed',
+    cost: { wood: 4, stone: 0, fiber: 4 },
+    footprint: { w: 1, d: 1 },
+    maxHp: 120,
+    blocksPlayers: false,
+    blocksAnimals: false,
+    spriteDef: BED_DEF,
     playerBuilt: true,
   },
   palisade: {

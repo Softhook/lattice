@@ -18,6 +18,7 @@ import {
   type Massing,
   type SolidWriter,
   type Ink,
+  hex,
 } from '@latticekit/draw';
 import { Rng, hash2 } from '@latticekit/core';
 import type { Creature } from './creatures.js';
@@ -90,6 +91,32 @@ function makePlayerMassing(bodyColor: Ink): Massing {
     const weaponCode = (v.flags >> 4) & 3; // 0: hands, 1: axe, 2: sword, 3: bow
     const actionCode = (v.flags >> 6) & 15; // 0: none, 1: sword, 2: axe, 3: punch, 4: bow, 5: chop, 6: mine, 7: forage, 8: repair, 9: dig, 10: raise
     const isHurt = ((v.flags >> 10) & 1) !== 0;
+    const isSleeping = ((v.flags >> 11) & 1) !== 0;
+
+    if (isSleeping) {
+      // ── Lying down in bed (Sleeping / Resting pose) ──
+      // @tier-b — gentle breathing motion
+      const breath = Math.sin(v.progress * Math.PI * 2) * 0.02;
+
+      // 1. Head resting on pillow (North end: x: 0.32..0.68, y: 0.16..0.36)
+      w.box(0.32, 0.16, 0.36, 0.20, { color: SKIN_TONE, h: 0.20, z: 0.42 });
+      w.box(0.30, 0.14, 0.40, 0.14, { color: HAIR_DARK, h: 0.22, z: 0.42 });
+      w.box(0.36, 0.24, 0.28, 0.06, { color: visorColor, h: 0.08, z: 0.54 });
+
+      // 2. Torso on mattress (x: 0.26..0.74, y: 0.34..0.48)
+      w.box(0.26, 0.34, 0.48, 0.14, { color: bodyColor, h: 0.18 + breath, z: 0.38 });
+
+      // 3. Arms at sides (resting on mattress/bed frame)
+      w.box(0.18, 0.34, 0.09, 0.16, { color: bodyColor, h: 0.16, z: 0.38 });
+      w.box(0.18, 0.48, 0.09, 0.08, { color: SKIN_TONE, h: 0.14, z: 0.38 });
+      w.box(0.73, 0.34, 0.09, 0.16, { color: bodyColor, h: 0.16, z: 0.38 });
+      w.box(0.73, 0.48, 0.09, 0.08, { color: SKIN_TONE, h: 0.14, z: 0.38 });
+
+      // 4. Cozy folded blanket pulled up over legs and waist (y: 0.44..0.84)
+      w.box(0.16, 0.44, 0.68, 0.06, { color: hex('#eae6df'), h: 0.08 + breath, z: 0.40 });
+      w.box(0.16, 0.50, 0.68, 0.34, { color: hex('#3d5a80'), h: 0.14 + breath * 0.5, z: 0.38 });
+      return;
+    }
 
     const actionPhase = (v.level % 1000) / 1000; // 0..1 action progress
     const walkPhase = v.progress; // 0..1 stride cycle
@@ -1711,13 +1738,14 @@ export function playerVariant(p: Player): Variant {
     p.actionType === 'raise' ? 10 : 0;
 
   const isHurtFlag = p.hurtFlash > 0 ? (1 << 10) : 0;
+  const isSleepingFlag = p.sleeping ? (1 << 11) : 0;
 
   const actionProgress = (p.actionDuration > 0 && p.actionTimer > 0)
     ? Math.min(1.0, Math.max(0.0, 1.0 - p.actionTimer / p.actionDuration))
     : 0;
 
   PLAYER_VARIANT_SCRATCH.seed = hash2(p.index, 42, 0);
-  PLAYER_VARIANT_SCRATCH.flags = facingCode | isMovingFlag | (weaponCode << 4) | (actionCode << 6) | isHurtFlag;
+  PLAYER_VARIANT_SCRATCH.flags = facingCode | isMovingFlag | (weaponCode << 4) | (actionCode << 6) | isHurtFlag | isSleepingFlag;
   PLAYER_VARIANT_SCRATCH.level = Math.floor(actionProgress * 1000);
   PLAYER_VARIANT_SCRATCH.progress = p.walkCycle % 1;
   PLAYER_VARIANT_SCRATCH.label = '';

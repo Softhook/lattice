@@ -6,6 +6,7 @@ import { oreAt } from '../src/underground.js';
 import { populateFlora, FLORA_REGISTRY } from '../src/flora.js';
 import { BUILDING_COSTS, BUILDING_REGISTRY, placeBuilding, type Building } from '../src/buildings.js';
 import { populateWorld, updateCreatures, createCreatureEvents, evolveGeneration, GENERATION_TICKS, MAX_CREATURES, SPECIES_REGISTRY, spawnCreature, isNearActiveFireOrLight, FIRE_WARD_RADIUS, FIRE_SAFE_ZONE_RADIUS, type CreatureState } from '../src/creatures.js';
+import { playerVariant } from '../src/sprites.js';
 
 describe('Verdant Gameplay Logic', () => {
   it('initializes world and terrain grid with bounds', () => {
@@ -506,8 +507,9 @@ describe('Verdant Gameplay Logic', () => {
 
     // 4. Building Registry
     const buildingKeys = Object.keys(BUILDING_REGISTRY);
-    expect(buildingKeys.length).toBe(9);
+    expect(buildingKeys.length).toBe(10);
     expect(buildingKeys.includes('campfire')).toBe(true);
+    expect(buildingKeys.includes('bed')).toBe(true);
     for (const key of buildingKeys) {
       const bld = BUILDING_REGISTRY[key as keyof typeof BUILDING_REGISTRY];
       expect(bld.maxHp).toBeGreaterThan(0);
@@ -796,6 +798,80 @@ describe('Verdant Gameplay Logic', () => {
 
     // Troll does NOT flee from campfire; it sieges buildings or targets players
     expect(troll.state).not.toBe('flee');
+  });
+
+  it('allows crafting, placing, and resting in a bed structure', () => {
+    const world = createWorld(42);
+    const [p1] = createPlayers();
+    p1.gx = 10;
+    p1.gy = 10;
+    p1.facing = 's';
+    p1.inventory.wood = 20;
+    p1.inventory.fiber = 10;
+    p1.mode = 'bed';
+
+    // 1. Build bed
+    const bed = buildAtFacing(p1, world, []);
+    expect(bed).toBeDefined();
+    expect(bed!.kind).toBe('bed');
+    expect(bed!.gx).toBe(10);
+    expect(bed!.gy).toBe(11);
+
+    const buildings = [bed!];
+
+    // 2. Target cursor detects bed
+    const target = getTargetContext(p1, world, [], [], buildings);
+    expect(target.kind).toBe('bed');
+    expect(target.actionLabel).toBe('REST IN BED');
+
+    // 3. Interact to lie down in bed
+    expect(p1.sleeping).toBe(false);
+    const interactRes = interactAtFacing(p1, world, [], buildings);
+    expect(interactRes.label).toBe('RESTING IN BED');
+    expect(p1.sleeping).toBe(true);
+    expect(p1.gx).toBe(10);
+    expect(p1.gy).toBe(11);
+
+    // 4. Sprite variant reflects sleeping flag (bit 11)
+    const variant = playerVariant(p1);
+    expect((variant.flags >> 11) & 1).toBe(1);
+
+    // 5. Interacting again wakes up
+    const wakeRes = interactAtFacing(p1, world, [], buildings);
+    expect(wakeRes.label).toBe('WOKE UP');
+    expect(p1.sleeping).toBe(false);
+    expect((playerVariant(p1).flags >> 11) & 1).toBe(0);
+  });
+
+  it('recovers health and does not decrease hunger when sleeping in bed at night', () => {
+    const [p1] = createPlayers();
+    p1.hp = 50;
+    p1.hunger = 80;
+    p1.sleeping = true;
+
+    // Tick during daytime (isNight = false): hunger decays normally
+    tickPlayer(p1, 1.0, false);
+    expect(p1.hunger).toBeLessThan(80);
+
+    // Reset and tick at night (isNight = true): hunger freezes, HP recovers
+    p1.hunger = 80;
+    p1.hp = 50;
+    tickPlayer(p1, 1.0, true);
+
+    expect(p1.hunger).toBe(80); // Hunger did not decrease!
+    expect(p1.hp).toBeGreaterThan(50); // Health recovered!
+  });
+
+  it('wakes the player when movement input is received', () => {
+    const world = createWorld(42);
+    const [p1] = createPlayers();
+    p1.gx = 10.5;
+    p1.gy = 10.5;
+    p1.sleeping = true;
+
+    // Moving wakes player
+    movePlayer(p1, 1, 0, world, [], 0.1);
+    expect(p1.sleeping).toBe(false);
   });
 });
 

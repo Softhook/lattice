@@ -431,8 +431,8 @@ function resolveCompletedWork(player: Player, kind: WorkKind): void {
   const targetBaseH = heightAt(world.field, targetTile.gx, targetTile.gy);
   const interact = interactAtFacing(player, world, flora, buildings);
   if (interact.type !== 'none') {
-    audio.play(interact.type);
-    const debrisColor = INTERACT_DEBRIS_COLOR[interact.type];
+    audio.play(interact.type === 'sleep' ? 'click' : interact.type);
+    const debrisColor = interact.type !== 'sleep' ? INTERACT_DEBRIS_COLOR[interact.type] : undefined;
     if (debrisColor !== undefined) {
       spawnHarvestDebris(fxPool, targetTile.gx + 0.5, targetTile.gy + 0.5, targetBaseH, debrisColor);
     }
@@ -493,7 +493,21 @@ function runPlayerActions(player: Player, e: PlayerActionEdges, dt: number, move
   // Idle: a fresh press starts a sustained action, or (when there's nothing to work) fires an
   // instant combat swing.
   if (e.attack) {
+    if (player.sleeping) {
+      player.sleeping = false;
+      player.lastActionMsg = 'WOKE UP';
+      player.msgTimer = 1.5;
+      audio.play('click');
+      return;
+    }
     const target = getTargetContext(player, world, flora, creatures, buildings);
+    if (target.kind === 'bed') {
+      const res = interactAtFacing(player, world, flora, buildings);
+      if (res.type !== 'none') {
+        audio.play('click');
+      }
+      return;
+    }
     const work = resolveWork(player, target, flora, buildings);
     if (work.kind !== 'none') {
       startWork(player, work.kind, target.gx, target.gy, work.seconds);
@@ -654,13 +668,17 @@ loop.onUpdate((dt, tick) => {
   }
 
   // ── Player regen & respawn ────────────────────────────────────────────────────
-  const p1Respawned = tickPlayer(p1, dt);
+  const cycle = ((tickCount * dt) % 120) / 120;
+  const daylight = Math.sin(cycle * Math.PI * 2) * 0.5 + 0.5;
+  const isNight = daylight < 0.5;
+
+  const p1Respawned = tickPlayer(p1, dt, isNight);
   if (p1Respawned) {
     const rng = createRng(hash2(SEED ^ 0x7e59a11, tickCount, p1.index));
     respawnPlayerAtRandomLocation(p1, world, rng, buildings);
     audio.play('respawn');
   }
-  const p2Respawned = p2.active && tickPlayer(p2, dt);
+  const p2Respawned = p2.active && tickPlayer(p2, dt, isNight);
   if (p2Respawned) {
     const rng = createRng(hash2(SEED ^ 0x7e59a11, tickCount, p2.index));
     respawnPlayerAtRandomLocation(p2, world, rng, buildings);
