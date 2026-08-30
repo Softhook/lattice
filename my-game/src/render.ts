@@ -866,7 +866,7 @@ function drawViewport(
 
       // In-world contextual action prompt pill floating over targeted object
       // ONLY shown when an actual interaction/action is available (harvest, stoke, attack, repair)
-      if (target.kind !== 'none' && target.kind !== 'build' && target.kind !== 'terrain' && target.actionLabel.length > 0) {
+      if (!activePlayer.sleeping && target.kind !== 'none' && target.kind !== 'build' && target.kind !== 'terrain' && target.actionLabel.length > 0) {
         const cx = target.gx;
         const cy = target.gy;
         const twx = (cx + 0.5 - (cy + 0.5)) * 32;

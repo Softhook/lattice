@@ -830,7 +830,7 @@ export function interactAtFacing(
   }
 
   // 3. Bed resting / sleep
-  if (target.kind === 'bed') {
+  if (target.kind === 'bed' || player.sleeping) {
     if (player.sleeping) {
       player.sleeping = false;
       const msg = 'WOKE UP';
@@ -847,10 +847,9 @@ export function interactAtFacing(
         player.vx = 0;
         player.vy = 0;
         player.facing = 's';
-        const msg = 'RESTING IN BED';
-        player.lastActionMsg = msg;
-        player.msgTimer = 2.0;
-        return { type: 'sleep', label: msg };
+        player.lastActionMsg = '';
+        player.msgTimer = 0;
+        return { type: 'sleep', label: 'RESTING IN BED' };
       }
     }
   }
@@ -1215,14 +1214,9 @@ export function getTargetContext(
   }
 
   if (player.sleeping) {
-    TARGET_SCRATCH.kind = 'bed';
-    TARGET_SCRATCH.gx = Math.floor(player.gx);
-    TARGET_SCRATCH.gy = Math.floor(player.gy);
-    TARGET_SCRATCH.basePx = heightAt(world.field, player.gx, player.gy);
-    TARGET_SCRATCH.actionKey = actKey;
-    TARGET_SCRATCH.actionLabel = 'WAKE UP';
-    TARGET_SCRATCH.subLabel = 'BED';
-    TARGET_SCRATCH.color = hex('#a29bfe');
+    TARGET_SCRATCH.kind = 'none';
+    TARGET_SCRATCH.actionLabel = '';
+    TARGET_SCRATCH.subLabel = '';
     return TARGET_SCRATCH;
   }
 

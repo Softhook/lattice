@@ -832,11 +832,16 @@ describe('Verdant Gameplay Logic', () => {
     expect(p1.gx).toBe(10);
     expect(p1.gy).toBe(11);
 
-    // 4. Sprite variant reflects sleeping flag (bit 11)
+    // 4. Target context has no prompt overlay when sleeping
+    const sleepingTarget = getTargetContext(p1, world, [], [], buildings);
+    expect(sleepingTarget.kind).toBe('none');
+    expect(sleepingTarget.actionLabel).toBe('');
+
+    // 5. Sprite variant reflects sleeping flag (bit 11)
     const variant = playerVariant(p1);
     expect((variant.flags >> 11) & 1).toBe(1);
 
-    // 5. Interacting again wakes up
+    // 6. Interacting again wakes up
     const wakeRes = interactAtFacing(p1, world, [], buildings);
     expect(wakeRes.label).toBe('WOKE UP');
     expect(p1.sleeping).toBe(false);

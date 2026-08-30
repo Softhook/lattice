@@ -212,7 +212,7 @@ export function drawPlayerHud(pen: Pen, player: Player): void {
   }
 
   // 6. Floating action toast, directly under the card (its height already reflects row 5).
-  if (player.lastActionMsg.length > 0 && player.msgTimer > 0) {
+  if (!player.sleeping && player.lastActionMsg.length > 0 && player.msgTimer > 0) {
     const msgY = padY + hudH + 16;
     const alpha = Math.min(1, player.msgTimer * 2);
     const msgCol = player.lastActionMsg.startsWith('NEED')
