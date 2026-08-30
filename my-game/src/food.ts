@@ -1,22 +1,23 @@
 /**
- * Food drops: the meat a hunted animal leaves on the ground, and the pickup that refills a
- * player's hunger bar.
+ * Ground item and food drops: carcass meat left by hunted animals, harvested surplus,
+ * and resources dropped by players to share with teammates.
  *
- * Why a standalone slot-recycled pool rather than a new `FloraKind`: food is not tool-harvested
- * and never regrows. It is walked over and consumed, and it rots on a timer if nobody collects
- * it — none of which the flora registry/regrowth machinery models. The pool is fixed size so a
- * kill landing mid-combat allocates nothing (non-negotiable 7), and it carries no RNG: a carcass
- * drops its meat on the exact tile it died on, so a seed + input log still replays to the same
- * pixel (non-negotiable 1). Bob animation and rot countdown are Tier A arithmetic.
+ * Why a standalone slot-recycled pool rather than a new `FloraKind`: ground drops are not
+ * tool-harvested and never regrows. They are walked over and collected into inventory, and
+ * perishable drops (food) rot on a timer if nobody collects them.
+ * The pool is fixed size so drops landing mid-session allocate nothing (non-negotiable 7),
+ * and it carries no RNG (non-negotiable 1). Bob animation and rot countdown are Tier A arithmetic.
  *
  * Pure logic — no `window`/`document`/timers. Runs unchanged in Node.
  */
 
 import type { Species } from './creatures.js';
-import { feedPlayer, type Player } from './players.js';
+import type { Player } from './players.js';
+
+export type DropKind = 'food' | 'wood' | 'stone' | 'fiber' | 'iron' | 'gems';
 
 /**
- * Which species leave meat when killed, and how many hunger points one carcass restores.
+ * Which species leave meat when killed, and how many food points one carcass yields.
  * Only the huntable game animals are here — predators (wolf, bear, croc…) and the conjured
  * `shade` are not food. A species absent from this map produces no drop, so `spawnFoodDrop`
  * is safe to call unconditionally on any kill.
@@ -32,23 +33,33 @@ export interface FoodDrop {
   live: boolean;
   gx: number;
   gy: number;
-  /** Species it came from — drives the pickup toast wording and the drop's tint. */
-  species: Species;
-  /** Hunger points restored when a player collects it. */
+  /** What kind of ground resource this drop holds. */
+  kind: DropKind;
+  /** Quantity of the resource in this drop (e.g. 5 wood or 16 food). */
+  count: number;
+  /** Species it came from (for animal carcass meat) — drives pickup toast wording and tint. */
+  species?: Species | undefined;
+  /** Hunger points restored when eaten (equal to count for food). */
   nutrition: number;
-  /** Seconds of life left before uncollected meat rots away. */
+  /** Seconds of life left before uncollected items rot or despawn. */
   ttlSec: number;
   /** Continuous [0, 1) bob-animation phase. Visual only — never hashed or persisted. */
   bob: number;
+  /** Cooldown timer preventing immediate re-pickup by the player who dropped it. */
+  pickupDelaySec: number;
+  /** Index of player who dropped this, or undefined if dropped from creature/world. */
+  droppedByPlayer?: 0 | 1 | undefined;
 }
 
-/** Upper bound on meat on the ground at once. A hunt rarely litters more than a handful of
- *  tiles; past this, the oldest-style behavior is simply "no drop" until a slot frees. */
+/** Upper bound on ground items/meat at once. Past this, oldest-style behavior is "no drop" until a slot frees. */
 export const MAX_FOOD = 96;
 
 /** Seconds a dropped carcass lasts before rotting. Long enough to fight your way clear and
  *  walk back for it, short enough that the world doesn't fill with permanent meat. */
 export const FOOD_ROT_SECONDS = 45;
+
+/** Seconds general non-perishable resource drops last before despawning. */
+export const RESOURCE_DESPAWN_SECONDS = 180;
 
 /** A player whose center comes within this many tiles of a drop picks it up. */
 export const FOOD_PICKUP_RADIUS = 0.9;
@@ -57,7 +68,17 @@ export const FOOD_PICKUP_RADIUS = 0.9;
 export function createFoodPool(): FoodDrop[] {
   const pool: FoodDrop[] = [];
   for (let i = 0; i < MAX_FOOD; i++) {
-    pool.push({ live: false, gx: 0, gy: 0, species: 'rabbit', nutrition: 0, ttlSec: 0, bob: 0 });
+    pool.push({
+      live: false,
+      gx: 0,
+      gy: 0,
+      kind: 'food',
+      count: 0,
+      nutrition: 0,
+      ttlSec: 0,
+      bob: 0,
+      pickupDelaySec: 0,
+    });
   }
   return pool;
 }
@@ -81,10 +102,47 @@ export function spawnFoodDrop(pool: FoodDrop[], gx: number, gy: number, species:
       f.live = true;
       f.gx = gx;
       f.gy = gy;
+      f.kind = 'food';
+      f.count = nutrition;
       f.species = species;
       f.nutrition = nutrition;
       f.ttlSec = FOOD_ROT_SECONDS;
       f.bob = 0;
+      f.pickupDelaySec = 0;
+      f.droppedByPlayer = undefined;
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Drop any inventory resource (food, wood, stone, fiber, iron, gems) onto the ground at (gx, gy).
+ * Returns true if a slot was allocated, false if the pool is full.
+ */
+export function spawnResourceDrop(
+  pool: FoodDrop[],
+  gx: number,
+  gy: number,
+  kind: DropKind,
+  count: number,
+  droppedByPlayer?: 0 | 1,
+): boolean {
+  if (count <= 0) return false;
+  for (let i = 0; i < pool.length; i++) {
+    const f = pool[i];
+    if (f !== undefined && !f.live) {
+      f.live = true;
+      f.gx = gx;
+      f.gy = gy;
+      f.kind = kind;
+      f.count = count;
+      f.species = undefined;
+      f.nutrition = kind === 'food' ? count : 0;
+      f.ttlSec = kind === 'food' ? FOOD_ROT_SECONDS : RESOURCE_DESPAWN_SECONDS;
+      f.bob = 0;
+      f.pickupDelaySec = droppedByPlayer !== undefined ? 3.0 : 0;
+      f.droppedByPlayer = droppedByPlayer;
       return true;
     }
   }
@@ -100,6 +158,20 @@ export interface FoodEvents {
  *  out-parameter, same contract as `createCreatureEvents`. */
 export function createFoodEvents(): FoodEvents {
   return { pickedUp: false };
+}
+
+/** Collect a ground drop into a player's inventory and set an action toast. */
+export function collectGroundDrop(player: Player, drop: FoodDrop): void {
+  if (drop.kind === 'food') {
+    player.inventory.food += drop.count;
+    const label = drop.species !== undefined ? `${drop.species.toUpperCase()} MEAT` : 'FOOD';
+    player.lastActionMsg = `COLLECTED ${label} (+${drop.count})`;
+    player.msgTimer = 2.0;
+  } else {
+    player.inventory[drop.kind] += drop.count;
+    player.lastActionMsg = `COLLECTED ${drop.kind.toUpperCase()} (+${drop.count})`;
+    player.msgTimer = 2.0;
+  }
 }
 
 /**
@@ -126,15 +198,32 @@ export function updateFoodDrops(
       f.live = false;
       continue;
     }
+    if (f.pickupDelaySec > 0) {
+      f.pickupDelaySec = Math.max(0, f.pickupDelaySec - dt);
+    }
     f.bob = (f.bob + dt * 1.6) % 1;
 
     for (let p = 0; p < players.length; p++) {
       const player = players[p];
       if (player === undefined || !player.active || player.respawnTimer > 0) continue;
+
       const dx = player.gx - f.gx;
       const dy = player.gy - f.gy;
-      if (dx * dx + dy * dy <= radiusSq) {
-        feedPlayer(player, f.nutrition, f.species);
+      const distSq = dx * dx + dy * dy;
+
+      // If dropped by this player, prevent instant self-pickup until they step away or timer clears
+      if (f.droppedByPlayer === player.index) {
+        if (distSq > 1.6 * 1.6) {
+          // Dropping player walked away — re-arm pickup
+          f.droppedByPlayer = undefined;
+        } else if (f.pickupDelaySec > 0) {
+          // Still standing near drop during delay — skip pickup for dropper
+          continue;
+        }
+      }
+
+      if (distSq <= radiusSq) {
+        collectGroundDrop(player, f);
         f.live = false;
         out.pickedUp = true;
         break;

@@ -7,6 +7,8 @@ import {
   tickPlayer,
   interactAtFacing,
   respawnPlayerAtRandomLocation,
+  eatFood,
+  dropInventoryItem,
   MAX_HUNGER,
 } from '../src/players.js';
 import {
@@ -66,11 +68,11 @@ describe('Hunger & Food Drops', () => {
     expect(pool.filter((f) => f.live).length).toBe(1);
   });
 
-  it('a player standing on a drop collects it and refills hunger (clamped)', () => {
+  it('a player standing on a drop collects it into inventory', () => {
     const [p1, p2] = createPlayers();
     p1.gx = 10;
     p1.gy = 10;
-    p1.hunger = 20;
+    p1.inventory.food = 0;
     p2.gx = 500;
     p2.gy = 500;
 
@@ -80,14 +82,63 @@ describe('Hunger & Food Drops', () => {
     updateFoodDrops(pool, [p1, p2], 1 / 60, ev);
 
     expect(ev.pickedUp).toBe(true);
-    expect(p1.hunger).toBe(20 + (FOOD_YIELD.deer ?? 0));
+    expect(p1.inventory.food).toBe(FOOD_YIELD.deer ?? 0);
     expect(pool.some((f) => f.live)).toBe(false);
+  });
 
-    // Clamps at MAX_HUNGER
-    p1.hunger = 95;
-    spawnFoodDrop(pool, 10, 10, 'deer');
+  it('eating food from inventory restores hunger up to MAX_HUNGER', () => {
+    const [p1] = createPlayers();
+    p1.inventory.food = 30;
+    p1.hunger = 50;
+
+    const res = eatFood(p1, 25);
+    expect(res.ok).toBe(true);
+    expect(res.ate).toBe(25);
+    expect(p1.hunger).toBe(75);
+    expect(p1.inventory.food).toBe(5);
+
+    // Eating when almost full clamps at MAX_HUNGER
+    const res2 = eatFood(p1, 25);
+    expect(res2.ok).toBe(true);
+    expect(res2.ate).toBe(5);
+    expect(p1.hunger).toBe(80);
+    expect(p1.inventory.food).toBe(0);
+
+    // Eating with 0 food fails
+    const res3 = eatFood(p1);
+    expect(res3.ok).toBe(false);
+  });
+
+  it('dropping resources and food spawns drops that teammate can collect', () => {
+    const [p1, p2] = createPlayers();
+    p1.gx = 10;
+    p1.gy = 10;
+    p1.inventory.wood = 20;
+    p1.inventory.food = 15;
+
+    p2.gx = 10;
+    p2.gy = 11.1;
+    p2.inventory.wood = 0;
+    p2.inventory.food = 0;
+
+    const pool = createFoodPool();
+    const ev = createFoodEvents();
+
+    // P1 drops 5 wood
+    const dropRes = dropInventoryItem(p1, 'wood', pool);
+    expect(dropRes.ok).toBe(true);
+    expect(dropRes.count).toBe(5);
+    expect(p1.inventory.wood).toBe(15);
+
+    // P1 does not immediately pick it back up due to cooldown
+    updateFoodDrops(pool, [p1], 1 / 60, ev);
+    expect(ev.pickedUp).toBe(false);
+    expect(p1.inventory.wood).toBe(15);
+
+    // P2 standing nearby collects it
     updateFoodDrops(pool, [p1, p2], 1 / 60, ev);
-    expect(p1.hunger).toBe(MAX_HUNGER);
+    expect(ev.pickedUp).toBe(true);
+    expect(p2.inventory.wood).toBe(5);
   });
 
   it('uncollected meat rots away after FOOD_ROT_SECONDS', () => {
@@ -124,13 +175,13 @@ describe('Hunger & Food Drops', () => {
     expect(pool.some((f) => f.live && f.species === 'rabbit')).toBe(true);
   });
 
-  it('foraging mushrooms restores hunger and gives no fiber', () => {
+  it('foraging mushrooms adds food to inventory and gives no fiber', () => {
     const world = createWorld(42);
     const [p1] = createPlayers();
     p1.gx = 10;
     p1.gy = 10;
     p1.facing = 's';
-    p1.hunger = 40;
+    p1.inventory.food = 0;
     const initialFiber = p1.inventory.fiber;
 
     const mushroom: FloraItem = {
@@ -149,18 +200,18 @@ describe('Hunger & Food Drops', () => {
 
     const result = interactAtFacing(p1, world, flora, []);
     expect(result.type).toBe('forage');
-    expect(p1.hunger).toBeGreaterThan(40);
+    expect(p1.inventory.food).toBeGreaterThan(0);
     expect(p1.inventory.fiber).toBe(initialFiber);
     expect(flora.length).toBe(0);
   });
 
-  it('picking berries from bushes restores hunger and gives wood/fiber', () => {
+  it('picking berries from bushes adds food to inventory and gives wood/fiber', () => {
     const world = createWorld(42);
     const [p1] = createPlayers();
     p1.gx = 10;
     p1.gy = 10;
     p1.facing = 's';
-    p1.hunger = 40;
+    p1.inventory.food = 0;
     const initialFiber = p1.inventory.fiber;
     const initialWood = p1.inventory.wood;
 
@@ -180,7 +231,7 @@ describe('Hunger & Food Drops', () => {
 
     const result = interactAtFacing(p1, world, flora, []);
     expect(result.type).toBe('forage');
-    expect(p1.hunger).toBeGreaterThan(40);
+    expect(p1.inventory.food).toBeGreaterThan(0);
     expect(p1.inventory.wood).toBeGreaterThan(initialWood);
     expect(p1.inventory.fiber).toBeGreaterThan(initialFiber);
     expect(flora.length).toBe(0);

@@ -54,6 +54,7 @@ import {
   toggleInventory,
   inventoryNav,
   activateInventorySelection,
+  dropSelectedInventoryRow,
   getTargetContext,
   resolveWork,
   startWork,
@@ -190,6 +191,7 @@ if (opened.source === 'save' && opened.state && opened.state.p1 && opened.state.
   p1.inventory.fiber = s.p1.fiber;
   p1.inventory.iron = s.p1.iron;
   p1.inventory.gems = s.p1.gems;
+  p1.inventory.food = s.p1.food;
   p1.hp = s.p1.hp;
   p1.hunger = s.p1.hunger;
   p1.gx = s.p1.gx;
@@ -202,6 +204,7 @@ if (opened.source === 'save' && opened.state && opened.state.p1 && opened.state.
   p2.inventory.fiber = s.p2.fiber;
   p2.inventory.iron = s.p2.iron;
   p2.inventory.gems = s.p2.gems;
+  p2.inventory.food = s.p2.food;
   p2.hp = s.p2.hp;
   p2.hunger = s.p2.hunger;
   p2.gx = s.p2.gx;
@@ -251,7 +254,7 @@ if (opened.source === 'save' && opened.state && opened.state.p1 && opened.state.
 // ── DOM Bottom Inventory Bar Helper ───────────────────────────────────────────
 
 // One slot per resource, per player. -1 forces the first paint.
-const domHudSlots = (['wood', 'stone', 'fiber', 'iron', 'gems'] as const).flatMap((res) =>
+const domHudSlots = (['wood', 'stone', 'fiber', 'iron', 'gems', 'food'] as const).flatMap((res) =>
   ([0, 1] as const).map((idx) => ({
     res,
     player: idx === 0 ? p1 : p2,
@@ -468,9 +471,14 @@ function runPlayerActions(player: Player, e: PlayerActionEdges, dt: number, move
     if (e.navDown)  inventoryNav(player, 0, 1);
     if (e.navLeft)  inventoryNav(player, -1, 0);
     if (e.navRight) inventoryNav(player, 1, 0);
+    if (e.dig) {
+      const ok = dropSelectedInventoryRow(player, foodPool);
+      audio.play(ok ? 'forage' : 'deny');
+      return;
+    }
     if (e.attack) {
-      const res = activateInventorySelection(player);
-      audio.play(res.ok ? (res.action === 'craft' ? 'craft' : 'click') : 'deny');
+      const res = activateInventorySelection(player, foodPool);
+      audio.play(res.ok ? (res.action === 'craft' ? 'craft' : res.action === 'eat' ? 'forage' : 'click') : 'deny');
     }
     return;
   }

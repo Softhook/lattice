@@ -23,23 +23,23 @@ Players cooperate to shape the world (dig and build), gather procedural resource
 | **Movement** | <kbd>W</kbd> / <kbd>A</kbd> / <kbd>S</kbd> / <kbd>D</kbd> (Continuous) | <kbd>I</kbd> / <kbd>J</kbd> / <kbd>K</kbd> / <kbd>L</kbd> (Continuous) |
 | **Dig** | <kbd>Q</kbd> | <kbd>U</kbd> |
 | **Raise** | <kbd>R</kbd> | <kbd>Y</kbd> |
-| **Act** (harvest / attack / place) | <kbd>Space</kbd> | <kbd>N</kbd> |
-| **Cycle Build Mode** | <kbd>E</kbd> or <kbd>F</kbd> | <kbd>O</kbd> or <kbd>H</kbd> |
-| **Cycle Weapon** | <kbd>C</kbd> | <kbd>,</kbd> |
-| **Craft / Equip Next Weapon** | <kbd>V</kbd> | <kbd>.</kbd> |
+| **Act** (harvest / attack / place / eat) | <kbd>Space</kbd> | <kbd>N</kbd> |
+| **Open / Close Inventory** | <kbd>C</kbd> or <kbd>V</kbd> | <kbd>,</kbd> or <kbd>.</kbd> |
+| **Drop Resource** (in Inventory) | <kbd>Q</kbd> | <kbd>U</kbd> |
 
 ### Modes & Controls
-- **Move Mode**: The Act key (<kbd>Space</kbd> / <kbd>N</kbd>) harvests resources from the facing tile (chopping trees for Wood, mining boulders for Stone, foraging bushes for Wood/Fiber), attacks a targeted creature, stokes a campfire, or repairs a damaged building — whichever the on-screen prompt is currently pointing at.
-- **Hunger**: The amber bar under each player's HP drains steadily (~4 min from full to empty). Hunt a rabbit, deer, boar, or alpine ibex and walk over the meat it leaves behind to refill it; at empty the player starves and loses HP until they eat. Crocodiles are defensive now — they leave players alone and only turn on you (hard) once attacked. The ibex herds high on the peaks in wolf and troll country, so its meat is the reward for a risky climb.
-- **Dig / Raise**: <kbd>Q</kbd> / <kbd>U</kbd> digs down; <kbd>R</kbd> / <kbd>Y</kbd> raises terrain. Digging now sinks well below sea level (down to 40 units / 400 px) — a shaft on flat meadow keeps going. A pit dug below the waterline turns to dirt, not flood: the water a lake holds is a material, and digging does not connect the two. (The renderer only draws each tile's top face, so a deep shaft reads as steeply stretched ground rather than sheer walls.)
-- **Underground finds**: past ~3 units down a dig can turn up **Iron** ore; past ~9 down, **Gems** — both get more common the deeper you go, and a strike sparks gold debris with a "STRUCK IRON" / "FOUND A GEM" prompt. Each layer of each tile is checked exactly once, so a seam is spent the moment it is dug. Iron is the one material you cannot gather on the surface, and it is all the **Iron Sword** costs (4 Wood, 3 Iron) — a blade is the reward for going deep. Gems are just carried and tallied in the Inventory for now.
-- **Build Mode**: The Act key (<kbd>Space</kbd> / <kbd>N</kbd>) places the selected structure if the player has the required materials:
+- **Move Mode**: The Act key (<kbd>Space</kbd> / <kbd>N</kbd>) harvests resources from the facing tile (chopping trees for Wood, mining boulders for Stone, foraging bushes for Wood/Fiber/Food), attacks a targeted creature, stokes a campfire, or repairs a damaged building — whichever the on-screen prompt is currently pointing at.
+- **Food & Inventory**: Hunted meat (from rabbits, deer, ibex, boar) and foraged flora (berry bushes, mushrooms) are collected into your personal inventory as **Food**. Open the Inventory (<kbd>C</kbd>/<kbd>V</kbd> or <kbd>,</kbd>/<kbd>.</kbd>) and press <kbd>Space</kbd>/<kbd>N</kbd> on Food to eat and restore satiety on demand.
+- **Dropping & Sharing Resources**: Any inventory resource (Food, Wood, Stone, Fiber, Iron, Gems) can be dropped onto the ground from the Inventory overlay by pressing <kbd>Q</kbd> (P1) or <kbd>U</kbd> (P2) to share supplies with your co-op partner. Dropped items render physically in the world and are picked up when another player walks over them.
+- **Hunger**: The amber bar under each player's HP drains steadily (~4 min from full to empty). Keep food stocked in your inventory; when hunger hits zero the player starves and loses HP until they eat.
+- **Dig / Raise**: <kbd>Q</kbd> / <kbd>U</kbd> digs down; <kbd>R</kbd> / <kbd>Y</kbd> raises terrain. Digging sinks well below sea level (down to 40 units / 400 px) — a shaft on flat meadow keeps going.
+- **Underground finds**: past ~3 units down a dig can turn up **Iron** ore; past ~9 down, **Gems** — both get more common the deeper you go, and a strike sparks gold debris with a "STRUCK IRON" / "FOUND A GEM" prompt. Iron is used to craft the **Iron Sword** (4 Wood, 3 Iron).
+- **Build Mode**: Armed structures selected from the Inventory's CRAFT tab are placed with the Act key (<kbd>Space</kbd> / <kbd>N</kbd>) if the player has the required materials:
   - **Wood Wall** (4 Wood): 1×1 solid timber palisade; blocks and keeps out animals.
   - **Stone Wall** (4 Stone): 1×1 heavy masonry fortification with high HP.
   - **Wood Tower** (12 Wood, 2 Stone): 2×2 timber lookout tower emitting lantern light at night.
   - **Stone Tower** (6 Wood, 14 Stone): 2×2 massive fortress tower with defensive lantern beacon.
   - **Floor** (2 Wood): 1×1 wooden plank decking and bridges.
-  - Pressing <kbd>E</kbd>/<kbd>F</kbd> (P1) or <kbd>O</kbd>/<kbd>H</kbd> (P2) cycles through the building modes and returns to Move Mode.
 
 ---
 

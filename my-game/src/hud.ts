@@ -29,7 +29,7 @@ import {
   INVENTORY_CRAFT_ORDER,
 } from './players.js';
 import { BUILDING_COSTS, BUILDING_REGISTRY, type BuildingKind } from './buildings.js';
-import { WEAPONS } from './combat.js';
+import { WEAPONS, type WeaponKind } from './combat.js';
 import {
   P1_COLOR,
   P1_ACCENT,
@@ -298,6 +298,7 @@ export function drawInventoryOverlay(pen: Pen, player: Player): void {
   const invKey = pIdx === 0 ? '[C/V]' : '[,/.]';
   const navKey = pIdx === 0 ? '[W/S/A/D]' : '[I/K/J/L]';
   const selectKey = pIdx === 0 ? '[Space]' : '[N]';
+  const dropKey = pIdx === 0 ? '[Q]' : '[U]';
 
   const margin = Math.max(16, Math.min(viewW, viewH) * 0.05);
   const panelX = margin;
@@ -312,7 +313,7 @@ export function drawInventoryOverlay(pen: Pen, player: Player): void {
 
   // Header
   screenText(pen, panelX + 18, panelY + 24, `INVENTORY — PLAYER ${pIdx + 1}`, pAccent, textStyle(15, 800, -1, 0));
-  screenText(pen, panelX + panelW - 18, panelY + 24, `${navKey} Move   ${selectKey} Select   ${invKey} Close`, ROW_TEXT_OK, textStyle(10, 700, 1, 0));
+  screenText(pen, panelX + panelW - 18, panelY + 24, `${navKey} Move   ${selectKey} Eat/Select   ${dropKey} Drop   ${invKey} Close`, ROW_TEXT_OK, textStyle(10, 700, 1, 0));
 
   // Tabs
   const tabY = panelY + 42;
@@ -328,7 +329,7 @@ export function drawInventoryOverlay(pen: Pen, player: Player): void {
       pen,
       panelX + 18,
       gridTop,
-      `🪵 ${player.inventory.wood}   🪨 ${player.inventory.stone}   🌿 ${player.inventory.fiber}   ⛓️ ${player.inventory.iron}   💎 ${player.inventory.gems}`,
+      `🪵 ${player.inventory.wood}   🪨 ${player.inventory.stone}   🌿 ${player.inventory.fiber}   ⛓️ ${player.inventory.iron}   💎 ${player.inventory.gems}   🍖 ${player.inventory.food}`,
       hex('#d4a373'),
       textStyle(12, 700, -1, 0),
     );
@@ -358,28 +359,74 @@ export function drawInventoryOverlay(pen: Pen, player: Player): void {
     let highlight: Rgba;
 
     if (player.invTab === 'items') {
-      const kind = INVENTORY_ITEMS_ORDER[i];
-      if (kind === undefined) continue;
-      const def = WEAPONS[kind];
-      const owned = player.craftedWeapons.includes(kind);
-      const equipped = player.weapon === kind;
-      icon = def.icon;
-      name = def.name.toUpperCase();
-      if (equipped) {
-        status = 'EQUIPPED';
-        statusColor = ROW_EQUIPPED;
+      const row = INVENTORY_ITEMS_ORDER[i];
+      if (row === undefined) continue;
+
+      if (row === 'food') {
+        icon = '🍖';
+        name = `FOOD (${player.inventory.food})`;
+        const hasFood = player.inventory.food > 0;
+        status = hasFood ? `${selectKey} EAT   [Q/U] DROP 10` : 'EMPTY';
+        statusColor = hasFood ? ROW_EQUIPPED : ROW_TEXT_DENY;
         highlight = ROW_EQUIPPED;
-      } else if (owned) {
-        status = 'OWNED — SELECT TO EQUIP';
-        statusColor = ROW_OWNED;
-        highlight = ROW_OWNED;
+      } else if (row === 'wood') {
+        icon = '🪵';
+        name = `WOOD (${player.inventory.wood})`;
+        const hasRes = player.inventory.wood > 0;
+        status = hasRes ? `${dropKey} DROP 5` : 'EMPTY';
+        statusColor = hasRes ? hex('#d4a373') : ROW_TEXT_DENY;
+        highlight = hex('#d4a373');
+      } else if (row === 'stone') {
+        icon = '🪨';
+        name = `STONE (${player.inventory.stone})`;
+        const hasRes = player.inventory.stone > 0;
+        status = hasRes ? `${dropKey} DROP 5` : 'EMPTY';
+        statusColor = hasRes ? hex('#b0bec5') : ROW_TEXT_DENY;
+        highlight = hex('#b0bec5');
+      } else if (row === 'fiber') {
+        icon = '🌿';
+        name = `FIBER (${player.inventory.fiber})`;
+        const hasRes = player.inventory.fiber > 0;
+        status = hasRes ? `${dropKey} DROP 5` : 'EMPTY';
+        statusColor = hasRes ? hex('#81c784') : ROW_TEXT_DENY;
+        highlight = hex('#81c784');
+      } else if (row === 'iron') {
+        icon = '⛓️';
+        name = `IRON (${player.inventory.iron})`;
+        const hasRes = player.inventory.iron > 0;
+        status = hasRes ? `${dropKey} DROP 1` : 'EMPTY';
+        statusColor = hasRes ? hex('#90caf9') : ROW_TEXT_DENY;
+        highlight = hex('#90caf9');
+      } else if (row === 'gems') {
+        icon = '💎';
+        name = `GEMS (${player.inventory.gems})`;
+        const hasRes = player.inventory.gems > 0;
+        status = hasRes ? `${dropKey} DROP 1` : 'EMPTY';
+        statusColor = hasRes ? hex('#e056fd') : ROW_TEXT_DENY;
+        highlight = hex('#e056fd');
       } else {
-        const fiberCost = def.cost.fiber ? ` ${def.cost.fiber}🌿` : '';
-        const ironCost = def.cost.iron ? ` ${def.cost.iron}⛓️` : '';
-        const affordable = canAffordWeapon(player, kind);
-        status = `${def.cost.wood}🪵 ${def.cost.stone}🪨${fiberCost}${ironCost}`;
-        statusColor = affordable ? UI_TOOL_GOLD : ROW_TEXT_DENY;
-        highlight = statusColor;
+        const kind = row as WeaponKind;
+        const def = WEAPONS[kind];
+        const owned = player.craftedWeapons.includes(kind);
+        const equipped = player.weapon === kind;
+        icon = def.icon;
+        name = def.name.toUpperCase();
+        if (equipped) {
+          status = 'EQUIPPED';
+          statusColor = ROW_EQUIPPED;
+          highlight = ROW_EQUIPPED;
+        } else if (owned) {
+          status = 'OWNED — SELECT TO EQUIP';
+          statusColor = ROW_OWNED;
+          highlight = ROW_OWNED;
+        } else {
+          const fiberCost = def.cost.fiber ? ` ${def.cost.fiber}🌿` : '';
+          const ironCost = def.cost.iron ? ` ${def.cost.iron}⛓️` : '';
+          const affordable = canAffordWeapon(player, kind);
+          status = `${def.cost.wood}🪵 ${def.cost.stone}🪨${fiberCost}${ironCost}`;
+          statusColor = affordable ? UI_TOOL_GOLD : ROW_TEXT_DENY;
+          highlight = statusColor;
+        }
       }
     } else {
       const kind = INVENTORY_CRAFT_ORDER[i];

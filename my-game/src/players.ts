@@ -24,6 +24,7 @@ import { harvestFloraAt, FLORA_REGISTRY, FLORA_SPATIAL } from './flora.js';
 import type { WeaponKind } from './combat.js';
 import { WEAPONS, CRAFTABLE_WEAPONS } from './combat.js';
 import type { Creature } from './creatures.js';
+import { spawnResourceDrop, type FoodDrop, type DropKind } from './food.js';
 
 // ── Player state ───────────────────────────────────────────────────────────────
 
@@ -61,6 +62,8 @@ export interface Inventory {
   iron: number;
   /** Gemstones, dug from deeper still. Carried and tallied; no use wired up yet. */
   gems: number;
+  /** Food points carried in inventory (from hunted meat / foraged berries & mushrooms). */
+  food: number;
 }
 
 export interface Player {
@@ -255,6 +258,7 @@ function makePlayer(index: 0 | 1, gx: number, gy: number): Player {
       fiber: 4,
       iron: 0,
       gems: 0,
+      food: 0,
     },
     hp: MAX_HP,
     hunger: MAX_HUNGER,
@@ -354,18 +358,132 @@ export function cycleWeapon(player: Player): WeaponKind {
 
 // ── Inventory Overlay ──────────────────────────────────────────────────────────
 //
-// The full-viewport Inventory (opened with C/V or ,/.) is the single place weapon and build-kind
-// selection happen, so that Space/N never has to double as "place" and stays free to always mean
-// interact-or-attack — see the key layout note atop `input.ts`.
+// The full-viewport Inventory (opened with C/V or ,/.) is the single place weapon, resource,
+// and build-kind management happen: consuming food, dropping resources for teammates, equipping
+// weapons, and arming structures.
 
-/** Selectable rows of the Inventory's "items" tab, in display order — fists first (always owned,
- *  free to re-equip), then every craftable weapon. */
-export const INVENTORY_ITEMS_ORDER: readonly WeaponKind[] = ['hands', ...CRAFTABLE_WEAPONS];
+export type InventoryRowKind = 'food' | 'wood' | 'stone' | 'fiber' | 'iron' | 'gems' | WeaponKind;
+
+/** Selectable rows of the Inventory's "items" tab, in display order — food and raw resources first,
+ *  then fists and craftable weapons. */
+export const INVENTORY_ITEMS_ORDER: readonly InventoryRowKind[] = [
+  'food',
+  'wood',
+  'stone',
+  'fiber',
+  'iron',
+  'gems',
+  'hands',
+  ...CRAFTABLE_WEAPONS,
+];
 
 /** Selectable rows of the Inventory's "craft" tab, in display order. */
 export const INVENTORY_CRAFT_ORDER: readonly BuildingKind[] = PLAYER_MODES.filter(
   (m): m is BuildingKind => m !== 'move',
 );
+
+/**
+ * Consume food from inventory to restore hunger points up to `MAX_HUNGER`.
+ * Clamps at maximum satiety and updates the action toast notification.
+ */
+export function eatFood(player: Player, maxAmount = 25): { ok: boolean; ate: number } {
+  if (player.respawnTimer > 0) return { ok: false, ate: 0 };
+  if (player.inventory.food <= 0) {
+    player.lastActionMsg = 'NO FOOD IN INVENTORY';
+    player.msgTimer = 2.0;
+    return { ok: false, ate: 0 };
+  }
+  if (player.hunger >= MAX_HUNGER) {
+    player.lastActionMsg = 'ALREADY FULL (100% SATIETY)';
+    player.msgTimer = 2.0;
+    return { ok: false, ate: 0 };
+  }
+  const deficit = MAX_HUNGER - player.hunger;
+  const toEat = Math.min(player.inventory.food, deficit, maxAmount);
+  player.inventory.food -= toEat;
+  player.hunger = Math.min(MAX_HUNGER, player.hunger + toEat);
+  player.lastActionMsg = `ATE FOOD (+${Math.round(toEat)} SATIETY)`;
+  player.msgTimer = 2.0;
+  return { ok: true, ate: toEat };
+}
+
+/**
+ * Drop a bundle of resources or food from inventory onto the ground at the player's position.
+ * Returns { ok, count } with the amount dropped.
+ */
+export function dropInventoryItem(
+  player: Player,
+  kind: InventoryRowKind,
+  pool: FoodDrop[],
+): { ok: boolean; count: number } {
+  if (player.respawnTimer > 0) return { ok: false, count: 0 };
+  let count = 0;
+  let dropKind: DropKind;
+
+  if (kind === 'food') {
+    dropKind = 'food';
+    count = Math.min(player.inventory.food, 10);
+  } else if (kind === 'wood') {
+    dropKind = 'wood';
+    count = Math.min(player.inventory.wood, 5);
+  } else if (kind === 'stone') {
+    dropKind = 'stone';
+    count = Math.min(player.inventory.stone, 5);
+  } else if (kind === 'fiber') {
+    dropKind = 'fiber';
+    count = Math.min(player.inventory.fiber, 5);
+  } else if (kind === 'iron') {
+    dropKind = 'iron';
+    count = Math.min(player.inventory.iron, 1);
+  } else if (kind === 'gems') {
+    dropKind = 'gems';
+    count = Math.min(player.inventory.gems, 1);
+  } else {
+    // Weapons are not dropped in this mode
+    return { ok: false, count: 0 };
+  }
+
+  if (count <= 0) {
+    player.lastActionMsg = `NO ${kind.toUpperCase()} TO DROP`;
+    player.msgTimer = 2.0;
+    return { ok: false, count: 0 };
+  }
+
+  // Spawn the drop 1.1 tiles in front of the player (in their facing direction)
+  let dropGx = player.gx;
+  let dropGy = player.gy;
+  switch (player.facing) {
+    case 'n': dropGy -= 1.1; break;
+    case 's': dropGy += 1.1; break;
+    case 'e': dropGx += 1.1; break;
+    case 'w': dropGx -= 1.1; break;
+  }
+  dropGx = clamp(dropGx, 1, W - 2);
+  dropGy = clamp(dropGy, 1, H - 2);
+
+  const ok = spawnResourceDrop(pool, dropGx, dropGy, dropKind, count, player.index);
+  if (!ok) {
+    player.lastActionMsg = 'GROUND TOO CROWDED';
+    player.msgTimer = 2.0;
+    return { ok: false, count: 0 };
+  }
+
+  player.inventory[dropKind] -= count;
+  player.lastActionMsg = `DROPPED ${count} ${dropKind.toUpperCase()}`;
+  player.msgTimer = 2.0;
+  return { ok: true, count };
+}
+
+/**
+ * Drop the currently highlighted inventory row (if it is a resource or food).
+ */
+export function dropSelectedInventoryRow(player: Player, foodPool: FoodDrop[]): boolean {
+  if (!player.invOpen || player.invTab !== 'items') return false;
+  const row = INVENTORY_ITEMS_ORDER[player.invCursor];
+  if (row === undefined) return false;
+  const res = dropInventoryItem(player, row, foodPool);
+  return res.ok;
+}
 
 /** Open (or close) the Inventory overlay. On open, the cursor jumps to whatever is currently
  *  equipped/armed on the active tab, so re-opening it lands on where the player left off. */
@@ -407,25 +525,35 @@ export function inventoryNav(player: Player, dx: number, dy: number): void {
  *  whether the overlay auto-closes. */
 export interface InventoryActivateResult {
   ok: boolean;
-  action: 'equip' | 'craft' | 'arm' | 'disarm' | 'deny';
+  action: 'equip' | 'craft' | 'arm' | 'disarm' | 'eat' | 'drop' | 'deny';
 }
 
 /**
- * Activate (Space/N) the currently highlighted Inventory row: on the items tab, equips an
- * already-unlocked weapon or crafts-and-equips a new one; on the craft tab, arms the highlighted
- * build kind (or disarms it if it's already armed). Once armed, Space/N places it at the
- * player's facing tile instead of interacting/attacking — see `main.ts` and `buildAtFacing`,
- * which disarms back to 'move' the instant it lands so Space/N is immediately interact-or-attack
- * again; building a second one means a deliberate trip back to the Inventory. Closes the overlay
- * on any successful selection so the player lands straight back in the world; stays open on a
- * denied (unaffordable) pick.
+ * Activate (Space/N) the currently highlighted Inventory row: on the items tab, eats food,
+ * drops resources, or equips/crafts weapons; on the craft tab, arms/disarms the highlighted
+ * build kind.
  */
-export function activateInventorySelection(player: Player): InventoryActivateResult {
+export function activateInventorySelection(player: Player, foodPool?: FoodDrop[]): InventoryActivateResult {
   if (player.respawnTimer > 0) return { ok: false, action: 'deny' };
 
   if (player.invTab === 'items') {
-    const kind = INVENTORY_ITEMS_ORDER[player.invCursor];
-    if (kind === undefined) return { ok: false, action: 'deny' };
+    const row = INVENTORY_ITEMS_ORDER[player.invCursor];
+    if (row === undefined) return { ok: false, action: 'deny' };
+
+    if (row === 'food') {
+      const res = eatFood(player);
+      return { ok: res.ok, action: res.ok ? 'eat' : 'deny' };
+    }
+
+    if (row === 'wood' || row === 'stone' || row === 'fiber' || row === 'iron' || row === 'gems') {
+      if (foodPool !== undefined) {
+        const res = dropInventoryItem(player, row, foodPool);
+        return { ok: res.ok, action: res.ok ? 'drop' : 'deny' };
+      }
+      return { ok: false, action: 'deny' };
+    }
+
+    const kind = row as WeaponKind;
     const wasAlreadyOwned = player.craftedWeapons.includes(kind);
     const ok = craftWeapon(player, kind);
     if (!ok) return { ok: false, action: 'deny' };
@@ -792,7 +920,7 @@ export function interactAtFacing(
       player.inventory.stone += harvest.stone;
       player.inventory.fiber += harvest.fiber;
       if (harvest.food > 0) {
-        player.hunger = Math.min(MAX_HUNGER, player.hunger + harvest.food);
+        player.inventory.food += harvest.food;
       }
 
       triggerPlayerAction(player, isTree ? 'chop' : isRock ? 'mine' : 'forage', isTree ? 0.32 : isRock ? 0.35 : 0.28);

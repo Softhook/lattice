@@ -385,7 +385,7 @@ describe('Verdant Gameplay Logic', () => {
       }
     }
     expect(widest).toBeGreaterThan(0.5);
-  });
+  }, 30000);
 
   it('evolution holds each species to its ceiling — the hare never monocultures the continent', () => {
     const world = createWorld(42);

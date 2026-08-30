@@ -19,6 +19,7 @@ describe('Verdant Storage', () => {
     p1.inventory.stone = 23;
     p1.inventory.iron = 7;
     p1.inventory.gems = 4;
+    p1.inventory.food = 18;
     p1.hp = 80;
     p1.weapon = 'sword';
     p1.craftedWeapons = ['hands', 'axe', 'sword'];
@@ -26,6 +27,7 @@ describe('Verdant Storage', () => {
     p1.gy = 22.0;
 
     p2.inventory.fiber = 19;
+    p2.inventory.food = 32;
     p2.hp = 95;
     p2.weapon = 'bow';
     p2.craftedWeapons = ['hands', 'bow'];
@@ -41,6 +43,8 @@ describe('Verdant Storage', () => {
     expect(save.p1.stone).toBe(23);
     expect(save.p1.iron).toBe(7);
     expect(save.p1.gems).toBe(4);
+    expect(save.p1.food).toBe(18);
+    expect(save.p2.food).toBe(32);
     expect(save.p1.hp).toBe(80);
     expect(save.p1.weapon).toBe('sword');
     expect(save.p1.craftedWeapons).toEqual(['hands', 'axe', 'sword']);

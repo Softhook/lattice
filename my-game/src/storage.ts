@@ -52,6 +52,8 @@ export interface SavedPlayer {
   readonly iron: number;
   /** Gemstones carried. Absent in pre-underground saves — defaulted to 0 on load. */
   readonly gems: number;
+  /** Food points carried in inventory. Absent in pre-food-inventory saves — defaulted to 0. */
+  readonly food: number;
   readonly hp: number;
   /** Satiety at save time. Absent in pre-hunger saves — `recognizePlayer` defaults those to
    *  full so an old world doesn't load its players mid-starvation. */
@@ -82,6 +84,7 @@ function recognizePlayer(v: unknown, label: string, defaultGx: number, defaultGy
   const fiber = typeof o['fiber'] === 'number' ? o['fiber'] : 0;
   const iron = typeof o['iron'] === 'number' ? o['iron'] : 0;
   const gems = typeof o['gems'] === 'number' ? o['gems'] : 0;
+  const food = typeof o['food'] === 'number' ? o['food'] : 0;
   const hp = typeof o['hp'] === 'number' ? o['hp'] : 100;
   const hunger = typeof o['hunger'] === 'number' ? o['hunger'] : 100;
   const mode = typeof o['mode'] === 'string' ? o['mode'] : 'move';
@@ -91,7 +94,7 @@ function recognizePlayer(v: unknown, label: string, defaultGx: number, defaultGy
   const gx = typeof o['gx'] === 'number' ? o['gx'] : defaultGx;
   const gy = typeof o['gy'] === 'number' ? o['gy'] : defaultGy;
 
-  return { wood, stone, fiber, iron, gems, hp, hunger, mode, weapon, craftedWeapons, gx, gy };
+  return { wood, stone, fiber, iron, gems, food, hp, hunger, mode, weapon, craftedWeapons, gx, gy };
 }
 
 function recognizeBuilding(v: unknown, index: number): SavedBuilding {
@@ -215,6 +218,7 @@ export function extractSaveState(
       fiber: p1.inventory.fiber,
       iron: p1.inventory.iron,
       gems: p1.inventory.gems,
+      food: p1.inventory.food,
       hp: p1.hp,
       hunger: p1.hunger,
       mode: p1.mode,
@@ -229,6 +233,7 @@ export function extractSaveState(
       fiber: p2.inventory.fiber,
       iron: p2.inventory.iron,
       gems: p2.inventory.gems,
+      food: p2.inventory.food,
       hp: p2.hp,
       hunger: p2.hunger,
       mode: p2.mode,

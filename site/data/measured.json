@@ -20,9 +20,9 @@
       "source": "find packages -type f -not -path '*/node_modules/*' -not -path '*/dist/*' -not -path '*/coverage/*' — 207 .ts, 19 .json, 9 .md, nothing else"
     },
     "tests": {
-      "value": 2763,
+      "value": 2771,
       "unit": "",
-      "source": "npx vitest run — 2763 passed (2763)"
+      "source": "npx vitest run — 2771 passed (2771)"
     },
 
     "testFiles": {

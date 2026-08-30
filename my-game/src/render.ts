@@ -94,6 +94,23 @@ const FOOD_TINT: Record<string, number> = {
 const FOOD_TINT_FALLBACK = hex('#c0553f');
 const FOOD_BONE = hex('#efe4cf');
 
+const DROP_TINT: Record<string, number> = {
+  wood: hex('#8d5524'),
+  stone: hex('#78909c'),
+  fiber: hex('#2e7d32'),
+  iron: hex('#455a64'),
+  gems: hex('#8e44ad'),
+};
+
+const DROP_HIGHLIGHT: Record<string, number> = {
+  wood: hex('#d4a373'),
+  stone: hex('#cfd8dc'),
+  fiber: hex('#aed581'),
+  iron: hex('#b0bec5'),
+  gems: hex('#e056fd'),
+  food: hex('#efe4cf'),
+};
+
 /** Mutable twin of `TextStyle` — same trick as `hud.ts`'s `TEXT_SCRATCH`: the target-cursor
  *  prompt pill draws up to two `screenText` calls per viewport per frame, and `{ ...DEFAULT_TEXT,
  *  ... }` would allocate a fresh style object each time. */
@@ -824,27 +841,30 @@ function drawViewport(
           FOOD_BOX_SCRATCH[6] = sx - shW; FOOD_BOX_SCRATCH[7] = sy;
           pen.surface.poly(FOOD_BOX_SCRATCH, 4, withAlpha(hex('#000000'), 0.3));
 
-          // Meat chunk
+          // Resource / meat chunk
           const cy = sy - 5 * zoom + bobPx;
           const rw = 5.5 * zoom;
           const rh = 4 * zoom;
-          const tint = FOOD_TINT[f.species] ?? FOOD_TINT_FALLBACK;
+          const tint = f.kind === 'food'
+            ? ((f.species !== undefined ? FOOD_TINT[f.species] : undefined) ?? FOOD_TINT_FALLBACK)
+            : (DROP_TINT[f.kind] ?? FOOD_TINT_FALLBACK);
           FOOD_BOX_SCRATCH[0] = sx;      FOOD_BOX_SCRATCH[1] = cy - rh;
           FOOD_BOX_SCRATCH[2] = sx + rw; FOOD_BOX_SCRATCH[3] = cy;
           FOOD_BOX_SCRATCH[4] = sx;      FOOD_BOX_SCRATCH[5] = cy + rh;
           FOOD_BOX_SCRATCH[6] = sx - rw; FOOD_BOX_SCRATCH[7] = cy;
           pen.surface.poly(FOOD_BOX_SCRATCH, 4, tint);
 
-          // Bone / fat highlight nub
+          // Highlight nub / facet
           const bx = sx + rw * 0.4;
           const by = cy - rh * 0.35;
           const bw = rw * 0.42;
           const bh = rh * 0.42;
+          const highlight = DROP_HIGHLIGHT[f.kind] ?? FOOD_BONE;
           FOOD_BOX_SCRATCH[0] = bx;      FOOD_BOX_SCRATCH[1] = by - bh;
           FOOD_BOX_SCRATCH[2] = bx + bw; FOOD_BOX_SCRATCH[3] = by;
           FOOD_BOX_SCRATCH[4] = bx;      FOOD_BOX_SCRATCH[5] = by + bh;
           FOOD_BOX_SCRATCH[6] = bx - bw; FOOD_BOX_SCRATCH[7] = by;
-          pen.surface.poly(FOOD_BOX_SCRATCH, 4, FOOD_BONE);
+          pen.surface.poly(FOOD_BOX_SCRATCH, 4, highlight);
         }
       }
     },
