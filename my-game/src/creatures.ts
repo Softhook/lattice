@@ -26,7 +26,7 @@ import { SpatialGrid } from './spatial.js';
 
 // ── Species & Declarative Registry ────────────────────────────────────────────
 
-export type Species = 'rabbit' | 'deer' | 'ibex' | 'fox' | 'wolf' | 'troll' | 'bear' | 'boar' | 'croc' | 'shade';
+export type Species = 'rabbit' | 'deer' | 'ibex' | 'fox' | 'wolf' | 'troll' | 'bear' | 'boar' | 'croc' | 'shade' | 'orc' | 'goblin';
 
 export type DietType = 'herbivore' | 'carnivore' | 'omnivore';
 export type BehaviorArchetype = 'skittish' | 'defensive' | 'territorial' | 'ambush' | 'apex';
@@ -96,9 +96,9 @@ export const SPECIES_REGISTRY: Record<Species, SpeciesDefinition> = {
     behavior: 'skittish',
     preferredBiomes: ['meadow', 'wetlands', 'taiga'],
     elevationRange: [2, 16],
-    initialSpawnCount: 240,
-    minPopulation: 60,
-    maxPopulation: 340,
+    initialSpawnCount: 180,
+    minPopulation: 50,
+    maxPopulation: 300,
     attackDamage: 0,
     attackRange: 1.0,
     noticeRange: 8,
@@ -118,9 +118,9 @@ export const SPECIES_REGISTRY: Record<Species, SpeciesDefinition> = {
     behavior: 'skittish',
     preferredBiomes: ['meadow', 'wetlands'],
     elevationRange: [3, 16],
-    initialSpawnCount: 150,
-    minPopulation: 40,
-    maxPopulation: 245,
+    initialSpawnCount: 100,
+    minPopulation: 30,
+    maxPopulation: 200,
     attackDamage: 0,
     attackRange: 1.2,
     noticeRange: 8,
@@ -312,6 +312,57 @@ export const SPECIES_REGISTRY: Record<Species, SpeciesDefinition> = {
     fearsFire: false,
     attacksBuildings: true,
   },
+  orc: {
+    species: 'orc',
+    name: 'Orc Raider',
+    icon: '👺',
+    baseHp: 28,
+    // Orcs are faster than trolls but far weaker — they make up for low individual threat by
+    // charging the player relentlessly. High fixed aggression so they always pursue; no prey
+    // targets since their goal is the player, not the ecosystem. Badlands and meadow mid-slopes
+    // are their territory — players can't rely on alpine campfires to stay safe from them.
+    baseTraits: { speed: 1.9, aggression: 0.92, size: 1.0, fertility: 0.7 },
+    diet: 'carnivore',
+    behavior: 'apex',
+    preferredBiomes: ['badlands', 'meadow', 'taiga'],
+    elevationRange: [2, 16],
+    initialSpawnCount: 40,
+    minPopulation: 10,
+    maxPopulation: 60,
+    attackDamage: 18,
+    attackRange: 1.3,
+    noticeRange: 10,
+    preyTargets: [],
+    predatorThreats: [],
+    loot: { stone: 6, fiber: 4 },
+    fearsFire: true,
+  },
+  goblin: {
+    species: 'goblin',
+    name: 'Goblin',
+    icon: '👾',
+    baseHp: 8,
+    // Goblins are the weakest humanoid — they die in two hits — but are the fastest species in
+    // the game and swarm in numbers. About half carry a crude bow (`GOBLIN_BOW_CHANCE`) and will
+    // pelt the player from range with inaccurate arrows before closing in. Their low damage means
+    // a single arrow is annoying, not fatal, but a volley from three goblins adds up fast.
+    // fertility is higher than orcs so a goblin pack replenishes quickly after a fight.
+    baseTraits: { speed: 2.1, aggression: 0.88, size: 0.7, fertility: 1.1 },
+    diet: 'carnivore',
+    behavior: 'apex',
+    preferredBiomes: ['meadow', 'wetlands', 'taiga'],
+    elevationRange: [2, 14],
+    initialSpawnCount: 80,
+    minPopulation: 20,
+    maxPopulation: 100,
+    attackDamage: 6,
+    attackRange: 1.1,
+    noticeRange: 9,
+    preyTargets: [],
+    predatorThreats: [],
+    loot: { fiber: 3 },
+    fearsFire: true,
+  },
 };
 
 /** AI behavior state. */
@@ -370,6 +421,24 @@ export interface Creature {
    *  `stepProjectiles` on a player hit, counted down in `updateOne`. 0 = back to basking and
    *  ignoring players. Unused by every other archetype. */
   retaliateTimer: number;
+  /** Whether this goblin carries a bow. Seeded from the creature id at spawn so each individual
+   *  is permanently an archer or a melee fighter — not toggling randomly. False for all non-goblin
+   *  species so the field costs nothing outside goblin logic. */
+  readonly hasBow: boolean;
+  /** Seconds until this goblin-archer may fire its next arrow. Counts down in `updateOne` whenever
+   *  the goblin is in chase/attack state and a player is in range. When it hits 0 the goblin flags
+   *  intent via `wantsToShoot`; `main.ts` reads that flag and calls `launchEnemyArrow`. Using a
+   *  flag instead of launching directly inside `updateOne` keeps `creatures.ts` free of any
+   *  import from `combat.ts` — the two modules must not cycle (see DAG in `AGENTS.md`). */
+  bowCooldown: number;
+  /** Set by `updateOne` when a bow-carrying goblin is in range and ready to fire. `main.ts`
+   *  reads this once per tick, calls `launchEnemyArrow` if true, then clears it. The shoot target
+   *  is whichever player triggered the flag (stored below). */
+  wantsToShoot: boolean;
+  /** Tile coordinates of the player this goblin wants to shoot. Valid only when `wantsToShoot`
+   *  is true; `main.ts` clears `wantsToShoot` after reading these. */
+  shootTargetGx: number;
+  shootTargetGy: number;
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -436,6 +505,18 @@ const ALARM_CONTAGION_WEIGHT = 4.0;
  *  Long enough that a single arrow means a real fight, short enough that backing off ends it. */
 export const RETALIATE_SECONDS = 7;
 
+/** Fraction of goblins that carry a bow. Seeded per creature from `hash2(id, 0xb0b, 0)` so each
+ *  individual's archer status is deterministic and stable across ticks — no random toggling. */
+export const GOBLIN_BOW_CHANCE = 0.45;
+
+/** Seconds between goblin arrow shots. Deliberately slow — goblins are bad shots, not machine
+ *  guns; the gap lets a player close the distance or dodge before the next volley. */
+const GOBLIN_BOW_COOLDOWN = 2.8;
+
+/** Maximum distance in tiles at which a goblin archer will try to shoot. Just inside their
+ *  noticeRange so melee goblins and archers both need the same proximity to notice a player. */
+const GOBLIN_SHOOT_RANGE = 8.0;
+
 // ── Spawn ──────────────────────────────────────────────────────────────────────
 
 let nextId = 1;
@@ -484,6 +565,16 @@ export function spawnCreature(
     fleeSpookTimer: 0,
     alarmTimer: 0,
     retaliateTimer: 0,
+    // Goblin bow — stable per-creature via hash of id, not the RNG stream (which is consumed
+    // by trait mutation above). A goblin that rolls under GOBLIN_BOW_CHANCE is an archer for
+    // its entire lifetime. Non-goblins always get false — no runtime branching on species needed.
+    hasBow: species === 'goblin'
+      ? ((hash2(id, 0xb0b, 0) >>> 0) / 4294967296) < GOBLIN_BOW_CHANCE
+      : false,
+    bowCooldown: 0,
+    wantsToShoot: false,
+    shootTargetGx: 0,
+    shootTargetGy: 0,
   };
 }
 
@@ -649,13 +740,16 @@ export interface CreatureEvents {
   roarOccurred: boolean;
   howlOccurred: boolean;
   wardOccurred?: boolean;
+  /** True if any goblin-archer fired this tick — lets `main.ts` play the shot audio without
+   *  walking the creature list a second time. */
+  goblinShotOccurred: boolean;
 }
 
 /** A fresh, all-false `CreatureEvents` bag. Call once and reuse it as `updateCreatures`'s
  *  out-parameter — allocating one per tick would put a per-frame allocation back in the
  *  hottest loop in the game. */
 export function createCreatureEvents(): CreatureEvents {
-  return { playerAttacked: false, roarOccurred: false, howlOccurred: false, wardOccurred: false };
+  return { playerAttacked: false, roarOccurred: false, howlOccurred: false, wardOccurred: false, goblinShotOccurred: false };
 }
 
 /**
@@ -687,6 +781,7 @@ export function updateCreatures(
   out.roarOccurred = false;
   out.howlOccurred = false;
   out.wardOccurred = false;
+  out.goblinShotOccurred = false;
 
   // 0. Distill campfires / lit towers into the per-tick ward cache (see `WARD_SOURCES`).
   rebuildWardSources(buildings, darkness);
@@ -733,6 +828,13 @@ function updateOne(
   if (c.alarmTimer > 0) {
     c.alarmTimer = Math.max(0, c.alarmTimer - dt);
   }
+  if (c.bowCooldown > 0) {
+    c.bowCooldown = Math.max(0, c.bowCooldown - dt);
+  }
+  // Goblin archers flag their shoot intent here; main.ts reads the flag and calls launchEnemyArrow
+  // once per tick, then clears wantsToShoot. Keeping the launch out of this file preserves the
+  // DAG: creatures.ts must not import combat.ts (see AGENTS.md).
+  c.wantsToShoot = false;
 
   // Slow natural idle/breathing cadence
   const idleRate = c.species === 'rabbit' ? 0.15 : c.species === 'croc' ? 0.08 : 0.3;
@@ -991,6 +1093,29 @@ function updateOne(
     }
 
     if (targetType !== 'none') {
+      // Goblin-archer special case: if in shoot range and cooled down, flag intent for main.ts
+      // to call launchEnemyArrow. The goblin still chases if out of shoot range so it closes in
+      // before committing to bow fire. The check happens before the melee-range block so an archer
+      // inside melee range still punches (melee path below) rather than trying to shoot at
+      // point-blank range, which would look weird and skip the attack animation.
+      if (c.species === 'goblin' && c.hasBow && targetType === 'player' && bestDist > def.attackRange && bestDist <= GOBLIN_SHOOT_RANGE && c.bowCooldown <= 0) {
+        c.wantsToShoot = true;
+        c.shootTargetGx = bestTargetGx;
+        c.shootTargetGy = bestTargetGy;
+        c.bowCooldown = GOBLIN_BOW_COOLDOWN;
+        c.state = 'attack'; // use attack state so the sprite draws the bow-raised pose
+        events.goblinShotOccurred = true;
+        // Face the player while shooting
+        const sdx = bestTargetGx - c.gx;
+        const sdy = bestTargetGy - c.gy;
+        if (Math.abs(sdx) > Math.abs(sdy)) {
+          c.facing = sdx > 0 ? 'e' : 'w';
+        } else {
+          c.facing = sdy > 0 ? 's' : 'n';
+        }
+        return;
+      }
+
       const attackRangeThreshold = def.attackRange + (targetType === 'building' ? 1.0 : 0);
       if (bestDist < attackRangeThreshold) {
         c.state = 'attack';
@@ -1268,7 +1393,12 @@ function moveWithSeparation(
   }
 
   const step = speed * dt;
-  const cycleSpeed = c.species === 'troll' || c.species === 'bear' ? 0.6 : c.species === 'rabbit' ? 0.45 : 0.9;
+  const cycleSpeed =
+    c.species === 'troll' || c.species === 'bear' ? 0.6 :
+    c.species === 'rabbit' ? 0.45 :
+    c.species === 'goblin' ? 1.1 :   // fast scurrying legs
+    c.species === 'orc'    ? 0.75 :  // heavy loping stride
+    0.9;
   c.walkCycle = (c.walkCycle + step * cycleSpeed) % 1;
 
   const nx = c.gx + dirX * step;

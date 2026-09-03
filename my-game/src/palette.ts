@@ -127,6 +127,19 @@ export const CROC_EYE     = hex('#d4c23a');
 export const SHADE_ROBE      = hex('#2d2438');
 export const SHADE_ROBE_DARK = hex('#17121f');
 
+/** Orc — fast melee brute; murky olive skin, crude blade, blood-red eyes. */
+export const ORC        = hex('#4a6830');
+export const ORC_DARK   = hex('#2e3e1c');
+export const ORC_EYE    = hex('#e74c3c');
+export const ORC_BLADE  = hex('#8a9090');
+export const ORC_LEATHER = hex('#7a5528');
+
+/** Goblin — tiny, frail, agile; sickly bright green, yellow eyes, crude wood bow. */
+export const GOBLIN      = hex('#5a8a2a');
+export const GOBLIN_DARK = hex('#2e4a14');
+export const GOBLIN_EYE  = hex('#f39c12');
+export const GOBLIN_BOW  = hex('#7a5528');
+
 // ── Dark magic (mission tower + conjured monsters) ─────────────────────────────
 
 /** Shared glow hue for the wizard tower and everything it conjures, so the two read as one

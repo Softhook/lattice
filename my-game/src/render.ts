@@ -67,7 +67,7 @@ import { drawSky, farRanges } from './sky.js';
 import { drawAmbientEffects } from './ambient.js';
 import { drawPlayerHud, drawSplitDivider, drawInventoryOverlay, drawMissionBanner } from './hud.js';
 import { AIM_ARC_ANGLE } from './combat.js';
-import type { Projectile, VisualFx } from './combat.js';
+import type { Projectile, EnemyProjectile, VisualFx } from './combat.js';
 import type { FoodDrop } from './food.js';
 import { getTargetContext } from './players.js';
 import { screenText, DEFAULT_TEXT } from '@latticekit/draw';
@@ -340,6 +340,7 @@ export function renderVerdant(
   seed: number,
   fxPool?: readonly VisualFx[],
   foodPool?: readonly FoodDrop[],
+  enemyProjectiles?: readonly EnemyProjectile[],
 ): void {
   // Open the frame — clears canvas and builds pen with camera1 and light1.
   const pen = beginFrame({
@@ -367,7 +368,7 @@ export function renderVerdant(
   ctx.beginPath();
   ctx.rect(0, 0, halfW, surface.height);
   ctx.clip();
-  drawViewport(pen, camera1, world, flora, creatures, players, buildings, projectiles, fxPool, foodPool, players[0], t, darkness, daylight, cycle, seed, light1, !singlePlayer, missions);
+  drawViewport(pen, camera1, world, flora, creatures, players, buildings, projectiles, fxPool, foodPool, players[0], t, darkness, daylight, cycle, seed, light1, !singlePlayer, missions, enemyProjectiles);
   ctx.restore();
 
   if (!singlePlayer) {
@@ -378,7 +379,7 @@ export function renderVerdant(
     ctx.rect(halfW, 0, halfW, surface.height);
     ctx.clip();
     ctx.translate(halfW, 0);
-    drawViewport(pen2, camera2, world, flora, creatures, players, buildings, projectiles, fxPool, foodPool, players[1], t, darkness, daylight, cycle, seed, light2, false, missions);
+    drawViewport(pen2, camera2, world, flora, creatures, players, buildings, projectiles, fxPool, foodPool, players[1], t, darkness, daylight, cycle, seed, light2, false, missions, enemyProjectiles);
     ctx.restore();
   }
 
@@ -406,6 +407,7 @@ function drawViewport(
   light: LightField,
   showDivider: boolean,
   missions: readonly Mission[],
+  enemyProjectiles?: readonly EnemyProjectile[],
 ): void {
   ORDER.clear();
 
@@ -739,6 +741,43 @@ function drawViewport(
         ARROW_LINE_SCRATCH[2] = sx;
         ARROW_LINE_SCRATCH[3] = sy;
         pen.surface.stroke(ARROW_LINE_SCRATCH, 2, false, hex('#ffd54f'), 2);
+      }
+
+      // Render enemy arrows (goblin volleys) with darker flint/wood tint
+      if (enemyProjectiles !== undefined) {
+        const numEnemyProj = enemyProjectiles.length;
+        for (let epi = 0; epi < numEnemyProj; epi++) {
+          const ep = enemyProjectiles[epi];
+          if (ep === undefined || !ep.live) continue;
+
+          const ewx = (ep.x - ep.y) * 32;
+          const ewy = (ep.x + ep.y) * 16 - ep.z;
+          const esx = (ewx - camera.x) * camera.zoom + camera.viewW * 0.5;
+          const esy = (ewy - camera.y) * camera.zoom + camera.viewH * 0.5;
+
+          const groundH = heightAt(world.field, ep.x, ep.y);
+          const egwy = (ep.x + ep.y) * 16 - groundH;
+          const egsy = (egwy - camera.y) * camera.zoom + camera.viewH * 0.5;
+
+          SHADOW_BOX_SCRATCH[0] = esx - 2.5; SHADOW_BOX_SCRATCH[1] = egsy - 1.2;
+          SHADOW_BOX_SCRATCH[2] = esx + 2.5; SHADOW_BOX_SCRATCH[3] = egsy - 1.2;
+          SHADOW_BOX_SCRATCH[4] = esx + 2.5; SHADOW_BOX_SCRATCH[5] = egsy + 1.2;
+          SHADOW_BOX_SCRATCH[6] = esx - 2.5; SHADOW_BOX_SCRATCH[7] = egsy + 1.2;
+          pen.surface.poly(SHADOW_BOX_SCRATCH, 4, withAlpha(hex('#000000'), 0.35));
+
+          const evwx = (ep.vx - ep.vy) * 32;
+          const evwy = (ep.vx + ep.vy) * 16 - ep.vz;
+          const evlen = Math.sqrt(evwx * evwx + evwy * evwy) || 1; // @tier-b — arrow shaft direction, pixels only
+          const arrowLen = 9 * camera.zoom;
+          const tailX = esx - (evwx / evlen) * arrowLen;
+          const tailY = esy - (evwy / evlen) * arrowLen;
+
+          ARROW_LINE_SCRATCH[0] = tailX;
+          ARROW_LINE_SCRATCH[1] = tailY;
+          ARROW_LINE_SCRATCH[2] = esx;
+          ARROW_LINE_SCRATCH[3] = esy;
+          pen.surface.stroke(ARROW_LINE_SCRATCH, 2, false, hex('#a07040'), 2);
+        }
       }
 
       // Render combat and harvest FX particles (slashes, sparks, ground shockwaves, debris)

@@ -6,6 +6,8 @@
  * - 3D ballistic projectile simulation for arrows (zero heap allocations).
  * - Melee arc and ranged projectile hit detection against creatures.
  * - Knockback physics, damage calculation, and creature loot drops.
+ * - Enemy projectile pool: goblin arrows fired at players, separate from the
+ *   player-fired pool so damage direction is always unambiguous.
  *
  * Fully deterministic: all kinematics are Tier A arithmetic.
  */
@@ -314,7 +316,8 @@ export function stepFx(pool: VisualFx[], dt: number): void {
 
 export const MAX_PROJECTILES = 64;
 
-export interface Projectile {
+/** Common ballistic state for physical projectiles flying through the air (player & enemy arrows). */
+export interface BallisticProjectile {
   x: number;
   y: number;
   /** Height in world pixels above ground. */
@@ -322,10 +325,13 @@ export interface Projectile {
   vx: number;
   vy: number;
   vz: number;
-  damage: number;
-  shooterIndex: 0 | 1;
   lifeSec: number;
   live: boolean;
+}
+
+export interface Projectile extends BallisticProjectile {
+  damage: number;
+  shooterIndex: 0 | 1;
 }
 
 /** Pre-allocated projectile pool for zero-allocation simulation. */
@@ -350,6 +356,48 @@ export function createProjectilePool(): Projectile[] {
 
 /** Gravity in world pixels per second squared for ballistic arcs. */
 const GRAVITY_PX = 460;
+
+/**
+ * Step standard ballistic projectile motion: lifespan decay, velocity integration,
+ * gravity, world boundaries, and terrain collision. Returns true if projectile remains
+ * active in-flight, or false if it expired, fell out-of-bounds, or impacted the ground.
+ */
+export function stepBallisticMotion(
+  p: BallisticProjectile,
+  world: WorldTerrain,
+  dt: number,
+  fxPool?: VisualFx[],
+  debrisColor: Rgba | number = hex('#8d6e63'),
+): boolean {
+  p.lifeSec -= dt;
+  if (p.lifeSec <= 0) {
+    p.live = false;
+    return false;
+  }
+
+  // Kinematics — Tier A arithmetic per spec (+, -, *, /)
+  p.x += p.vx * dt;
+  p.y += p.vy * dt;
+  p.vz -= GRAVITY_PX * dt;
+  p.z += p.vz * dt;
+
+  if (p.x < 1 || p.y < 1 || p.x >= W - 1 || p.y >= H - 1) {
+    p.live = false;
+    return false;
+  }
+
+  const groundH = heightAt(world.field, p.x, p.y);
+  if (p.z <= groundH) {
+    // Landed on ground — spawn subtle impact dust
+    if (fxPool !== undefined) {
+      spawnHarvestDebris(fxPool, p.x, p.y, groundH, debrisColor, 3);
+    }
+    p.live = false;
+    return false;
+  }
+
+  return true;
+}
 
 /** Reusable target for `aimComponents` — combat resolves an aim direction at most once per
  *  attack, on the input thread, so a shared scratch is safe. */
@@ -631,30 +679,7 @@ export function stepProjectiles(
     const p = projectiles[i];
     if (p === undefined || !p.live) continue;
 
-    p.lifeSec -= dt;
-    if (p.lifeSec <= 0) {
-      p.live = false;
-      continue;
-    }
-
-    // Kinematics
-    p.x += p.vx * dt;
-    p.y += p.vy * dt;
-    p.vz -= GRAVITY_PX * dt;
-    p.z += p.vz * dt;
-
-    if (p.x < 1 || p.y < 1 || p.x >= W - 1 || p.y >= H - 1) {
-      p.live = false;
-      continue;
-    }
-
-    const groundH = heightAt(world.field, p.x, p.y);
-    if (p.z <= groundH) {
-      // Landed on ground — spawn a few subtle dust particles
-      if (fxPool !== undefined) {
-        spawnHarvestDebris(fxPool, p.x, p.y, groundH, hex('#8d6e63'), 3);
-      }
-      p.live = false;
+    if (!stepBallisticMotion(p, world, dt, fxPool, hex('#8d6e63'))) {
       continue;
     }
 
@@ -753,5 +778,133 @@ function dropCreatureLoot(player: Player, species: string): void {
 }
 
 
+// ── Enemy Projectiles (Goblin Arrows) ───────────────────────────────────────────
+//
+// A separate pool from the player-fired `Projectile` pool so damage direction is unambiguous:
+// `EnemyProjectile` hits players; `Projectile` hits creatures. Neither type hits the same faction
+// as its shooter. The pool is pre-allocated (zero heap on the hot path) and sized for the
+// realistic maximum of simultaneous goblin-archers on screen, not the entire species population.
 
-export { canAffordWeapon, craftWeapon, craftNextAvailable, cycleWeapon } from './players.js';
+/** Maximum simultaneous enemy arrows (goblin volleys) in flight. Sized for the realistic on-screen
+ *  goblin count — goblins fire slowly (GOBLIN_BOW_COOLDOWN ≈ 2.8 s) so this never fills in practice,
+ *  but the hard cap prevents a stack of goblins overwhelming the pool on a very bad frame. */
+export const MAX_ENEMY_PROJECTILES = 32;
+
+/** An arrow shot by a goblin archer at a player. Kinematics are identical to player arrows;
+ *  only the hit target and tint differ. */
+export interface EnemyProjectile extends BallisticProjectile {
+  damage: number;
+}
+
+/** Pre-allocate the enemy projectile pool for zero per-frame garbage. */
+export function createEnemyProjectilePool(): EnemyProjectile[] {
+  const pool: EnemyProjectile[] = [];
+  for (let i = 0; i < MAX_ENEMY_PROJECTILES; i++) {
+    pool.push({ x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, damage: 0, lifeSec: 0, live: false });
+  }
+  return pool;
+}
+
+/** Goblin arrow damage per hit. Low enough that a single shot is annoying, not devastating;
+ *  a volley of three goblins is actually dangerous. Night darkness bonus applied at launch. */
+const GOBLIN_ARROW_DAMAGE = 8;
+
+/** Arrow flight speed in tiles per second — same as player arrows for fair visual parity. */
+const ENEMY_ARROW_SPEED = 12.0;
+
+/**
+ * Launch a goblin arrow from (fromGx, fromGy) toward (targetGx, targetGy), with a random
+ * angular scatter baked in at launch time so the shot is permanently off-course rather than
+ * correcting each tick.
+ *
+ * `aimScatterRads` is the magnitude of the error in radians; its sign comes from the goblin's
+ * own Rng so each goblin has a stable "aim bias" — one always overshoots left, another always
+ * undershoots right — rather than spraying randomly each shot. @tier-b annotation on the
+ * cos/sin rotation: scatter is presentation-only and never reaches a hash or save file.
+ */
+export function launchEnemyArrow(
+  pool: EnemyProjectile[],
+  fromGx: number,
+  fromGy: number,
+  baseHeightPx: number,
+  targetGx: number,
+  targetGy: number,
+  aimScatterRads: number,
+  darkness: number,
+): boolean {
+  let p: EnemyProjectile | undefined;
+  for (let i = 0; i < pool.length; i++) {
+    const item = pool[i];
+    if (item !== undefined && !item.live) { p = item; break; }
+  }
+  if (p === undefined) return false;
+
+  const dx = targetGx - fromGx;
+  const dy = targetGy - fromGy;
+  const dist = Math.sqrt(dx * dx + dy * dy); // Tier A: sqrt exact per spec — aim setup, pixels only
+  if (dist < 0.01) return false;
+
+  // Apply scatter: rotate the aim vector by aimScatterRads. @tier-b — rotation for pixels only.
+  const cs = Math.cos(aimScatterRads);
+  const sn = Math.sin(aimScatterRads);
+  const dirX = (dx / dist) * cs - (dy / dist) * sn;
+  const dirY = (dx / dist) * sn + (dy / dist) * cs;
+
+  p.x = fromGx + dirX * 0.5;
+  p.y = fromGy + dirY * 0.5;
+  p.z = baseHeightPx + 12;
+  p.vx = dirX * ENEMY_ARROW_SPEED;
+  p.vy = dirY * ENEMY_ARROW_SPEED;
+  p.vz = 40;
+  p.damage = GOBLIN_ARROW_DAMAGE * (1 + darkness * 0.3);
+  p.lifeSec = 1.4;
+  p.live = true;
+  return true;
+}
+
+/** Step all live enemy projectiles, applying gravity and checking player hit. Returns true if
+ *  any player was struck this tick — caller uses this to gate the hurt-sound effect. */
+export function stepEnemyProjectiles(
+  pool: EnemyProjectile[],
+  players: readonly [Player, Player],
+  world: WorldTerrain,
+  dt: number,
+  fxPool?: VisualFx[],
+): boolean {
+  let anyHit = false;
+
+  for (let i = 0; i < pool.length; i++) {
+    const p = pool[i];
+    if (p === undefined || !p.live) continue;
+
+    if (!stepBallisticMotion(p, world, dt, fxPool, 0x7a5528ff)) {
+      continue;
+    }
+
+    // Check hit against players
+    for (let pi = 0; pi < players.length; pi++) {
+      const player = players[pi];
+      if (player === undefined || !player.active || player.respawnTimer > 0) continue;
+      const ddx = player.gx - p.x;
+      const ddy = player.gy - p.y;
+      if (ddx * ddx + ddy * ddy < 0.65 * 0.65) {
+        player.sleeping = false;
+        player.hp = Math.max(0, player.hp - p.damage);
+        player.combatCooldown = 3.0;
+        player.hurtFlash = 0.35;
+        if (player.hp <= 0) {
+          player.hp = 0;
+          player.respawnTimer = 3;
+        }
+        if (fxPool !== undefined) {
+          spawnHitSparks(fxPool, p.x, p.y, p.z, hex('#e74c3c'), 6);
+        }
+        p.live = false;
+        anyHit = true;
+        break;
+      }
+    }
+  }
+
+  return anyHit;
+}

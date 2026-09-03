@@ -15,9 +15,13 @@ import {
   launchArrow,
   executeAttack,
   stepProjectiles,
+  createEnemyProjectilePool,
+  launchEnemyArrow,
+  stepEnemyProjectiles,
+  stepBallisticMotion,
 } from '../src/combat.js';
 import { spawnCreature, updateCreatures, createCreatureEvents, type Creature } from '../src/creatures.js';
-import { playerVariant, creatureVariant } from '../src/sprites.js';
+import { playerVariant, creatureVariant, spriteForCreature } from '../src/sprites.js';
 
 describe('Combat & Weapon Crafting System', () => {
   it('defines all core weapons with valid stats and non-zero costs for craftables', () => {
@@ -284,5 +288,69 @@ describe('Combat & Weapon Crafting System', () => {
     const v2 = creatureVariant(wolf);
     expect(v2.level).toBeGreaterThan(0); // Progress is advancing smoothly
   }, 15000);
+
+  it('supports orc melee aggression and goblin archer projectile mechanics with shared ballistics', () => {
+    // 1. Sprites registry includes orc and goblin
+    expect(spriteForCreature('orc')).toBeDefined();
+    expect(spriteForCreature('goblin')).toBeDefined();
+
+    // 2. Orc spawns, is faster than troll (troll speed 0.75, orc 1.9), and directly targets/damages player
+    const orc = spawnCreature('orc', 10.5, 10.0, 1);
+    const troll = spawnCreature('troll', 10.5, 10.0, 1);
+    expect(orc.traits.speed).toBeGreaterThan(troll.traits.speed);
+    expect(orc.maxHp).toBeLessThan(troll.maxHp); // weaker than troll (troll ~418 HP, orc ~130 HP)
+
+    const [p1, p2] = createPlayers();
+    p1.gx = 10;
+    p1.gy = 10;
+    const initialHp = p1.hp;
+    const world = createWorld(42);
+
+    // Update orc: strikes player in melee
+    const events = createCreatureEvents();
+    updateCreatures([orc], world, [p1, p2], [], [], 0, 1 / 60, events);
+    expect(orc.state).toBe('attack');
+    expect(p1.hp).toBeLessThan(initialHp);
+
+    // 3. Goblin archer spawns, has very low HP, and fires arrows at range
+    const goblin = spawnCreature('goblin', 14.0, 10.0, 2);
+    expect(goblin.maxHp).toBeLessThan(orc.maxHp); // very weak compared to orc/troll (~22 HP)
+    goblin.hasBow = true; // force bow for testing archer AI
+    goblin.bowCooldown = 0;
+
+    const goblinEvents = createCreatureEvents();
+    updateCreatures([goblin], world, [p1, p2], [], [], 0, 1 / 60, goblinEvents);
+    expect(goblin.wantsToShoot).toBe(true);
+    expect(goblinEvents.goblinShotOccurred).toBe(true);
+
+    // 4. Ballistic dynamics unification: launch and step enemy arrows
+    const enemyPool = createEnemyProjectilePool();
+    const launched = launchEnemyArrow(enemyPool, goblin.gx, goblin.gy, 0, p1.gx, p1.gy, 0, 0);
+    expect(launched).toBe(true);
+
+    const arrow = enemyPool.find((p) => p.live);
+    expect(arrow).toBeDefined();
+
+    // Shared ballistic step advances kinematics
+    const prevZ = arrow!.z;
+    stepBallisticMotion(arrow!, world, 0.05);
+    expect(arrow!.x).not.toBe(goblin.gx);
+    expect(arrow!.z).not.toBe(prevZ);
+
+    // Stepping enemy projectiles damages player on hit
+    arrow!.live = true;
+    arrow!.lifeSec = 1.0;
+    arrow!.x = p1.gx;
+    arrow!.y = p1.gy;
+    arrow!.vx = 0;
+    arrow!.vy = 0;
+    arrow!.vz = 0;
+    arrow!.z = heightAt(world.field, p1.gx, p1.gy) + 50;
+    const playerPreHp = p1.hp;
+    const hit = stepEnemyProjectiles(enemyPool, [p1, p2], world, 0.0001);
+    expect(hit).toBe(true);
+    expect(p1.hp).toBeLessThan(playerPreHp);
+    expect(arrow!.live).toBe(false);
+  });
 });
 

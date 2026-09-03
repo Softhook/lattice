@@ -69,6 +69,15 @@ import {
   BACKPACK_COL,
   TOOL_GOLD,
   TOOL_STEEL,
+  ORC,
+  ORC_DARK,
+  ORC_EYE,
+  ORC_BLADE,
+  ORC_LEATHER,
+  GOBLIN,
+  GOBLIN_DARK,
+  GOBLIN_EYE,
+  GOBLIN_BOW,
 } from './palette.js';
 
 
@@ -1638,6 +1647,147 @@ export const SHADE_SPRITE: SpriteDef = defineSprite({
   id: 'shade', w: 1, d: 1, massing: shadeMassing,
 });
 
+/**
+ * Orc — hulking bipedal brute. Broader and lower-slung than the player, fast-moving, carrying a crude iron cleaver.
+ */
+const orcMassing: Massing = (w: SolidWriter, v: Variant, _rng: Rng) => {
+  const facing = v.flags & 3; // 0: north, 1: south, 2: east, 3: west
+  const isMoving = ((v.flags >> 3) & 7) !== 0;
+  const isHurt = ((v.flags >> 7) & 1) !== 0;
+  const animPhase = (v.level % 1000) / 1000;
+  const isAttacking = ((v.flags >> 3) & 7) === 4 || animPhase > 0.05;
+
+  // Kinematics @tier-b: stride swing and attack cleave
+  const walkPhase = animPhase;
+  const swing = isMoving ? Math.sin(walkPhase * Math.PI * 2) * 0.12 : 0;
+  const bob = isMoving ? Math.abs(Math.sin(walkPhase * Math.PI * 2)) * 0.04 : 0;
+  const hurtShake = isHurt ? Math.sin(animPhase * Math.PI * 8) * 0.06 : 0;
+  const cleave = isAttacking ? Math.sin(animPhase * Math.PI) * 0.25 : 0;
+
+  const z = hurtShake;
+
+  // Legs & heavy feet
+  const legL = Math.max(-0.15, Math.min(0.15, swing));
+  const legR = -legL;
+  w.box(0.28, 0.38 + legL, 0.20, 0.24, { color: ORC_DARK, h: 0.38, z });
+  w.box(0.52, 0.38 + legR, 0.20, 0.24, { color: ORC_DARK, h: 0.38, z });
+
+  // Loincloth / leather belt
+  w.box(0.24, 0.32, 0.52, 0.36, { color: ORC_LEATHER, h: 0.22, z: z + 0.36 + bob });
+
+  // Muscular broad torso
+  w.box(0.20, 0.28, 0.60, 0.44, { color: ORC, h: 0.55, z: z + 0.52 + bob });
+  w.box(0.24, 0.30, 0.52, 0.40, { color: ORC_DARK, h: 0.20, z: z + 0.85 + bob }); // Shoulder hunched collar
+
+  // Head with protruding brow & blood-red eyes
+  const headZ = z + 0.95 + bob;
+  w.box(0.28, 0.32, 0.44, 0.36, { color: ORC, h: 0.36, z: headZ });
+
+  // Eyes & tusk hints based on facing
+  if (facing === 1) {
+    // Facing south (+y)
+    w.box(0.34, 0.64, 0.08, 0.06, { color: ORC_EYE, h: 0.08, z: headZ + 0.16 });
+    w.box(0.58, 0.64, 0.08, 0.06, { color: ORC_EYE, h: 0.08, z: headZ + 0.16 });
+    w.box(0.38, 0.66, 0.06, 0.06, { color: hex('#e0dbcd'), h: 0.12, z: headZ + 0.04 });
+    w.box(0.56, 0.66, 0.06, 0.06, { color: hex('#e0dbcd'), h: 0.12, z: headZ + 0.04 });
+  } else if (facing === 2) {
+    // Facing east (+x)
+    w.box(0.68, 0.50, 0.06, 0.08, { color: ORC_EYE, h: 0.08, z: headZ + 0.16 });
+    w.box(0.70, 0.46, 0.06, 0.06, { color: hex('#e0dbcd'), h: 0.12, z: headZ + 0.04 });
+  } else if (facing === 3) {
+    // Facing west (-x)
+    w.box(0.26, 0.50, 0.06, 0.08, { color: ORC_EYE, h: 0.08, z: headZ + 0.16 });
+    w.box(0.24, 0.46, 0.06, 0.06, { color: hex('#e0dbcd'), h: 0.12, z: headZ + 0.04 });
+  }
+
+  // Arms & crude iron cleaver
+  const armZ = z + 0.48 + bob;
+  w.box(0.10, 0.34 - swing * 0.5, 0.14, 0.22, { color: ORC, h: 0.45, z: armZ });
+  w.box(0.76, 0.34 + swing * 0.5, 0.14, 0.22, { color: ORC, h: 0.45, z: armZ });
+
+  // Cleaver weapon in right hand (drawn forward on attack)
+  const weaponX = facing === 3 ? 0.04 : 0.82;
+  const weaponY = 0.42 + (facing === 1 ? 0.18 + cleave : facing === 0 ? -0.12 : cleave);
+  w.box(weaponX, weaponY, 0.08, 0.08, { color: ORC_LEATHER, h: 0.22, z: armZ - 0.08 });
+  w.box(weaponX - 0.02, weaponY + (facing === 1 ? 0.08 : 0), 0.12, 0.24, { color: ORC_BLADE, h: 0.32, z: armZ + 0.06 + cleave });
+};
+
+export const ORC_SPRITE: SpriteDef = defineSprite({
+  id: 'orc', w: 1, d: 1, massing: orcMassing,
+});
+
+/**
+ * Goblin — small, agile, sickly bright-green pest. Frail and twitchy, sometimes wielding a short hunting bow.
+ */
+const goblinMassing: Massing = (w: SolidWriter, v: Variant, _rng: Rng) => {
+  const facing = v.flags & 3; // 0: north, 1: south, 2: east, 3: west
+  const isMoving = ((v.flags >> 3) & 7) !== 0;
+  const isHurt = ((v.flags >> 7) & 1) !== 0;
+  const hasBow = ((v.flags >> 8) & 1) !== 0;
+  const animPhase = (v.level % 1000) / 1000;
+  const isAttacking = ((v.flags >> 3) & 7) === 4 || animPhase > 0.05;
+
+  // Kinematics @tier-b: rapid scamper
+  const swing = isMoving ? Math.sin(animPhase * Math.PI * 2) * 0.15 : 0;
+  const scamperBob = isMoving ? Math.abs(Math.sin(animPhase * Math.PI * 4)) * 0.04 : 0;
+  const hurtShake = isHurt ? Math.sin(animPhase * Math.PI * 8) * 0.07 : 0;
+  const drawBow = (hasBow && isAttacking) ? Math.sin(animPhase * Math.PI) * 0.20 : 0;
+
+  const z = hurtShake;
+
+  // Small skinny legs
+  const legL = Math.max(-0.12, Math.min(0.12, swing));
+  const legR = -legL;
+  w.box(0.34, 0.40 + legL, 0.12, 0.16, { color: GOBLIN_DARK, h: 0.28, z });
+  w.box(0.54, 0.40 + legR, 0.12, 0.16, { color: GOBLIN_DARK, h: 0.28, z });
+
+  // Tiny waist / loincloth
+  w.box(0.32, 0.36, 0.36, 0.28, { color: GOBLIN_DARK, h: 0.15, z: z + 0.26 + scamperBob });
+
+  // Lean, wiry torso
+  w.box(0.30, 0.34, 0.40, 0.32, { color: GOBLIN, h: 0.36, z: z + 0.38 + scamperBob });
+
+  // Large goblin head with pointy ears and glowing yellow eyes
+  const headZ = z + 0.68 + scamperBob;
+  w.box(0.28, 0.32, 0.44, 0.36, { color: GOBLIN, h: 0.34, z: headZ });
+
+  // Large pointy ears sticking out
+  w.box(0.18, 0.40, 0.12, 0.12, { color: GOBLIN_DARK, h: 0.18, z: headZ + 0.14 });
+  w.box(0.70, 0.40, 0.12, 0.12, { color: GOBLIN_DARK, h: 0.18, z: headZ + 0.14 });
+
+  // Beady yellow eyes
+  if (facing === 1) {
+    w.box(0.34, 0.64, 0.08, 0.05, { color: GOBLIN_EYE, h: 0.08, z: headZ + 0.14 });
+    w.box(0.58, 0.64, 0.08, 0.05, { color: GOBLIN_EYE, h: 0.08, z: headZ + 0.14 });
+  } else if (facing === 2) {
+    w.box(0.68, 0.48, 0.05, 0.08, { color: GOBLIN_EYE, h: 0.08, z: headZ + 0.14 });
+  } else if (facing === 3) {
+    w.box(0.27, 0.48, 0.05, 0.08, { color: GOBLIN_EYE, h: 0.08, z: headZ + 0.14 });
+  }
+
+  // Thin arms
+  const armZ = z + 0.38 + scamperBob;
+  w.box(0.20, 0.38 - swing * 0.4, 0.10, 0.16, { color: GOBLIN, h: 0.30, z: armZ });
+  w.box(0.70, 0.38 + swing * 0.4, 0.10, 0.16, { color: GOBLIN, h: 0.30, z: armZ });
+
+  // Bow or crude dagger
+  if (hasBow) {
+    // Small curved wood bow held in hand
+    const bowX = facing === 3 ? 0.16 : 0.72;
+    const bowY = 0.44 + (facing === 1 ? 0.12 + drawBow : facing === 0 ? -0.08 : drawBow);
+    w.box(bowX, bowY, 0.06, 0.22, { color: GOBLIN_BOW, h: 0.40, z: armZ - 0.05 + drawBow * 0.5 });
+  } else {
+    // Tiny rusty shiv
+    const shivX = facing === 3 ? 0.18 : 0.74;
+    const shivY = 0.44 + (facing === 1 ? 0.10 : 0);
+    w.box(shivX, shivY, 0.06, 0.10, { color: hex('#808888'), h: 0.20, z: armZ });
+  }
+};
+
+export const GOBLIN_SPRITE: SpriteDef = defineSprite({
+  id: 'goblin', w: 1, d: 1, massing: goblinMassing,
+});
+
 // ── Declarative Creature Sprite Registry ──────────────────────────────────────
 
 export const CREATURE_SPRITES: Record<Creature['species'], SpriteDef> = {
@@ -1651,6 +1801,8 @@ export const CREATURE_SPRITES: Record<Creature['species'], SpriteDef> = {
   boar:   BOAR_SPRITE,
   croc:   CROC_SPRITE,
   shade:  SHADE_SPRITE,
+  orc:    ORC_SPRITE,
+  goblin: GOBLIN_SPRITE,
 };
 
 /** Map a creature species to its cached SpriteDef via declarative registry. */
@@ -1700,6 +1852,7 @@ export function creatureVariant(c: Creature): Variant {
     c.state === 'eat' ? 5 : 6;
 
   const isHurtFlag = c.hurtTimer > 0 ? (1 << 7) : 0;
+  const hasBowFlag = c.hasBow ? (1 << 8) : 0;
 
   let animPhase = c.walkCycle % 1;
   if (c.attackAnimTimer > 0 || c.state === 'attack') {
@@ -1709,7 +1862,7 @@ export function creatureVariant(c: Creature): Variant {
   }
 
   CREATURE_VARIANT_SCRATCH.seed = hash2(c.id, 0, 0);
-  CREATURE_VARIANT_SCRATCH.flags = facingCode | (stateCode << 3) | isHurtFlag;
+  CREATURE_VARIANT_SCRATCH.flags = facingCode | (stateCode << 3) | isHurtFlag | hasBowFlag;
   CREATURE_VARIANT_SCRATCH.level = Math.floor(animPhase * 1000);
   CREATURE_VARIANT_SCRATCH.progress = c.traits.size;
   CREATURE_VARIANT_SCRATCH.label = '';

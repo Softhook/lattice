@@ -91,6 +91,9 @@ import { PlayerGamepad } from './gamepad.js';
 import { createVerdantStore, extractSaveState } from './storage.js';
 import {
   createProjectilePool,
+  createEnemyProjectilePool,
+  launchEnemyArrow,
+  stepEnemyProjectiles,
   createFxPool,
   stepFx,
   spawnHarvestDebris,
@@ -372,6 +375,7 @@ let autosaveTimer = 0;
 let autosaveCount = 0;
 let prevDaylight = 1.0;
 const projectiles = createProjectilePool();
+const enemyProjectiles = createEnemyProjectilePool();
 const fxPool = createFxPool();
 const foodPool = createFoodPool();
 const creatureEvents = createCreatureEvents();
@@ -608,6 +612,28 @@ loop.onUpdate((dt, tick) => {
   if (creatureEvents.howlOccurred) {
     audio.play('howl');
   }
+  if (creatureEvents.goblinShotOccurred) {
+    audio.play('bow_shoot');
+  }
+
+  // ── Goblin Archery Launch ─────────────────────────────────────────────────────
+  // If an archer goblin decided to shoot during updateCreatures, launch a scattered arrow
+  for (let ci = 0; ci < creatures.length; ci++) {
+    const c = creatures[ci];
+    if (c !== undefined && c.hp > 0 && c.wantsToShoot && c.species === 'goblin') {
+      c.wantsToShoot = false;
+      const groundH = heightAt(world.field, c.gx, c.gy);
+      // Angular scatter: [-0.22 .. +0.22] radians (~12.5 deg error margin)
+      const scatter = ((hash2(c.id, tickCount, 0) >>> 0) / 4294967296 - 0.5) * 0.45;
+      launchEnemyArrow(enemyProjectiles, c.gx, c.gy, groundH, c.shootTargetGx, c.shootTargetGy, scatter, currentDarkness);
+    }
+  }
+
+  // ── Enemy Projectiles Step ───────────────────────────────────────────────────
+  const playerHitByArrow = stepEnemyProjectiles(enemyProjectiles, playersPair, world, dt, fxPool);
+  if (playerHitByArrow) {
+    audio.play('hurt');
+  }
 
   tickFloraRegrowth(SEED, flora, world, dt);
 
@@ -768,6 +794,7 @@ loop.onRender((_alpha, t, nowMs) => {
     SEED,
     fxPool,
     foodPool,
+    enemyProjectiles,
   );
 });
 

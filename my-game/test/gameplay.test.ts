@@ -484,7 +484,7 @@ describe('Verdant Gameplay Logic', () => {
 
     // 3. Species Registry
     const speciesKeys = Object.keys(SPECIES_REGISTRY);
-    expect(speciesKeys.length).toBe(10);
+    expect(speciesKeys.length).toBe(12);
     for (const key of speciesKeys) {
       const s = SPECIES_REGISTRY[key as keyof typeof SPECIES_REGISTRY];
       expect(s.baseHp).toBeGreaterThan(0);
